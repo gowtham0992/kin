@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kin — Today</title>
+    <style>
+      :root { color-scheme: light; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 20px; background: #f5f1e8; color: #24332d; }
+      main { max-width: 640px; margin: auto; }
+      header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+      h1 { margin: 0; font-size: 30px; letter-spacing: -0.04em; }
+      .eyebrow { color: #66746e; font-size: 14px; }
+      ul { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 10px; }
+      li { background: #fffdf8; border: 1px solid #ded8ca; border-radius: 16px; padding: 16px; display: flex; gap: 12px; align-items: center; }
+      .mark { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: #e6ece8; }
+      .done .mark { background: #315e4e; color: white; }
+      .skipped { opacity: .62; }
+      .title { font-weight: 700; }
+      .meta { margin-top: 3px; color: #66746e; font-size: 13px; }
+      .empty { padding: 24px; text-align: center; background: #fffdf8; border-radius: 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header><div><div class="eyebrow">KIN · FAMILY CARE CIRCLE</div><h1>Today</h1></div><strong id="summary">Loading…</strong></header>
+      <ul id="tasks"><li class="empty">Ask Kin to show today’s care plan.</li></ul>
+    </main>
+    <script type="module">
+      import { App } from "https://unpkg.com/@modelcontextprotocol/ext-apps@1.7.5/dist/index.js";
+      const app = new App({ name: "Kin Today", version: "0.1.0" });
+      const render = (result) => {
+        const data = result?.structuredContent;
+        if (!data?.tasks) return;
+        document.querySelector("#summary").textContent = `${data.summary.completed}/${data.summary.total} done`;
+        const taskList = document.querySelector("#tasks");
+        taskList.replaceChildren();
+        if (!data.tasks.length) {
+          const empty = document.createElement("li");
+          empty.className = "empty";
+          empty.textContent = "Nothing scheduled today.";
+          taskList.append(empty);
+          return;
+        }
+        for (const task of data.tasks) {
+          const item = document.createElement("li");
+          item.className = ["scheduled", "done", "skipped"].includes(task.state)
+            ? task.state
+            : "scheduled";
+          const mark = document.createElement("span");
+          mark.className = "mark";
+          mark.textContent = task.state === "done" ? "✓" : "•";
+          const copy = document.createElement("div");
+          const title = document.createElement("div");
+          title.className = "title";
+          title.textContent = task.title;
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          meta.textContent = String(task.state).replace("_", " ");
+          copy.append(title, meta);
+          item.append(mark, copy);
+          taskList.append(item);
+        }
+      };
+      app.ontoolresult = render;
+      await app.connect();
+    </script>
+  </body>
+</html>

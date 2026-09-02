@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f2ede2" />
+    <title>Kin — Family care, in sync</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Kin home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>kin</span>
+      </a>
+      <div class="live-pill"><span aria-hidden="true"></span> Family circle live</div>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <p class="kicker">Care that feels shared</p>
+        <h1 id="page-title">One small answer.<br /><em>Everyone knows.</em></h1>
+        <p class="lede">Evelyn checks in by voice. Kin quietly keeps Maya and Theo on the same page—without making care feel clinical.</p>
+      </section>
+
+      <section class="demo-stage" aria-label="Interactive Kin care demonstration">
+        <div class="echo-wrap">
+          <div class="surface-label"><span>Parent’s kitchen</span><strong>Echo Show</strong></div>
+          <article class="echo" aria-labelledby="echo-heading">
+            <div class="echo-camera" aria-hidden="true"></div>
+            <div class="echo-screen">
+              <div class="echo-topline"><span id="echo-time">9:14</span><span>72°</span></div>
+              <div class="echo-copy">
+                <p class="eyebrow">Good morning, Evelyn</p>
+                <h2 id="echo-heading">A gentle start<br />to your day.</h2>
+              </div>
+              <div id="echo-task" class="prompt-card" aria-live="polite">
+                <div class="prompt-icon" aria-hidden="true">☼</div>
+                <div>
+                  <p>Coming up</p>
+                  <strong>Loading today’s care plan…</strong>
+                </div>
+              </div>
+              <div id="echo-actions" class="echo-actions" hidden>
+                <button class="confirm-primary" type="button" data-response="done">I did it</button>
+                <button type="button" data-response="not_yet">Not yet</button>
+              </div>
+              <p id="voice-line" class="voice-line">Try saying: “Alexa, tell Kin I did it.”</p>
+            </div>
+            <div class="echo-foot" aria-hidden="true"><span></span><span></span><span></span></div>
+          </article>
+        </div>
+
+        <div class="connection" aria-hidden="true">
+          <span></span><span></span><span></span>
+          <div>shared instantly</div>
+        </div>
+
+        <div class="phone-wrap">
+          <div class="surface-label"><span>Across town</span><strong>Maya’s phone</strong></div>
+          <article class="phone" aria-labelledby="phone-heading">
+            <div class="phone-screen">
+              <div class="phone-status"><span>9:14</span><span>●●● 5G ◢</span></div>
+              <div class="phone-head">
+                <div>
+                  <p class="eyebrow">Wednesday, September 2</p>
+                  <h2 id="phone-heading">Mom’s day</h2>
+                </div>
+                <div class="avatar" aria-label="Maya’s profile">M</div>
+              </div>
+              <section class="progress-card" aria-label="Today’s progress">
+                <div class="progress-copy"><span>Today’s rhythm</span><strong id="progress-count">—</strong></div>
+                <div class="progress-track"><span id="progress-bar"></span></div>
+                <p id="progress-message">Connecting to the family circle…</p>
+              </section>
+              <div class="section-row"><h3>Today</h3><span id="sync-label">Syncing…</span></div>
+              <ul id="phone-tasks" class="task-list" aria-live="polite"></ul>
+              <aside class="duty-card">
+                <span class="duty-avatar">T</span>
+                <div><p>On duty today</p><strong id="duty-label">Loading roster…</strong></div>
+                <span class="duty-check" aria-hidden="true">✓</span>
+              </aside>
+              <nav class="phone-nav" aria-label="Kin navigation">
+                <button class="active" type="button"><span>⌂</span>Today</button>
+                <button type="button"><span>◷</span>Week</button>
+                <button type="button"><span>♧</span>Circle</button>
+              </nav>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="trust-strip" aria-label="Kin product principles">
+        <div><span>01</span><p><strong>Voice first</strong> for the person receiving care</p></div>
+        <div><span>02</span><p><strong>Shared truth</strong> for the whole family</p></div>
+        <div><span>03</span><p><strong>Human escalation</strong> when something is missed</p></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

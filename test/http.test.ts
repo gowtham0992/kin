@@ -1,0 +1,54 @@
+import request from "supertest";
+import { describe, expect, it } from "vitest";
+import { createDemoStore } from "../src/domain.js";
+import { createHttpApp } from "../src/http.js";
+
+const fixedNow = () => new Date("2026-09-02T08:00:00.000Z");
+
+describe("Kin HTTP surface", () => {
+  it("reports health without exposing framework details", async () => {
+    const response = await request(createHttpApp(createDemoStore(fixedNow))).get("/health");
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: "ok", service: "kin", version: "0.1.0" });
+    expect(response.headers["x-powered-by"]).toBeUndefined();
+  });
+
+  it("rejects oversized JSON at the request boundary", async () => {
+    const response = await request(createHttpApp(createDemoStore(fixedNow)))
+      .post("/mcp")
+      .set("content-type", "application/json")
+      .send({ value: "x".repeat(140_000) });
+    expect(response.status).toBe(413);
+  });
+
+  it("does not advertise unsupported streaming methods", async () => {
+    const app = createHttpApp(createDemoStore(fixedNow));
+    const getResponse = await request(app).get("/mcp");
+    const deleteResponse = await request(app).delete("/mcp");
+    expect(getResponse.status).toBe(405);
+    expect(deleteResponse.status).toBe(405);
+  });
+
+  it("drives the simulator through the same shared care state", async () => {
+    const app = createHttpApp(createDemoStore(fixedNow));
+    const before = await request(app).get("/api/today");
+    expect(before.body.summary.completed).toBe(0);
+
+    const confirmation = await request(app)
+      .post("/api/tasks/morning-water/confirm")
+      .send({ response: "done", actor: "Evelyn", requestId: "web-turn-0001" });
+    expect(confirmation.status).toBe(201);
+    expect(confirmation.body.snapshot.summary.completed).toBe(1);
+
+    const after = await request(app).get("/api/today");
+    expect(after.body.tasks[0]).toMatchObject({ id: "morning-water", state: "done" });
+  });
+
+  it("rejects invalid simulator confirmation input", async () => {
+    const response = await request(createHttpApp(createDemoStore(fixedNow)))
+      .post("/api/tasks/morning-water/confirm")
+      .send({ response: "maybe", actor: "", requestId: "tiny" });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: "Invalid confirmation request" });
+  });
+});
