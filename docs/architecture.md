@@ -32,9 +32,13 @@ The current AWS transaction writes the updated task and `CONFIRMATION#<requestId
 
 1. Shared care plan and idempotent voice confirmation — complete and contract-tested.
 2. DynamoDB repository and protected table definition — complete locally; cloud deployment awaits account authorization.
-3. Rotating caregiver duty and a durable missed-task outbox.
-4. SMS delivery with retry evidence and a simulator-visible escalation timeline.
+3. Rotating caregiver duty and a durable missed-task outbox — complete, including conditional delivery leases.
+4. SNS delivery with retry evidence and a simulator-visible escalation timeline — complete; filtered SMS subscriptions await caregiver consent and a destination number.
 5. Bedrock weekly care brief grounded only in recorded family events.
 6. OAuth 2.1/PKCE, deployment hardening, telemetry, and a recorded Alexa+ demo.
 
 Each slice must keep `npm run check` green and expose one end-to-end behavior a judge can see. AWS deployment, phone-number messaging, and public repository publication require explicit owner approval because they change external state or can incur cost.
+
+SNS standard topics provide at-least-once delivery. The outbox prevents concurrent workers and successful replays from publishing twice, but a network failure after SNS accepts a message and before Kin receives the message identifier remains an ambiguity window. Kin stores only a provider error code, never raw provider text, and uses privacy-minimized alert copy so a rare duplicate is understandable rather than alarming.
+
+The public Today snapshot is an explicit projection, not a serialized database record. It exposes the task, status, recipient display name, and event time required by the family UI; it excludes provider message identifiers, attempt identifiers, delivery leases, attempt counts, and internal failure codes.

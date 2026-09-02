@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "infra:synth": "cdk synth --app 'tsx infra/app.ts'",
     "seed:aws": "tsx scripts/seed-dynamo.ts",
+    "sweep:aws": "tsx scripts/run-escalation-sweep.ts",
     "test": "vitest run --exclude 'dist/**'",
     "check": "npm run build && npm test"
   },

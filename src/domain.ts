@@ -1,3 +1,11 @@
+import type {
+  BlockedEscalation,
+  EscalationRecord,
+  EscalationSummary,
+  MissedTaskEscalation,
+} from "./escalation.js";
+import { toEscalationSummary } from "./escalation.js";
+
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
 export type ConfirmationResponse = (typeof confirmationResponses)[number];
@@ -33,6 +41,7 @@ export interface TodaySnapshot {
   date: string;
   tasks: CareTask[];
   onDuty: DutyAssignment | null;
+  escalations: EscalationSummary[];
   summary: {
     total: number;
     completed: number;
@@ -49,6 +58,28 @@ export interface CareRepository {
     actor: string;
     requestId: string;
   }): Promise<{ task: CareTask; confirmation: Confirmation; replayed: boolean }>;
+  queueEscalation(input: MissedTaskEscalation | BlockedEscalation): Promise<{
+    record: EscalationRecord;
+    replayed: boolean;
+  }>;
+  claimEscalation(input: {
+    event: MissedTaskEscalation;
+    attemptId: string;
+    now: Date;
+    leaseSeconds: number;
+  }): Promise<EscalationRecord | null>;
+  completeEscalation(input: {
+    record: EscalationRecord;
+    attemptId: string;
+    providerMessageId: string;
+    completedAt: Date;
+  }): Promise<EscalationRecord>;
+  failEscalation(input: {
+    record: EscalationRecord;
+    attemptId: string;
+    errorCode: string;
+    failedAt: Date;
+  }): Promise<EscalationRecord>;
 }
 
 export class TaskNotFoundError extends Error {
@@ -63,6 +94,7 @@ export class InMemoryCareStore implements CareRepository {
   readonly #confirmationsByRequest = new Map<string, Confirmation>();
   readonly #now: () => Date;
   readonly #onDuty: DutyAssignment | null;
+  readonly #escalations = new Map<string, EscalationRecord>();
 
   constructor(
     tasks: CareTask[],
@@ -88,6 +120,9 @@ export class InMemoryCareStore implements CareRepository {
       date,
       tasks,
       onDuty: this.#onDuty ? structuredClone(this.#onDuty) : null,
+      escalations: [...this.#escalations.values()]
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .map(toEscalationSummary),
       summary: {
         total: tasks.length,
         completed,
@@ -95,6 +130,93 @@ export class InMemoryCareStore implements CareRepository {
         remaining: tasks.length - completed - skipped,
       },
     };
+  }
+
+  async queueEscalation(input: MissedTaskEscalation | BlockedEscalation) {
+    const id = `missed_${input.taskId}_${input.dueAt}`;
+    const previous = this.#escalations.get(id);
+    if (previous) return { record: structuredClone(previous), replayed: true };
+    const routed = "recipient" in input;
+    const createdAt = routed ? input.createdAt : this.#now().toISOString();
+    const record: EscalationRecord = {
+      id,
+      taskId: input.taskId,
+      taskTitle: input.taskTitle,
+      dueAt: input.dueAt,
+      createdAt,
+      updatedAt: createdAt,
+      recipientMemberId: routed ? input.recipient.memberId : null,
+      recipientMemberName: routed ? input.recipient.memberName : null,
+      status: routed ? "queued" : "blocked",
+      attemptCount: 0,
+      attemptId: null,
+      leaseUntil: null,
+      providerMessageId: null,
+      lastErrorCode: routed ? null : input.reason,
+    };
+    this.#escalations.set(id, record);
+    return { record: structuredClone(record), replayed: false };
+  }
+
+  async claimEscalation(input: {
+    event: MissedTaskEscalation;
+    attemptId: string;
+    now: Date;
+    leaseSeconds: number;
+  }): Promise<EscalationRecord | null> {
+    const record = this.#escalations.get(input.event.id);
+    if (!record) return null;
+    const leaseExpired = record.leaseUntil !== null && record.leaseUntil <= input.now.toISOString();
+    if (!["queued", "failed"].includes(record.status) && !(record.status === "sending" && leaseExpired)) {
+      return null;
+    }
+    record.status = "sending";
+    record.attemptId = input.attemptId;
+    record.attemptCount += 1;
+    record.updatedAt = input.now.toISOString();
+    record.leaseUntil = new Date(input.now.getTime() + input.leaseSeconds * 1_000).toISOString();
+    return structuredClone(record);
+  }
+
+  async completeEscalation(input: {
+    record: EscalationRecord;
+    attemptId: string;
+    providerMessageId: string;
+    completedAt: Date;
+  }): Promise<EscalationRecord> {
+    return this.#finishEscalation(input.record.id, input.attemptId, {
+      status: "sent",
+      providerMessageId: input.providerMessageId,
+      lastErrorCode: null,
+      updatedAt: input.completedAt.toISOString(),
+    });
+  }
+
+  async failEscalation(input: {
+    record: EscalationRecord;
+    attemptId: string;
+    errorCode: string;
+    failedAt: Date;
+  }): Promise<EscalationRecord> {
+    return this.#finishEscalation(input.record.id, input.attemptId, {
+      status: "failed",
+      providerMessageId: null,
+      lastErrorCode: input.errorCode,
+      updatedAt: input.failedAt.toISOString(),
+    });
+  }
+
+  #finishEscalation(
+    id: string,
+    attemptId: string,
+    update: Pick<EscalationRecord, "status" | "providerMessageId" | "lastErrorCode" | "updatedAt">,
+  ): EscalationRecord {
+    const record = this.#escalations.get(id);
+    if (!record || record.status !== "sending" || record.attemptId !== attemptId) {
+      throw new Error("Escalation lease was lost");
+    }
+    Object.assign(record, update, { attemptId: null, leaseUntil: null });
+    return structuredClone(record);
   }
 
   async confirm(input: {

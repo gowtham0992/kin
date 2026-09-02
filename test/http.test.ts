@@ -44,6 +44,41 @@ describe("Kin HTTP surface", () => {
     expect(after.body.tasks[0]).toMatchObject({ id: "morning-water", state: "done" });
   });
 
+  it("does not expose escalation delivery internals in the public snapshot", async () => {
+    const now = new Date("2026-09-02T16:00:00.000Z");
+    const store = createDemoStore(() => now);
+    const event = {
+      id: "missed_morning-water_2026-09-02T15:00:00.000Z",
+      taskId: "morning-water",
+      taskTitle: "Drink a glass of water",
+      dueAt: "2026-09-02T15:00:00.000Z",
+      createdAt: now.toISOString(),
+      recipient: (await store.today()).onDuty!,
+    };
+    const queued = await store.queueEscalation(event);
+    const claimed = await store.claimEscalation({
+      event, attemptId: "worker-private", now, leaseSeconds: 60,
+    });
+    await store.completeEscalation({
+      record: claimed!,
+      attemptId: "worker-private",
+      providerMessageId: "private-provider-id",
+      completedAt: now,
+    });
+
+    const response = await request(createHttpApp(store)).get("/api/today");
+    expect(response.body.escalations[0]).toEqual({
+      id: event.id,
+      taskId: "morning-water",
+      dueAt: event.dueAt,
+      updatedAt: now.toISOString(),
+      recipientMemberName: "Theo",
+      status: "sent",
+    });
+    expect(JSON.stringify(response.body)).not.toContain("private-provider-id");
+    expect(JSON.stringify(response.body)).not.toContain("worker-private");
+  });
+
   it("rejects invalid simulator confirmation input", async () => {
     const response = await request(createHttpApp(createDemoStore(fixedNow)))
       .post("/api/tasks/morning-water/confirm")

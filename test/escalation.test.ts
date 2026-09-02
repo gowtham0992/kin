@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDemoStore } from "../src/domain.js";
-import { planMissedTaskEscalations } from "../src/escalation.js";
+import { planMissedTaskEscalations, runEscalationSweep } from "../src/escalation.js";
 
 describe("missed-task escalation planning", () => {
   it("routes an overdue task to the active on-duty caregiver after the grace period", async () => {
@@ -43,5 +43,85 @@ describe("missed-task escalation planning", () => {
       "no_active_duty_assignment",
       "no_active_duty_assignment",
     ]);
+  });
+
+  it("publishes a missed task once and replays the durable sent record", async () => {
+    const now = new Date("2026-09-02T16:00:00.000Z");
+    const store = createDemoStore(() => now);
+    const published: string[] = [];
+    const publisher = {
+      async publish(event: { id: string }) {
+        published.push(event.id);
+        return { messageId: "sns-message-1" };
+      },
+    };
+
+    const first = await runEscalationSweep({
+      snapshot: await store.today(),
+      store,
+      publisher,
+      now,
+      attemptId: "sweep-attempt-1",
+    });
+    const second = await runEscalationSweep({
+      snapshot: await store.today(),
+      store,
+      publisher,
+      now,
+      attemptId: "sweep-attempt-2",
+    });
+
+    expect(published).toHaveLength(1);
+    expect(first.records[0]).toMatchObject({ status: "sent", attemptCount: 1 });
+    expect(second.records[0]).toMatchObject({
+      status: "sent",
+      providerMessageId: "sns-message-1",
+    });
+    expect((await store.today()).escalations).toHaveLength(1);
+  });
+
+  it("allows one worker to hold an unexpired delivery lease", async () => {
+    const now = new Date("2026-09-02T16:00:00.000Z");
+    const store = createDemoStore(() => now);
+    const plan = planMissedTaskEscalations({ snapshot: await store.today(), now });
+    const event = plan.events[0]!;
+    await store.queueEscalation(event);
+
+    const [first, second] = await Promise.all([
+      store.claimEscalation({ event, attemptId: "worker-1", now, leaseSeconds: 60 }),
+      store.claimEscalation({ event, attemptId: "worker-2", now, leaseSeconds: 60 }),
+    ]);
+
+    expect([first, second].filter(Boolean)).toHaveLength(1);
+  });
+
+  it("records a privacy-safe failure code and retries on the next sweep", async () => {
+    const now = new Date("2026-09-02T16:00:00.000Z");
+    const store = createDemoStore(() => now);
+    let shouldFail = true;
+    const publisher = {
+      async publish() {
+        if (shouldFail) {
+          shouldFail = false;
+          const error = new Error("provider details must not be persisted");
+          error.name = "ServiceUnavailable";
+          throw error;
+        }
+        return { messageId: "sns-message-2" };
+      },
+    };
+
+    const failed = await runEscalationSweep({
+      snapshot: await store.today(), store, publisher, now, attemptId: "worker-1",
+    });
+    const retried = await runEscalationSweep({
+      snapshot: await store.today(), store, publisher, now, attemptId: "worker-2",
+    });
+
+    expect(failed.records[0]).toMatchObject({
+      status: "failed",
+      lastErrorCode: "ServiceUnavailable",
+    });
+    expect(retried.records[0]).toMatchObject({ status: "sent", attemptCount: 2 });
   });
 });

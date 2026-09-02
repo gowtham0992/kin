@@ -12,6 +12,8 @@ This repository begins with the portable core: an MCP `2025-11-25`-compatible se
 - A small MCP Apps resource renders the Today view.
 - In-memory demo data keeps the first slice runnable without cloud credentials.
 - A DynamoDB repository uses strongly consistent reads and an atomic transaction for the task update plus idempotency record.
+- Missed-task sweeps persist a deterministic outbox record, acquire a conditional 60-second delivery lease, and record the SNS message identifier or a privacy-safe failure code.
+- The caregiver view renders queued, sending, sent, failed, blocked, and empty escalation states from the same shared snapshot.
 
 ## Run locally
 
@@ -35,6 +37,19 @@ KIN_DYNAMODB_TABLE=kin-care-state \
 KIN_CIRCLE_ID=demo-family \
 npm run seed:aws
 ```
+
+Run the missed-task worker with `KIN_ALERT_TOPIC_ARN` set in the local environment:
+
+```bash
+AWS_PROFILE=kin-dev \
+AWS_REGION=us-east-1 \
+KIN_DYNAMODB_TABLE=kin-care-state \
+KIN_CIRCLE_ID=demo-family \
+KIN_ALERT_TOPIC_ARN="$KIN_ALERT_TOPIC_ARN" \
+npm run sweep:aws
+```
+
+Kin prevents concurrent workers from publishing the same alert by leasing the outbox record. SNS standard-topic delivery is at least once; an ambiguous provider timeout can still produce a duplicate, so the message is deliberately non-alarming and contains no task details.
 
 `npm run infra:synth` produces the reviewable CloudFormation template without deploying it. The table uses on-demand billing, AWS-managed encryption, seven-day point-in-time recovery, deletion protection, and retain-on-delete behavior.
 
