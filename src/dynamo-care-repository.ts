@@ -10,6 +10,8 @@ import {
 import {
   TaskNotFoundError,
   type CareActivityWindow,
+  type CircleMember,
+  type CircleSnapshot,
   type CareRepository,
   type CareTask,
   type Confirmation,
@@ -24,7 +26,7 @@ import type {
   MissedTaskEscalation,
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
-import { calendarDate, shiftCalendarDate, validateTimeZone } from "./calendar.js";
+import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
 
 interface DynamoSender {
   send(
@@ -48,6 +50,12 @@ interface StoredDutyAssignment extends DutyAssignment {
   PK: string;
   SK: string;
   entityType: "DutyAssignment";
+}
+
+interface StoredCircleMember extends CircleMember {
+  PK: string;
+  SK: string;
+  entityType: "CircleMember";
 }
 
 interface StoredEscalation extends EscalationRecord {
@@ -251,6 +259,60 @@ export class DynamoCareRepository implements CareRepository {
       .map(toEscalationSummary);
 
     return { ...input, tasks, escalations };
+  }
+
+  async circle(): Promise<CircleSnapshot> {
+    const startDate = calendarDate(this.#now(), this.#timeZone);
+    const endDate = shiftCalendarDate(startDate, 6);
+    const [memberResult, dutyResult] = await Promise.all([
+      this.#client.send(new QueryCommand({
+        TableName: this.#tableName,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :member)",
+        ExpressionAttributeValues: { ":pk": this.#partitionKey(), ":member": "MEMBER#" },
+        ConsistentRead: true,
+      })),
+      this.#client.send(new QueryCommand({
+        TableName: this.#tableName,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": this.#partitionKey(),
+          ":start": `DUTY#${startDate}`,
+          ":end": `DUTY#${endDate}\uffff`,
+        },
+        ConsistentRead: true,
+      })),
+    ]);
+    const members = ((memberResult as { Items?: StoredCircleMember[] }).Items ?? [])
+      .map(stripMemberStorage)
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const assignments = ((dutyResult as { Items?: StoredDutyAssignment[] }).Items ?? [])
+      .map((stored) => ({ date: stored.SK.slice("DUTY#".length), ...stripDutyStorage(stored) }))
+      .sort((left, right) => left.date.localeCompare(right.date));
+    return { startDate, endDate, members, assignments };
+  }
+
+  async assignDuty(input: { date: string; memberId: string }): Promise<CircleSnapshot> {
+    const current = await this.circle();
+    if (input.date < current.startDate || input.date > current.endDate) {
+      throw new Error("Duty date must be within the visible roster week");
+    }
+    const member = current.members.find((candidate) => candidate.id === input.memberId);
+    if (!member?.canReceiveAlerts) throw new Error("Caregiver is not eligible for duty");
+    const assignment: DutyAssignment = {
+      memberId: member.id,
+      memberName: member.name,
+      ...calendarDayBounds(input.date, this.#timeZone),
+    };
+    await this.#client.send(new PutCommand({
+      TableName: this.#tableName,
+      Item: {
+        ...assignment,
+        PK: this.#partitionKey(),
+        SK: `DUTY#${input.date}`,
+        entityType: "DutyAssignment",
+      } satisfies StoredDutyAssignment,
+    }));
+    return this.circle();
   }
 
   async confirm(input: {
@@ -546,6 +608,11 @@ function stripEscalationStorage(stored: StoredEscalation): EscalationRecord {
 function stripDutyStorage(stored: StoredDutyAssignment): DutyAssignment {
   const { PK: _pk, SK: _sk, entityType: _entityType, ...assignment } = stored;
   return assignment;
+}
+
+function stripMemberStorage(stored: StoredCircleMember): CircleMember {
+  const { PK: _pk, SK: _sk, entityType: _entityType, ...member } = stored;
+  return member;
 }
 
 function activeDutyAt(assignments: DutyAssignment[], asOf: Date): DutyAssignment | null {

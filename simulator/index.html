@@ -102,10 +102,21 @@
                 </details>
                 <p id="brief-safety" class="brief-safety"></p>
               </section>
+              <section id="circle-view" class="circle-view" aria-label="Family duty roster" aria-live="polite" hidden>
+                <article class="circle-hero">
+                  <p>THE HANDOFF, MADE VISIBLE</p>
+                  <h3>Coverage, shared fairly.</h3>
+                  <p>Choose who receives a missed check-in each day. Changes become the family’s shared truth.</p>
+                </article>
+                <div id="roster-balance" class="roster-balance" aria-label="Duty balance"></div>
+                <div class="section-row roster-heading"><h3>Next seven days</h3><span>Tap a name to hand off</span></div>
+                <ol id="roster-days" class="roster-days"></ol>
+                <p class="roster-note">Alerts are coordination only—not emergency monitoring.</p>
+              </section>
               <nav class="phone-nav" aria-label="Kin navigation">
                 <button class="active" type="button" data-view="today"><span>⌂</span>Today</button>
                 <button type="button" data-view="week"><span>◷</span>Week</button>
-                <button type="button" aria-disabled="true"><span>♧</span>Circle</button>
+                <button type="button" data-view="circle"><span>♧</span>Circle</button>
               </nav>
             </div>
           </article>

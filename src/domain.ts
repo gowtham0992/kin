@@ -5,7 +5,7 @@ import type {
   MissedTaskEscalation,
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
-import { calendarDate, shiftCalendarDate, validateTimeZone } from "./calendar.js";
+import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
 
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
@@ -38,6 +38,20 @@ export interface DutyAssignment {
   endsAt: string;
 }
 
+export interface CircleMember {
+  id: string;
+  name: string;
+  relationship: "parent" | "daughter" | "son";
+  canReceiveAlerts: boolean;
+}
+
+export interface CircleSnapshot {
+  startDate: string;
+  endDate: string;
+  members: CircleMember[];
+  assignments: Array<DutyAssignment & { date: string }>;
+}
+
 export interface TodaySnapshot {
   date: string;
   tasks: CareTask[];
@@ -62,6 +76,8 @@ export interface CareRepository {
   today(): Promise<TodaySnapshot>;
   escalationSnapshot(asOf: Date): Promise<TodaySnapshot>;
   activityBetween(input: { startDate: string; endDate: string }): Promise<CareActivityWindow>;
+  circle(): Promise<CircleSnapshot>;
+  assignDuty(input: { date: string; memberId: string }): Promise<CircleSnapshot>;
   confirm(input: {
     taskId: string;
     response: ConfirmationResponse;
@@ -103,7 +119,13 @@ export class InMemoryCareStore implements CareRepository {
   readonly #tasks = new Map<string, CareTask>();
   readonly #confirmationsByRequest = new Map<string, Confirmation>();
   readonly #now: () => Date;
-  readonly #onDuty: DutyAssignment | null;
+  #onDuty: DutyAssignment | null;
+  readonly #dutyByDate = new Map<string, DutyAssignment>();
+  readonly #members: CircleMember[] = [
+    { id: "evelyn", name: "Evelyn", relationship: "parent", canReceiveAlerts: false },
+    { id: "maya", name: "Maya", relationship: "daughter", canReceiveAlerts: true },
+    { id: "theo", name: "Theo", relationship: "son", canReceiveAlerts: true },
+  ];
   readonly #escalations = new Map<string, EscalationRecord>();
   readonly #timeZone: string;
 
@@ -116,6 +138,9 @@ export class InMemoryCareStore implements CareRepository {
     this.#now = now;
     this.#onDuty = onDuty ? structuredClone(onDuty) : null;
     this.#timeZone = validateTimeZone(timeZone);
+    if (onDuty) {
+      this.#dutyByDate.set(calendarDate(new Date(onDuty.startsAt), this.#timeZone), structuredClone(onDuty));
+    }
     for (const task of tasks) this.#tasks.set(task.id, structuredClone(task));
   }
 
@@ -165,6 +190,34 @@ export class InMemoryCareStore implements CareRepository {
       .map(toEscalationSummary);
 
     return { ...input, tasks, escalations };
+  }
+
+  async circle(): Promise<CircleSnapshot> {
+    const startDate = calendarDate(this.#now(), this.#timeZone);
+    const endDate = shiftCalendarDate(startDate, 6);
+    return {
+      startDate,
+      endDate,
+      members: structuredClone(this.#members),
+      assignments: [...this.#dutyByDate.entries()]
+        .filter(([date]) => date >= startDate && date <= endDate)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([date, assignment]) => ({ date, ...structuredClone(assignment) })),
+    };
+  }
+
+  async assignDuty(input: { date: string; memberId: string }): Promise<CircleSnapshot> {
+    const member = this.#members.find((candidate) => candidate.id === input.memberId);
+    if (!member?.canReceiveAlerts) throw new Error("Caregiver is not eligible for duty");
+    const bounds = calendarDayBounds(input.date, this.#timeZone);
+    const assignment: DutyAssignment = {
+      memberId: member.id,
+      memberName: member.name,
+      ...bounds,
+    };
+    this.#dutyByDate.set(input.date, assignment);
+    if (input.date === calendarDate(this.#now(), this.#timeZone)) this.#onDuty = assignment;
+    return this.circle();
   }
 
   async escalationSnapshot(asOf: Date): Promise<TodaySnapshot> {

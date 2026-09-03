@@ -34,11 +34,11 @@ The current AWS transaction writes the updated task and `CONFIRMATION#<requestId
 
 1. Shared care plan and idempotent voice confirmation — complete and contract-tested.
 2. DynamoDB repository and protected table definition — complete and verified in `us-east-1`.
-3. Active caregiver assignment routing and a durable missed-task outbox — complete, including conditional delivery leases; editable rotation-roster management remains.
+3. Seven-day sibling rotation roster and durable missed-task outbox — complete, including an editable Circle view, DynamoDB-persisted handoffs, DST-safe local-day boundaries, and conditional delivery leases.
 4. SNS delivery with retry evidence and a simulator-visible escalation timeline — complete; filtered SMS subscriptions await caregiver consent and a destination number.
 5. Bedrock-assisted weekly family brief grounded only in recorded events — complete, with bounded DynamoDB reads, constrained event selection, schema and applicability validation, token metadata, and deterministic fallback.
 6. Five-minute scheduled escalation worker — code and infrastructure complete, including strict scheduler input, immutable outbox recipient routing, local-midnight coverage, least-privilege IAM, retry destinations, DLQ, alarms, structured logs, and X-Ray; AWS deployment awaits the explicitly scoped bootstrap update documented below.
-7. Consent-based filtered SMS subscriptions and editable sibling rotation roster.
+7. Consent-based filtered SMS subscriptions and authenticated roster administration.
 8. OAuth 2.1/PKCE, deployment hardening, telemetry, and a recorded Alexa+ demo.
 
 Each slice must keep `npm run check` green and expose one end-to-end behavior a judge can see. AWS deployment, phone-number messaging, and public repository publication require explicit owner approval because they change external state or can incur cost.

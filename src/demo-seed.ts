@@ -1,10 +1,15 @@
-import type { CareTask, DutyAssignment } from "./domain.js";
-import { calendarDate, validateTimeZone } from "./calendar.js";
+import type { CareTask, CircleMember, DutyAssignment } from "./domain.js";
+import {
+  calendarDate,
+  calendarDayBounds,
+  shiftCalendarDate,
+  validateTimeZone,
+} from "./calendar.js";
 
 export interface DemoSeedItem {
   PK: string;
   SK: string;
-  entityType: "CareTask" | "DutyAssignment";
+  entityType: "CareTask" | "DutyAssignment" | "CircleMember";
   [key: string]: unknown;
 }
 
@@ -14,9 +19,8 @@ export function buildDemoSeed(input: {
   timeZone?: string;
 }): DemoSeedItem[] {
   const now = input.now ?? new Date();
-  const date = calendarDate(now, validateTimeZone(input.timeZone ?? "UTC"));
-  const nextDate = new Date(`${date}T00:00:00.000Z`);
-  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  const timeZone = validateTimeZone(input.timeZone ?? "UTC");
+  const date = calendarDate(now, timeZone);
   const partitionKey = `CIRCLE#${input.circleId}`;
 
   const tasks: CareTask[] = [
@@ -39,25 +43,40 @@ export function buildDemoSeed(input: {
       confirmedAt: null,
     },
   ];
-  const duty: DutyAssignment = {
-    memberId: "theo",
-    memberName: "Theo",
-    startsAt: `${date}T08:00:00.000Z`,
-    endsAt: `${nextDate.toISOString().slice(0, 10)}T02:00:00.000Z`,
-  };
+  const duties = Array.from({ length: 7 }, (_, index): DutyAssignment & { date: string } => {
+    const dutyDate = shiftCalendarDate(date, index);
+    const isTheo = index % 2 === 0;
+    return {
+      date: dutyDate,
+      memberId: isTheo ? "theo" : "maya",
+      memberName: isTheo ? "Theo" : "Maya",
+      ...calendarDayBounds(dutyDate, timeZone),
+    };
+  });
+  const members: CircleMember[] = [
+    { id: "evelyn", name: "Evelyn", relationship: "parent", canReceiveAlerts: false },
+    { id: "maya", name: "Maya", relationship: "daughter", canReceiveAlerts: true },
+    { id: "theo", name: "Theo", relationship: "son", canReceiveAlerts: true },
+  ];
 
   return [
+    ...members.map((member) => ({
+      ...member,
+      PK: partitionKey,
+      SK: `MEMBER#${member.id}`,
+      entityType: "CircleMember" as const,
+    })),
     ...tasks.map((task) => ({
       ...task,
       PK: partitionKey,
       SK: `TASK#${task.dueAt}#${task.id}`,
       entityType: "CareTask" as const,
     })),
-    {
+    ...duties.map(({ date: dutyDate, ...duty }) => ({
       ...duty,
       PK: partitionKey,
-      SK: `DUTY#${date}`,
-      entityType: "DutyAssignment",
-    },
+      SK: `DUTY#${dutyDate}`,
+      entityType: "DutyAssignment" as const,
+    })),
   ];
 }

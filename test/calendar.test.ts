@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { calendarDate, shiftCalendarDate, validateTimeZone } from "../src/calendar.js";
+import {
+  calendarDate,
+  calendarDayBounds,
+  shiftCalendarDate,
+  validateTimeZone,
+} from "../src/calendar.js";
 
 describe("care-circle calendar", () => {
   it("keeps the family on its local date after UTC midnight", () => {
@@ -23,5 +28,16 @@ describe("care-circle calendar", () => {
   it("rejects normalized and fractional date shifts", () => {
     expect(() => shiftCalendarDate("2026-02-31", 1)).toThrow();
     expect(() => shiftCalendarDate("2026-09-02", 0.5)).toThrow();
+  });
+
+  it("resolves local roster days across daylight-saving changes", () => {
+    expect(calendarDayBounds("2026-07-10", "America/Denver")).toEqual({
+      startsAt: "2026-07-10T06:00:00.000Z",
+      endsAt: "2026-07-11T06:00:00.000Z",
+    });
+    expect(calendarDayBounds("2026-11-01", "America/Denver")).toEqual({
+      startsAt: "2026-11-01T06:00:00.000Z",
+      endsAt: "2026-11-02T07:00:00.000Z",
+    });
   });
 });

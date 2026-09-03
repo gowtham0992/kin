@@ -10,6 +10,7 @@ const dutyLabel = document.querySelector("#duty-label");
 const escalationCard = document.querySelector("#escalation-card");
 const todayView = document.querySelector("#today-view");
 const weekView = document.querySelector("#week-view");
+const circleView = document.querySelector("#circle-view");
 const phoneHeading = document.querySelector("#phone-heading");
 const phoneKicker = document.querySelector("#phone-kicker");
 const phoneNav = document.querySelector(".phone-nav");
@@ -22,11 +23,15 @@ const briefSource = document.querySelector("#brief-source");
 const evidenceSummary = document.querySelector("#evidence-summary");
 const evidenceList = document.querySelector("#evidence-list");
 const briefSafety = document.querySelector("#brief-safety");
+const rosterBalance = document.querySelector("#roster-balance");
+const rosterDays = document.querySelector("#roster-days");
 
 let snapshot = null;
 let submitting = false;
 let weeklyBrief = null;
 let loadingBrief = false;
+let circle = null;
+let loadingCircle = false;
 
 function formatTime(iso) {
   return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(iso));
@@ -87,7 +92,7 @@ function render(data) {
   const escalationsByTask = new Map(escalations.map((record) => [record.taskId, record]));
   taskList.replaceChildren(...data.tasks.map((task) => createTaskItem(task, escalationsByTask.get(task.id))));
   const { completed, total, remaining } = data.summary;
-  if (weekView.hidden) phoneKicker.textContent = formatDate(data.date);
+  if (!todayView.hidden) phoneKicker.textContent = formatDate(data.date);
   progressCount.textContent = `${completed} of ${total}`;
   progressBar.style.width = `${total ? Math.round((completed / total) * 100) : 0}%`;
   const needsAttention = escalations.some((record) => ["sent", "blocked", "failed"].includes(record.status));
@@ -210,6 +215,104 @@ function showBriefError() {
   briefPoints.append(retry);
 }
 
+function datesBetween(startDate, endDate) {
+  const dates = [];
+  const cursor = new Date(`${startDate}T00:00:00.000Z`);
+  while (cursor.toISOString().slice(0, 10) <= endDate) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+function renderCircle(data) {
+  circle = data;
+  const caregivers = data.members.filter((member) => member.canReceiveAlerts);
+  const assignmentByDate = new Map(data.assignments.map((assignment) => [assignment.date, assignment]));
+  const counts = new Map(caregivers.map((member) => [member.id, 0]));
+  for (const assignment of data.assignments) counts.set(assignment.memberId, (counts.get(assignment.memberId) ?? 0) + 1);
+  rosterBalance.replaceChildren(...caregivers.map((member) => {
+    const item = document.createElement("div");
+    const avatar = document.createElement("span");
+    const copy = document.createElement("p");
+    avatar.textContent = member.name.slice(0, 1);
+    copy.textContent = `${member.name} · ${counts.get(member.id) ?? 0} day${counts.get(member.id) === 1 ? "" : "s"}`;
+    item.append(avatar, copy);
+    return item;
+  }));
+  rosterDays.replaceChildren(...datesBetween(data.startDate, data.endDate).map((date, index) => {
+    const item = document.createElement("li");
+    const day = document.createElement("div");
+    const weekday = document.createElement("strong");
+    const calendar = document.createElement("span");
+    const select = document.createElement("select");
+    weekday.textContent = index === 0 ? "Today" : new Intl.DateTimeFormat(undefined, { weekday: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+    calendar.textContent = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+    day.append(weekday, calendar);
+    select.setAttribute("aria-label", `Caregiver on duty ${date}`);
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "Unassigned";
+    select.append(empty, ...caregivers.map((member) => {
+      const option = document.createElement("option");
+      option.value = member.id;
+      option.textContent = member.name;
+      return option;
+    }));
+    select.value = assignmentByDate.get(date)?.memberId ?? "";
+    select.addEventListener("change", () => {
+      if (!select.value) {
+        select.value = assignmentByDate.get(date)?.memberId ?? "";
+        return;
+      }
+      void saveDuty(date, select.value, select);
+    });
+    item.append(day, select);
+    return item;
+  }));
+}
+
+async function loadCircle() {
+  if (loadingCircle) return;
+  loadingCircle = true;
+  try {
+    const response = await fetch("/api/circle", { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error("Could not load roster");
+    renderCircle(await response.json());
+  } catch {
+    rosterDays.replaceChildren();
+    const item = document.createElement("li");
+    item.textContent = "The family roster isn’t available yet.";
+    rosterDays.append(item);
+  } finally {
+    loadingCircle = false;
+  }
+}
+
+async function saveDuty(date, memberId, select) {
+  select.disabled = true;
+  try {
+    const response = await fetch("/api/circle/duty", {
+      method: "PUT",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ date, memberId }),
+    });
+    if (!response.ok) throw new Error("Could not update roster");
+    const updated = await response.json();
+    renderCircle(updated);
+    if (snapshot?.date === date) await loadToday();
+    toast.textContent = "Duty handoff shared with the family";
+    toast.hidden = false;
+    window.setTimeout(() => { toast.hidden = true; }, 2200);
+  } catch {
+    toast.textContent = "That handoff didn’t save. The roster is unchanged.";
+    toast.hidden = false;
+    renderCircle(circle);
+  } finally {
+    select.disabled = false;
+  }
+}
+
 async function loadWeeklyBrief() {
   if (loadingBrief) return;
   loadingBrief = true;
@@ -227,19 +330,24 @@ async function loadWeeklyBrief() {
 
 function switchPhoneView(view) {
   const showWeek = view === "week";
-  todayView.hidden = showWeek;
+  const showCircle = view === "circle";
+  todayView.hidden = showWeek || showCircle;
   weekView.hidden = !showWeek;
-  phoneHeading.textContent = showWeek ? "This week" : "Mom’s day";
-  phoneKicker.textContent = showWeek
-    ? "A family handoff, grounded in facts"
-    : snapshot
-      ? formatDate(snapshot.date)
-      : "Today";
+  circleView.hidden = !showCircle;
+  phoneHeading.textContent = showCircle ? "Our circle" : showWeek ? "This week" : "Mom’s day";
+  phoneKicker.textContent = showCircle
+    ? "Maya + Theo"
+    : showWeek
+      ? "A family handoff, grounded in facts"
+      : snapshot
+        ? formatDate(snapshot.date)
+        : "Today";
   for (const button of phoneNav.querySelectorAll("button[data-view]")) {
     button.classList.toggle("active", button.dataset.view === view);
     button.setAttribute("aria-current", button.dataset.view === view ? "page" : "false");
   }
   if (showWeek && !weeklyBrief) void loadWeeklyBrief();
+  if (showCircle && !circle) void loadCircle();
 }
 
 function renderEscalation(escalations) {

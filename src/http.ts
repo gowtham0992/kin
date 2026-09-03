@@ -14,6 +14,10 @@ const confirmationBody = z.object({
   actor: z.string().trim().min(1).max(80),
   requestId: z.string().min(8).max(100),
 }).strict();
+const dutyBody = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  memberId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
+}).strict();
 
 export function createHttpApp(
   store: CareRepository,
@@ -40,6 +44,31 @@ export function createHttpApp(
     try {
       response.set("cache-control", "no-store").json(await weeklyBrief.create());
     } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/circle", async (_request, response, next) => {
+    try {
+      response.set("cache-control", "no-store").json(await store.circle());
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/circle/duty", async (request, response, next) => {
+    const body = dutyBody.safeParse(request.body);
+    if (!body.success) {
+      response.status(400).json({ error: "Invalid duty assignment" });
+      return;
+    }
+    try {
+      response.set("cache-control", "no-store").json(await store.assignDuty(body.data));
+    } catch (error) {
+      if (error instanceof Error && /duty|caregiver/i.test(error.message)) {
+        response.status(400).json({ error: "Duty assignment is not allowed" });
+        return;
+      }
       next(error);
     }
   });

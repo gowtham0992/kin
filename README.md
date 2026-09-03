@@ -15,6 +15,7 @@ This repository begins with the portable core: an MCP `2025-11-25`-compatible se
 - Missed-task sweeps persist a deterministic outbox record, acquire a conditional 60-second delivery lease, and record the SNS message identifier or a privacy-safe failure code.
 - The deployable worker runs that sweep every five minutes through EventBridge Scheduler, with bounded retries, a retained encrypted dead-letter queue, alarms, structured logs, and X-Ray tracing.
 - Retries publish to the caregiver frozen into the durable outbox record even if the duty assignment changes later.
+- The Circle view makes the seven-day Maya/Theo rotation visible and editable, persists handoffs in DynamoDB, and derives exact local-day boundaries across daylight-saving changes.
 - The caregiver view renders queued, sending, sent, failed, blocked, and empty escalation states from the same shared snapshot.
 - `show_weekly_brief` and `/api/weekly-brief` summarize a seven-day activity window with evidence IDs for every observation.
 - Bedrock ranks recorded events and selects safe follow-up categories; Kin renders every user-visible sentence directly from stored facts.
@@ -30,6 +31,7 @@ npm start
 
 The MCP endpoint is `http://127.0.0.1:3000/mcp`; health is available at `/health`.
 The Alexa+-style web simulator is served at `http://127.0.0.1:3000/` and uses the same care-state operation as the MCP tools.
+Its Circle tab reads and updates the duty assignments used by the escalation worker without exposing phone numbers or delivery internals.
 
 Set `KIN_DYNAMODB_TABLE`, `KIN_CIRCLE_ID`, `KIN_TIME_ZONE`, and `AWS_REGION` to use the AWS-backed repository. `KIN_TIME_ZONE` is an IANA identifier such as `America/Denver` and keeps daily care state aligned with the family's calendar after UTC midnight. With no table configured, Kin intentionally starts in local demo mode.
 

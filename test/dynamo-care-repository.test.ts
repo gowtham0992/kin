@@ -304,4 +304,48 @@ describe("DynamoCareRepository", () => {
       },
     });
   });
+
+  it("writes a timezone-correct duty handoff for an eligible circle member", async () => {
+    const maya = {
+      PK: "CIRCLE#family-1",
+      SK: "MEMBER#maya",
+      entityType: "CircleMember",
+      id: "maya",
+      name: "Maya",
+      relationship: "daughter",
+      canReceiveAlerts: true,
+    };
+    const client = new FakeDynamoSender([
+      { Items: [maya] }, { Items: [] }, {},
+      { Items: [maya] }, { Items: [{
+        PK: "CIRCLE#family-1",
+        SK: "DUTY#2026-09-03",
+        entityType: "DutyAssignment",
+        memberId: "maya",
+        memberName: "Maya",
+        startsAt: "2026-09-03T06:00:00.000Z",
+        endsAt: "2026-09-04T06:00:00.000Z",
+      }] },
+    ]);
+    const repository = new DynamoCareRepository({
+      client,
+      tableName: "kin-test",
+      circleId: "family-1",
+      now: fixedNow,
+      timeZone: "America/Denver",
+    });
+
+    const result = await repository.assignDuty({ date: "2026-09-03", memberId: "maya" });
+
+    expect(client.commands[2]).toBeInstanceOf(PutCommand);
+    expect(client.commands[2]?.input).toMatchObject({
+      Item: {
+        SK: "DUTY#2026-09-03",
+        memberId: "maya",
+        startsAt: "2026-09-03T06:00:00.000Z",
+        endsAt: "2026-09-04T06:00:00.000Z",
+      },
+    });
+    expect(result.assignments[0]).toMatchObject({ date: "2026-09-03", memberName: "Maya" });
+  });
 });

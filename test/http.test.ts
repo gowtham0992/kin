@@ -99,4 +99,29 @@ describe("Kin HTTP surface", () => {
     expect(response.status).toBe(400);
     expect(response.body).toEqual({ error: "Invalid confirmation request" });
   });
+
+  it("shows the care circle and updates one roster day", async () => {
+    const app = createHttpApp(createDemoStore(fixedNow));
+    const before = await request(app).get("/api/circle");
+    expect(before.body.members).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "maya", canReceiveAlerts: true }),
+      expect.objectContaining({ id: "theo", canReceiveAlerts: true }),
+    ]));
+
+    const updated = await request(app).put("/api/circle/duty").send({
+      date: "2026-09-03",
+      memberId: "maya",
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body.assignments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ date: "2026-09-03", memberId: "maya" }),
+    ]));
+  });
+
+  it("rejects assigning the care recipient to alert duty", async () => {
+    const response = await request(createHttpApp(createDemoStore(fixedNow)))
+      .put("/api/circle/duty")
+      .send({ date: "2026-09-03", memberId: "evelyn" });
+    expect(response.status).toBe(400);
+  });
 });

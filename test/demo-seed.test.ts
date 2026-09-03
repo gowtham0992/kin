@@ -8,16 +8,25 @@ describe("Kin demo seed", () => {
       now: new Date("2026-09-02T12:00:00.000Z"),
     });
 
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(12);
     expect(items.map((item) => item.SK)).toEqual([
+      "MEMBER#evelyn",
+      "MEMBER#maya",
+      "MEMBER#theo",
       "TASK#2026-09-02T15:00:00.000Z#morning-water",
       "TASK#2026-09-02T21:00:00.000Z#afternoon-walk",
       "DUTY#2026-09-02",
+      "DUTY#2026-09-03",
+      "DUTY#2026-09-04",
+      "DUTY#2026-09-05",
+      "DUTY#2026-09-06",
+      "DUTY#2026-09-07",
+      "DUTY#2026-09-08",
     ]);
-    expect(items[2]).toMatchObject({
+    expect(items[5]).toMatchObject({
       PK: "CIRCLE#family-1",
       memberName: "Theo",
-      endsAt: "2026-09-03T02:00:00.000Z",
+      endsAt: "2026-09-03T00:00:00.000Z",
     });
   });
 
@@ -28,6 +37,7 @@ describe("Kin demo seed", () => {
       timeZone: "America/Denver",
     });
 
-    expect(items[2]?.SK).toBe("DUTY#2026-09-02");
+    expect(items[5]?.SK).toBe("DUTY#2026-09-02");
+    expect(items[6]).toMatchObject({ SK: "DUTY#2026-09-03", memberName: "Maya" });
   });
 });
