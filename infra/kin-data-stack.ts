@@ -94,7 +94,6 @@ export class KinDataStack extends Stack {
       architecture: Architecture.ARM_64,
       memorySize: 256,
       timeout: Duration.seconds(30),
-      reservedConcurrentExecutions: 1,
       tracing: Tracing.ACTIVE,
       logGroup: workerLogGroup,
       loggingFormat: LoggingFormat.JSON,

@@ -56,7 +56,6 @@ describe("Kin AWS infrastructure", () => {
       FunctionName: "kin-escalation-worker",
       Runtime: "nodejs22.x",
       Architectures: ["arm64"],
-      ReservedConcurrentExecutions: 1,
       Timeout: 30,
       TracingConfig: { Mode: "Active" },
       Environment: {
