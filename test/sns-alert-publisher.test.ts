@@ -21,12 +21,15 @@ describe("SnsAlertPublisher", () => {
       taskTitle: "Drink a glass of water",
       dueAt: "2026-09-02T15:00:00.000Z",
       createdAt: "2026-09-02T16:00:00.000Z",
-      recipient: {
-        memberId: "theo",
-        memberName: "Theo",
-        startsAt: "2026-09-02T08:00:00.000Z",
-        endsAt: "2026-09-03T02:00:00.000Z",
-      },
+      updatedAt: "2026-09-02T16:00:00.000Z",
+      recipientMemberId: "theo",
+      recipientMemberName: "Theo",
+      status: "sending",
+      attemptCount: 1,
+      attemptId: "worker-1",
+      leaseUntil: "2026-09-02T16:01:00.000Z",
+      providerMessageId: null,
+      lastErrorCode: null,
     });
 
     expect(result).toEqual({ messageId: "message-1" });

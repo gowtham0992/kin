@@ -20,4 +20,14 @@ describe("Kin demo seed", () => {
       endsAt: "2026-09-03T02:00:00.000Z",
     });
   });
+
+  it("keys the duty assignment by the family's local date", () => {
+    const items = buildDemoSeed({
+      circleId: "family-1",
+      now: new Date("2026-09-03T04:30:00.000Z"),
+      timeZone: "America/Denver",
+    });
+
+    expect(items[2]?.SK).toBe("DUTY#2026-09-02");
+  });
 });

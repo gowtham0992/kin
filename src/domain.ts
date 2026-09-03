@@ -5,7 +5,7 @@ import type {
   MissedTaskEscalation,
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
-import { calendarDate, validateTimeZone } from "./calendar.js";
+import { calendarDate, shiftCalendarDate, validateTimeZone } from "./calendar.js";
 
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
@@ -60,6 +60,7 @@ export interface CareActivityWindow {
 
 export interface CareRepository {
   today(): Promise<TodaySnapshot>;
+  escalationSnapshot(asOf: Date): Promise<TodaySnapshot>;
   activityBetween(input: { startDate: string; endDate: string }): Promise<CareActivityWindow>;
   confirm(input: {
     taskId: string;
@@ -121,7 +122,7 @@ export class InMemoryCareStore implements CareRepository {
   async today(): Promise<TodaySnapshot> {
     const date = calendarDate(this.#now(), this.#timeZone);
     const tasks = [...this.#tasks.values()]
-      .filter((task) => task.dueAt.startsWith(date))
+      .filter((task) => calendarDate(new Date(task.dueAt), this.#timeZone) === date)
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
       .map((task) => structuredClone(task));
 
@@ -150,20 +151,45 @@ export class InMemoryCareStore implements CareRepository {
   }): Promise<CareActivityWindow> {
     const tasks = [...this.#tasks.values()]
       .filter((task) => {
-        const date = task.dueAt.slice(0, 10);
+        const date = calendarDate(new Date(task.dueAt), this.#timeZone);
         return date >= input.startDate && date <= input.endDate;
       })
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
       .map((task) => structuredClone(task));
     const escalations = [...this.#escalations.values()]
       .filter((record) => {
-        const date = record.dueAt.slice(0, 10);
+        const date = calendarDate(new Date(record.dueAt), this.#timeZone);
         return date >= input.startDate && date <= input.endDate;
       })
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
       .map(toEscalationSummary);
 
     return { ...input, tasks, escalations };
+  }
+
+  async escalationSnapshot(asOf: Date): Promise<TodaySnapshot> {
+    const date = calendarDate(asOf, this.#timeZone);
+    const previousDate = shiftCalendarDate(date, -1);
+    const tasks = [...this.#tasks.values()]
+      .filter((task) => {
+        const taskDate = calendarDate(new Date(task.dueAt), this.#timeZone);
+        return taskDate >= previousDate && taskDate <= date;
+      })
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
+      .map((task) => structuredClone(task));
+    const escalations = [...this.#escalations.values()]
+      .filter((record) => {
+        const dueDate = calendarDate(new Date(record.dueAt), this.#timeZone);
+        return dueDate >= previousDate && dueDate <= date;
+      })
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map(toEscalationSummary);
+    return snapshotFor(
+      date,
+      tasks,
+      this.#onDuty ? structuredClone(this.#onDuty) : null,
+      escalations,
+    );
   }
 
   async queueEscalation(input: MissedTaskEscalation | BlockedEscalation) {
@@ -336,4 +362,26 @@ export function createDemoStore(
     },
     timeZone,
   );
+}
+
+function snapshotFor(
+  date: string,
+  tasks: CareTask[],
+  onDuty: DutyAssignment | null,
+  escalations: EscalationSummary[],
+): TodaySnapshot {
+  const completed = tasks.filter((task) => task.state === "done").length;
+  const skipped = tasks.filter((task) => task.state === "skipped").length;
+  return {
+    date,
+    tasks,
+    onDuty,
+    escalations,
+    summary: {
+      total: tasks.length,
+      completed,
+      skipped,
+      remaining: tasks.length - completed - skipped,
+    },
+  };
 }

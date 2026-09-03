@@ -7,16 +7,18 @@ const tableName = requiredEnvironment("KIN_DYNAMODB_TABLE");
 const topicArn = requiredEnvironment("KIN_ALERT_TOPIC_ARN");
 const circleId = process.env.KIN_CIRCLE_ID?.trim() || "demo-family";
 const region = process.env.AWS_REGION?.trim() || "us-east-1";
+const timeZone = process.env.KIN_TIME_ZONE?.trim() || "UTC";
 const now = resolveClock();
 const repository = createDynamoCareRepository({
   tableName,
   circleId,
   region,
   now: () => now,
+  timeZone,
 });
 
 const result = await runEscalationSweep({
-  snapshot: await repository.today(),
+  snapshot: await repository.escalationSnapshot(now),
   store: repository,
   publisher: createSnsAlertPublisher({ topicArn, region }),
   now,

@@ -58,7 +58,8 @@ describe("DynamoCareRepository", () => {
       ConsistentRead: true,
       ExpressionAttributeValues: {
         ":pk": "CIRCLE#family-1",
-        ":taskDate": "TASK#2026-09-02",
+        ":start": "TASK#2026-09-01",
+        ":end": "TASK#2026-09-03\uffff",
       },
     });
   });
@@ -225,14 +226,81 @@ describe("DynamoCareRepository", () => {
     expect(client.commands[0]?.input).toMatchObject({
       ConsistentRead: true,
       ExpressionAttributeValues: {
-        ":start": "TASK#2026-08-27",
-        ":end": "TASK#2026-09-02\uffff",
+        ":start": "TASK#2026-08-26",
+        ":end": "TASK#2026-09-03\uffff",
       },
     });
     expect(client.commands[1]?.input).toMatchObject({
       ExpressionAttributeValues: {
-        ":start": "ESCALATION#2026-08-27",
-        ":end": "ESCALATION#2026-09-02\uffff",
+        ":start": "ESCALATION#2026-08-26",
+        ":end": "ESCALATION#2026-09-03\uffff",
+      },
+    });
+  });
+
+  it("keeps a late-evening local task in today despite tomorrow's UTC prefix", async () => {
+    const lateTask = {
+      ...storedTask,
+      SK: "TASK#2026-09-03T04:00:00.000Z#evening-call",
+      id: "evening-call",
+      title: "Call Maya",
+      dueAt: "2026-09-03T04:00:00.000Z",
+    };
+    const client = new FakeDynamoSender([{ Items: [lateTask] }, {}, {}]);
+    const repository = new DynamoCareRepository({
+      client,
+      tableName: "kin-test",
+      circleId: "family-1",
+      now: () => new Date("2026-09-03T04:30:00.000Z"),
+      timeZone: "America/Denver",
+    });
+
+    const snapshot = await repository.today();
+
+    expect(snapshot.date).toBe("2026-09-02");
+    expect(snapshot.tasks.map((task) => task.id)).toEqual(["evening-call"]);
+  });
+
+  it("loads the previous local day's overdue tasks for an after-midnight sweep", async () => {
+    const priorTask = {
+      ...storedTask,
+      SK: "TASK#2026-09-03T05:30:00.000Z#late-check-in",
+      id: "late-check-in",
+      title: "Late check-in",
+      dueAt: "2026-09-03T05:30:00.000Z",
+    };
+    const priorDuty = {
+      PK: "CIRCLE#family-1",
+      SK: "DUTY#2026-09-02",
+      entityType: "DutyAssignment",
+      memberId: "theo",
+      memberName: "Theo",
+      startsAt: "2026-09-02T14:00:00.000Z",
+      endsAt: "2026-09-03T08:00:00.000Z",
+    };
+    const client = new FakeDynamoSender([
+      { Items: [priorTask] },
+      { Items: [priorDuty] },
+      { Items: [] },
+    ]);
+    const repository = new DynamoCareRepository({
+      client,
+      tableName: "kin-test",
+      circleId: "family-1",
+      timeZone: "America/Denver",
+    });
+
+    const snapshot = await repository.escalationSnapshot(
+      new Date("2026-09-03T06:30:00.000Z"),
+    );
+
+    expect(snapshot.date).toBe("2026-09-03");
+    expect(snapshot.tasks.map((task) => task.id)).toEqual(["late-check-in"]);
+    expect(snapshot.onDuty?.memberId).toBe("theo");
+    expect(client.commands[0]?.input).toMatchObject({
+      ExpressionAttributeValues: {
+        ":start": "TASK#2026-09-01",
+        ":end": "TASK#2026-09-04\uffff",
       },
     });
   });

@@ -13,6 +13,8 @@ This repository begins with the portable core: an MCP `2025-11-25`-compatible se
 - In-memory demo data keeps the first slice runnable without cloud credentials.
 - A DynamoDB repository uses strongly consistent reads and an atomic transaction for the task update plus idempotency record.
 - Missed-task sweeps persist a deterministic outbox record, acquire a conditional 60-second delivery lease, and record the SNS message identifier or a privacy-safe failure code.
+- The deployable worker runs that sweep every five minutes through EventBridge Scheduler, with bounded retries, a retained encrypted dead-letter queue, alarms, structured logs, and X-Ray tracing.
+- Retries publish to the caregiver frozen into the durable outbox record even if the duty assignment changes later.
 - The caregiver view renders queued, sending, sent, failed, blocked, and empty escalation states from the same shared snapshot.
 - `show_weekly_brief` and `/api/weekly-brief` summarize a seven-day activity window with evidence IDs for every observation.
 - Bedrock ranks recorded events and selects safe follow-up categories; Kin renders every user-visible sentence directly from stored facts.
@@ -48,6 +50,7 @@ AWS_PROFILE=kin-dev \
 AWS_REGION=us-east-1 \
 KIN_DYNAMODB_TABLE=kin-care-state \
 KIN_CIRCLE_ID=demo-family \
+KIN_TIME_ZONE=America/Denver \
 KIN_ALERT_TOPIC_ARN="$KIN_ALERT_TOPIC_ARN" \
 npm run sweep:aws
 ```
@@ -68,7 +71,7 @@ npm run brief:aws
 
 Without `KIN_BEDROCK_MODEL_ID`, the server deliberately uses the evidence-linked deterministic brief. Model errors, incomplete generations, invalid JSON, schema violations, unknown evidence references, and inapplicable follow-up selections take the same safe fallback path.
 
-`npm run infra:synth` produces the reviewable CloudFormation template without deploying it. The table uses on-demand billing, AWS-managed encryption, seven-day point-in-time recovery, deletion protection, and retain-on-delete behavior.
+`npm run infra:synth` bundles the Lambda and produces a reviewable CloudFormation template without deploying it. The table uses on-demand billing, AWS-managed encryption, seven-day point-in-time recovery, deletion protection, and retain-on-delete behavior. Lambda assets require a standard CDK bootstrap before deployment; the exact current account status is documented in `docs/aws-deployment.md`.
 
 The reasoning and reversal conditions behind these choices live in [docs/architecture.md](docs/architecture.md).
 The verified cloud state and restricted deployment workflow live in [docs/aws-deployment.md](docs/aws-deployment.md).

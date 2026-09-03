@@ -1,5 +1,5 @@
 import { PublishCommand, SNSClient } from "@aws-sdk/client-sns";
-import type { MissedTaskEscalation } from "./escalation.js";
+import type { EscalationRecord } from "./escalation.js";
 
 interface SnsSender {
   send(command: PublishCommand): Promise<{ MessageId?: string }>;
@@ -14,15 +14,18 @@ export class SnsAlertPublisher {
     this.#topicArn = input.topicArn;
   }
 
-  async publish(event: MissedTaskEscalation): Promise<{ messageId: string }> {
+  async publish(record: EscalationRecord): Promise<{ messageId: string }> {
+    if (!record.recipientMemberId) {
+      throw new Error("Escalation has no routed recipient");
+    }
     const result = await this.#client.send(
       new PublishCommand({
         TopicArn: this.#topicArn,
         Subject: "Kin care check-in needs attention",
         Message: "A scheduled Kin check-in was missed. Open Kin to see the shared family update.",
         MessageAttributes: {
-          onDutyMemberId: { DataType: "String", StringValue: event.recipient.memberId },
-          escalationId: { DataType: "String", StringValue: event.id },
+          onDutyMemberId: { DataType: "String", StringValue: record.recipientMemberId },
+          escalationId: { DataType: "String", StringValue: record.id },
         },
       }),
     );

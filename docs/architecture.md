@@ -4,7 +4,7 @@ Kin will ship as one deployable TypeScript service with a DynamoDB care-state st
 
 The AWS deployment region is `us-east-1`. Deployment must use a named, non-root IAM or IAM Identity Center principal; Kin will not be provisioned from the AWS account root identity.
 
-The data stack uses CDK's bootstrapless synthesizer because it contains no file or container assets. This avoids provisioning general-purpose CDK asset roles and keeps the deployer limited to the named Kin stack and execution role.
+The first data-only deployment used CDK's bootstrapless synthesizer. The scheduled escalation worker is now a bundled Lambda asset, so subsequent deployments use the standard CDK asset contract. Bootstrap and execution permissions remain separate from application permissions; `kin-dev` cannot deploy infrastructure and the Lambda role can access only the named table, topic, dead-letter queue, logs, and X-Ray APIs it needs.
 
 ## The system must preserve trust before adding breadth
 
@@ -12,7 +12,7 @@ The core invariant is simple: one spoken confirmation produces one durable state
 
 Kin is ordinary family-care coordination, not emergency monitoring or a medical device. The product must never diagnose, recommend medication, imply that someone is safe because a task was completed, or silently discard a missed-task escalation.
 
-Daily and weekly windows are evaluated in the care circle's configured IANA timezone rather than the server's UTC date. This prevents an evening family interaction from silently moving to tomorrow's plan after UTC midnight.
+Daily and weekly windows are evaluated in the care circle's configured IANA timezone rather than the server's UTC date. Because existing sort keys contain UTC timestamps, DynamoDB reads use a bounded one-day buffer on each side and filter results against the IANA timezone in the repository. This keeps the deployed data compatible while preventing a late-evening task from silently moving to tomorrow's plan. If a circle grows beyond hundreds of tasks per week, add an explicit local-care-date access pattern rather than widening these reads.
 
 ## One aggregate fits the access pattern
 
@@ -34,14 +34,18 @@ The current AWS transaction writes the updated task and `CONFIRMATION#<requestId
 
 1. Shared care plan and idempotent voice confirmation — complete and contract-tested.
 2. DynamoDB repository and protected table definition — complete and verified in `us-east-1`.
-3. Rotating caregiver duty and a durable missed-task outbox — complete, including conditional delivery leases.
+3. Active caregiver assignment routing and a durable missed-task outbox — complete, including conditional delivery leases; editable rotation-roster management remains.
 4. SNS delivery with retry evidence and a simulator-visible escalation timeline — complete; filtered SMS subscriptions await caregiver consent and a destination number.
 5. Bedrock-assisted weekly family brief grounded only in recorded events — complete, with bounded DynamoDB reads, constrained event selection, schema and applicability validation, token metadata, and deterministic fallback.
-6. OAuth 2.1/PKCE, deployment hardening, telemetry, and a recorded Alexa+ demo.
+6. Five-minute scheduled escalation worker — code and infrastructure complete, including strict scheduler input, immutable outbox recipient routing, local-midnight coverage, least-privilege IAM, retry destinations, DLQ, alarms, structured logs, and X-Ray; AWS deployment awaits the explicitly scoped bootstrap update documented below.
+7. Consent-based filtered SMS subscriptions and editable sibling rotation roster.
+8. OAuth 2.1/PKCE, deployment hardening, telemetry, and a recorded Alexa+ demo.
 
 Each slice must keep `npm run check` green and expose one end-to-end behavior a judge can see. AWS deployment, phone-number messaging, and public repository publication require explicit owner approval because they change external state or can incur cost.
 
 SNS standard topics provide at-least-once delivery. The outbox prevents concurrent workers and successful replays from publishing twice, but a network failure after SNS accepts a message and before Kin receives the message identifier remains an ambiguity window. Kin stores only a provider error code, never raw provider text, and uses privacy-minimized alert copy so a rare duplicate is understandable rather than alarming.
+
+The outbox record freezes the recipient at the moment the escalation is created. A failed delivery retry publishes from that record, never from the current roster, so a duty handoff cannot silently redirect an old alert while its audit trail still names the original caregiver.
 
 The public Today snapshot is an explicit projection, not a serialized database record. It exposes the task, status, recipient display name, and event time required by the family UI; it excludes provider message identifiers, attempt identifiers, delivery leases, attempt counts, and internal failure codes.
 

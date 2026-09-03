@@ -82,7 +82,7 @@ export interface EscalationStore {
 }
 
 export interface AlertPublisher {
-  publish(event: MissedTaskEscalation): Promise<{ messageId: string }>;
+  publish(record: EscalationRecord): Promise<{ messageId: string }>;
 }
 
 export interface EscalationPlan {
@@ -168,7 +168,7 @@ export async function runEscalationSweep(input: {
     }
 
     try {
-      const published = await input.publisher.publish(event);
+      const published = await input.publisher.publish(claimed);
       records.push(await input.store.completeEscalation({
         record: claimed,
         attemptId: input.attemptId,

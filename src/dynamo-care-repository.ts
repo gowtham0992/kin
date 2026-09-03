@@ -24,7 +24,7 @@ import type {
   MissedTaskEscalation,
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
-import { calendarDate, validateTimeZone } from "./calendar.js";
+import { calendarDate, shiftCalendarDate, validateTimeZone } from "./calendar.js";
 
 interface DynamoSender {
   send(
@@ -98,45 +98,114 @@ export class DynamoCareRepository implements CareRepository {
   }
 
   async today(): Promise<TodaySnapshot> {
-    const date = calendarDate(this.#now(), this.#timeZone);
+    const now = this.#now();
+    const date = calendarDate(now, this.#timeZone);
+    const previousDate = shiftCalendarDate(date, -1);
+    const nextDate = shiftCalendarDate(date, 1);
     const [taskResult, dutyResult, escalationResult] = await Promise.all([
       this.#client.send(new QueryCommand({
         TableName: this.#tableName,
-        KeyConditionExpression: "PK = :pk AND begins_with(SK, :taskDate)",
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
         ExpressionAttributeValues: {
           ":pk": this.#partitionKey(),
-          ":taskDate": `TASK#${date}`,
+          ":start": `TASK#${previousDate}`,
+          ":end": `TASK#${nextDate}\uffff`,
         },
-        ConsistentRead: true,
-      })),
-      this.#client.send(new GetCommand({
-        TableName: this.#tableName,
-        Key: { PK: this.#partitionKey(), SK: `DUTY#${date}` },
         ConsistentRead: true,
       })),
       this.#client.send(new QueryCommand({
         TableName: this.#tableName,
-        KeyConditionExpression: "PK = :pk AND begins_with(SK, :escalationDate)",
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
         ExpressionAttributeValues: {
           ":pk": this.#partitionKey(),
-          ":escalationDate": `ESCALATION#${date}`,
+          ":start": `DUTY#${previousDate}`,
+          ":end": `DUTY#${date}\uffff`,
+        },
+        ConsistentRead: true,
+      })),
+      this.#client.send(new QueryCommand({
+        TableName: this.#tableName,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": this.#partitionKey(),
+          ":start": `ESCALATION#${previousDate}`,
+          ":end": `ESCALATION#${nextDate}\uffff`,
         },
         ConsistentRead: true,
         ScanIndexForward: false,
       })),
     ]);
     const result = taskResult as { Items?: StoredTask[] };
-    const storedDuty = (dutyResult as { Item?: StoredDutyAssignment }).Item;
+    const storedDuties = (dutyResult as { Items?: StoredDutyAssignment[] }).Items ?? [];
     const storedEscalations = (escalationResult as { Items?: StoredEscalation[] }).Items ?? [];
 
     const tasks = (result.Items ?? [])
       .map(({ PK: _pk, SK: _sk, entityType: _entityType, ...task }) => task)
+      .filter((task) => calendarDate(new Date(task.dueAt), this.#timeZone) === date)
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
-    const onDuty = storedDuty
-      ? (({ PK: _pk, SK: _sk, entityType: _entityType, ...assignment }) => assignment)(storedDuty)
-      : null;
-    const escalations = storedEscalations.map(stripEscalationStorage).map(toEscalationSummary);
+    const onDuty = activeDutyAt(storedDuties.map(stripDutyStorage), now);
+    const escalations = storedEscalations
+      .map(stripEscalationStorage)
+      .filter((record) => calendarDate(new Date(record.dueAt), this.#timeZone) === date)
+      .map(toEscalationSummary);
     return snapshotFor(date, tasks, onDuty, escalations);
+  }
+
+  async escalationSnapshot(asOf: Date): Promise<TodaySnapshot> {
+    const date = calendarDate(asOf, this.#timeZone);
+    const previousDate = shiftCalendarDate(date, -1);
+    const queryStartDate = shiftCalendarDate(previousDate, -1);
+    const queryEndDate = shiftCalendarDate(date, 1);
+    const [taskResult, dutyResult, escalationResult] = await Promise.all([
+      this.#client.send(new QueryCommand({
+        TableName: this.#tableName,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": this.#partitionKey(),
+          ":start": `TASK#${queryStartDate}`,
+          ":end": `TASK#${queryEndDate}\uffff`,
+        },
+        ConsistentRead: true,
+      })),
+      this.#client.send(new QueryCommand({
+        TableName: this.#tableName,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": this.#partitionKey(),
+          ":start": `DUTY#${previousDate}`,
+          ":end": `DUTY#${date}\uffff`,
+        },
+        ConsistentRead: true,
+      })),
+      this.#client.send(new QueryCommand({
+        TableName: this.#tableName,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": this.#partitionKey(),
+          ":start": `ESCALATION#${queryStartDate}`,
+          ":end": `ESCALATION#${queryEndDate}\uffff`,
+        },
+        ConsistentRead: true,
+        ScanIndexForward: false,
+      })),
+    ]);
+    const tasks = ((taskResult as { Items?: StoredTask[] }).Items ?? [])
+      .map(({ PK: _pk, SK: _sk, entityType: _entityType, ...task }) => task)
+      .filter((task) => {
+        const localDate = calendarDate(new Date(task.dueAt), this.#timeZone);
+        return localDate >= previousDate && localDate <= date;
+      })
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
+    const assignments = ((dutyResult as { Items?: StoredDutyAssignment[] }).Items ?? [])
+      .map(stripDutyStorage);
+    const escalations = ((escalationResult as { Items?: StoredEscalation[] }).Items ?? [])
+      .map(stripEscalationStorage)
+      .filter((record) => {
+        const localDate = calendarDate(new Date(record.dueAt), this.#timeZone);
+        return localDate >= previousDate && localDate <= date;
+      })
+      .map(toEscalationSummary);
+    return snapshotFor(date, tasks, activeDutyAt(assignments, asOf), escalations);
   }
 
   async activityBetween(input: {
@@ -149,8 +218,8 @@ export class DynamoCareRepository implements CareRepository {
         KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
         ExpressionAttributeValues: {
           ":pk": this.#partitionKey(),
-          ":start": `TASK#${input.startDate}`,
-          ":end": `TASK#${input.endDate}\uffff`,
+          ":start": `TASK#${shiftCalendarDate(input.startDate, -1)}`,
+          ":end": `TASK#${shiftCalendarDate(input.endDate, 1)}\uffff`,
         },
         ConsistentRead: true,
       })),
@@ -159,17 +228,25 @@ export class DynamoCareRepository implements CareRepository {
         KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
         ExpressionAttributeValues: {
           ":pk": this.#partitionKey(),
-          ":start": `ESCALATION#${input.startDate}`,
-          ":end": `ESCALATION#${input.endDate}\uffff`,
+          ":start": `ESCALATION#${shiftCalendarDate(input.startDate, -1)}`,
+          ":end": `ESCALATION#${shiftCalendarDate(input.endDate, 1)}\uffff`,
         },
         ConsistentRead: true,
       })),
     ]);
     const tasks = ((taskResult as { Items?: StoredTask[] }).Items ?? [])
       .map(({ PK: _pk, SK: _sk, entityType: _entityType, ...task }) => task)
+      .filter((task) => {
+        const localDate = calendarDate(new Date(task.dueAt), this.#timeZone);
+        return localDate >= input.startDate && localDate <= input.endDate;
+      })
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
     const escalations = ((escalationResult as { Items?: StoredEscalation[] }).Items ?? [])
       .map(stripEscalationStorage)
+      .filter((record) => {
+        const localDate = calendarDate(new Date(record.dueAt), this.#timeZone);
+        return localDate >= input.startDate && localDate <= input.endDate;
+      })
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
       .map(toEscalationSummary);
 
@@ -464,4 +541,18 @@ function snapshotFor(
 function stripEscalationStorage(stored: StoredEscalation): EscalationRecord {
   const { PK: _pk, SK: _sk, entityType: _entityType, ...record } = stored;
   return record;
+}
+
+function stripDutyStorage(stored: StoredDutyAssignment): DutyAssignment {
+  const { PK: _pk, SK: _sk, entityType: _entityType, ...assignment } = stored;
+  return assignment;
+}
+
+function activeDutyAt(assignments: DutyAssignment[], asOf: Date): DutyAssignment | null {
+  const now = asOf.getTime();
+  return assignments.find((assignment) => {
+    const startsAt = new Date(assignment.startsAt).getTime();
+    const endsAt = new Date(assignment.endsAt).getTime();
+    return Number.isFinite(startsAt) && Number.isFinite(endsAt) && startsAt <= now && endsAt > now;
+  }) ?? null;
 }

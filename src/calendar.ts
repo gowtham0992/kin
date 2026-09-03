@@ -20,3 +20,17 @@ export function validateTimeZone(timeZone: string): string {
     throw new Error("KIN_TIME_ZONE must be a valid IANA time zone");
   }
 }
+
+export function shiftCalendarDate(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    !Number.isInteger(days) ||
+    !Number.isFinite(value.getTime()) ||
+    value.toISOString().slice(0, 10) !== date
+  ) {
+    throw new Error("A valid calendar date and whole-day offset are required");
+  }
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}

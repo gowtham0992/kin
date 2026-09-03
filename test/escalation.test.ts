@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createDemoStore } from "../src/domain.js";
-import { planMissedTaskEscalations, runEscalationSweep } from "../src/escalation.js";
+import {
+  type EscalationRecord,
+  planMissedTaskEscalations,
+  runEscalationSweep,
+} from "../src/escalation.js";
 
 describe("missed-task escalation planning", () => {
   it("routes an overdue task to the active on-duty caregiver after the grace period", async () => {
@@ -123,5 +127,56 @@ describe("missed-task escalation planning", () => {
       lastErrorCode: "ServiceUnavailable",
     });
     expect(retried.records[0]).toMatchObject({ status: "sent", attemptCount: 2 });
+  });
+
+  it("retries to the recipient frozen in the durable outbox record", async () => {
+    const now = new Date("2026-09-02T16:00:00.000Z");
+    const snapshot = await createDemoStore(() => now).today();
+    snapshot.onDuty = {
+      memberId: "maya",
+      memberName: "Maya",
+      startsAt: "2026-09-02T08:00:00.000Z",
+      endsAt: "2026-09-03T02:00:00.000Z",
+    };
+    const prior: EscalationRecord = {
+      id: "missed_morning-water_2026-09-02T15:00:00.000Z",
+      taskId: "morning-water",
+      taskTitle: "Drink a glass of water",
+      dueAt: "2026-09-02T15:00:00.000Z",
+      createdAt: "2026-09-02T15:31:00.000Z",
+      updatedAt: "2026-09-02T15:31:00.000Z",
+      recipientMemberId: "theo",
+      recipientMemberName: "Theo",
+      status: "failed",
+      attemptCount: 1,
+      attemptId: null,
+      leaseUntil: null,
+      providerMessageId: null,
+      lastErrorCode: "ServiceUnavailable",
+    };
+    const delivered: unknown[] = [];
+    const store = {
+      async queueEscalation() { return { record: prior, replayed: true }; },
+      async claimEscalation() {
+        return { ...prior, status: "sending" as const, attemptId: "retry-2" };
+      },
+      async completeEscalation() { return { ...prior, status: "sent" as const }; },
+      async failEscalation() { return prior; },
+    };
+
+    await runEscalationSweep({
+      snapshot,
+      store,
+      publisher: {
+        async publish(delivery: unknown) {
+          delivered.push(delivery);
+          return { messageId: "sns-retry" };
+        },
+      },
+      now,
+      attemptId: "retry-2",
+    });
+
+    expect(delivered[0]).toMatchObject({ recipientMemberId: "theo" });
   });
 });

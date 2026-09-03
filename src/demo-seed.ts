@@ -1,4 +1,5 @@
 import type { CareTask, DutyAssignment } from "./domain.js";
+import { calendarDate, validateTimeZone } from "./calendar.js";
 
 export interface DemoSeedItem {
   PK: string;
@@ -10,9 +11,10 @@ export interface DemoSeedItem {
 export function buildDemoSeed(input: {
   circleId: string;
   now?: Date;
+  timeZone?: string;
 }): DemoSeedItem[] {
   const now = input.now ?? new Date();
-  const date = now.toISOString().slice(0, 10);
+  const date = calendarDate(now, validateTimeZone(input.timeZone ?? "UTC"));
   const nextDate = new Date(`${date}T00:00:00.000Z`);
   nextDate.setUTCDate(nextDate.getUTCDate() + 1);
   const partitionKey = `CIRCLE#${input.circleId}`;

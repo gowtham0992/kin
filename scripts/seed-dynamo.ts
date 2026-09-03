@@ -10,7 +10,10 @@ const client = DynamoDBDocumentClient.from(
   new DynamoDBClient({ region: process.env.AWS_REGION || "us-east-1" }),
   { marshallOptions: { removeUndefinedValues: true } },
 );
-const items = buildDemoSeed({ circleId });
+const items = buildDemoSeed({
+  circleId,
+  timeZone: process.env.KIN_TIME_ZONE?.trim() || "UTC",
+});
 
 let seeded = 0;
 let preserved = 0;
