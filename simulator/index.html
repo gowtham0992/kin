@@ -64,31 +64,48 @@
               <div class="phone-status"><span>9:14</span><span>●●● 5G ◢</span></div>
               <div class="phone-head">
                 <div>
-                  <p class="eyebrow">Wednesday, September 2</p>
+                  <p id="phone-kicker" class="eyebrow">Wednesday, September 2</p>
                   <h2 id="phone-heading">Mom’s day</h2>
                 </div>
                 <div class="avatar" aria-label="Maya’s profile">M</div>
               </div>
-              <section class="progress-card" aria-label="Today’s progress">
-                <div class="progress-copy"><span>Today’s rhythm</span><strong id="progress-count">—</strong></div>
-                <div class="progress-track"><span id="progress-bar"></span></div>
-                <p id="progress-message">Connecting to the family circle…</p>
+              <div id="today-view">
+                <section class="progress-card" aria-label="Today’s progress">
+                  <div class="progress-copy"><span>Today’s rhythm</span><strong id="progress-count">—</strong></div>
+                  <div class="progress-track"><span id="progress-bar"></span></div>
+                  <p id="progress-message">Connecting to the family circle…</p>
+                </section>
+                <div class="section-row"><h3>Today</h3><span id="sync-label">Syncing…</span></div>
+                <ul id="phone-tasks" class="task-list" aria-live="polite"></ul>
+                <aside id="escalation-card" class="escalation-card" aria-live="polite">
+                  <span class="escalation-mark" aria-hidden="true">✓</span>
+                  <div><p>Family coverage</p><strong>No missed check-ins</strong></div>
+                </aside>
+                <aside class="duty-card">
+                  <span class="duty-avatar">T</span>
+                  <div><p>On duty today</p><strong id="duty-label">Loading roster…</strong></div>
+                  <span class="duty-check" aria-hidden="true">✓</span>
+                </aside>
+              </div>
+              <section id="week-view" class="week-view" aria-label="Weekly family brief" aria-live="polite" hidden>
+                <article class="brief-hero">
+                  <p id="brief-period">Last seven days</p>
+                  <h3 id="brief-headline">Gathering the week…</h3>
+                  <p id="brief-overview">Kin is reading only the activity your family recorded.</p>
+                </article>
+                <div id="brief-stats" class="brief-stats" aria-label="Weekly totals"></div>
+                <div class="section-row brief-section-row"><h3>What to know</h3><span id="brief-source">Recorded facts</span></div>
+                <ul id="brief-points" class="brief-points"></ul>
+                <details class="evidence-drawer">
+                  <summary id="evidence-summary">View source activity</summary>
+                  <ol id="evidence-list"></ol>
+                </details>
+                <p id="brief-safety" class="brief-safety"></p>
               </section>
-              <div class="section-row"><h3>Today</h3><span id="sync-label">Syncing…</span></div>
-              <ul id="phone-tasks" class="task-list" aria-live="polite"></ul>
-              <aside id="escalation-card" class="escalation-card" aria-live="polite">
-                <span class="escalation-mark" aria-hidden="true">✓</span>
-                <div><p>Family coverage</p><strong>No missed check-ins</strong></div>
-              </aside>
-              <aside class="duty-card">
-                <span class="duty-avatar">T</span>
-                <div><p>On duty today</p><strong id="duty-label">Loading roster…</strong></div>
-                <span class="duty-check" aria-hidden="true">✓</span>
-              </aside>
               <nav class="phone-nav" aria-label="Kin navigation">
-                <button class="active" type="button"><span>⌂</span>Today</button>
-                <button type="button"><span>◷</span>Week</button>
-                <button type="button"><span>♧</span>Circle</button>
+                <button class="active" type="button" data-view="today"><span>⌂</span>Today</button>
+                <button type="button" data-view="week"><span>◷</span>Week</button>
+                <button type="button" aria-disabled="true"><span>♧</span>Circle</button>
               </nav>
             </div>
           </article>

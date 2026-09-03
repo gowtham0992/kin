@@ -13,11 +13,15 @@ import {
   confirmationResponses,
   type CareRepository,
 } from "./domain.js";
+import { WeeklyBriefService } from "./weekly-brief.js";
 
 const widgetUri = "ui://kin/today.html";
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 
-export function createMcpServer(store: CareRepository): McpServer {
+export function createMcpServer(
+  store: CareRepository,
+  weeklyBrief: WeeklyBriefService = new WeeklyBriefService(store),
+): McpServer {
   const server = new McpServer({ name: "kin", version: "0.1.0" });
 
   registerAppTool(
@@ -40,6 +44,25 @@ export function createMcpServer(store: CareRepository): McpServer {
           },
         ],
         structuredContent: { ...snapshot },
+      };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "show_weekly_brief",
+    {
+      title: "Show the weekly family brief",
+      description:
+        "Summarizes the last seven days of recorded care activity with evidence-linked family follow-ups. It does not provide medical advice.",
+      inputSchema: {},
+      _meta: {},
+    },
+    async () => {
+      const brief = await weeklyBrief.create();
+      return {
+        content: [{ type: "text", text: `${brief.headline}. ${brief.overview}` }],
+        structuredContent: { ...brief },
       };
     },
   );

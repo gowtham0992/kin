@@ -202,4 +202,38 @@ describe("DynamoCareRepository", () => {
       ReturnValues: "ALL_NEW",
     });
   });
+
+  it("reads a bounded activity window for grounded briefs", async () => {
+    const client = new FakeDynamoSender([
+      { Items: [storedTask] },
+      { Items: [] },
+    ]);
+    const repository = new DynamoCareRepository({
+      client,
+      tableName: "kin-test",
+      circleId: "family-1",
+      now: fixedNow,
+    });
+
+    const activity = await repository.activityBetween({
+      startDate: "2026-08-27",
+      endDate: "2026-09-02",
+    });
+
+    expect(activity.tasks).toHaveLength(1);
+    expect(client.commands).toHaveLength(2);
+    expect(client.commands[0]?.input).toMatchObject({
+      ConsistentRead: true,
+      ExpressionAttributeValues: {
+        ":start": "TASK#2026-08-27",
+        ":end": "TASK#2026-09-02\uffff",
+      },
+    });
+    expect(client.commands[1]?.input).toMatchObject({
+      ExpressionAttributeValues: {
+        ":start": "ESCALATION#2026-08-27",
+        ":end": "ESCALATION#2026-09-02\uffff",
+      },
+    });
+  });
 });

@@ -11,10 +11,12 @@
     "infra:synth": "cdk synth --app 'tsx infra/app.ts'",
     "seed:aws": "tsx scripts/seed-dynamo.ts",
     "sweep:aws": "tsx scripts/run-escalation-sweep.ts",
+    "brief:aws": "tsx scripts/generate-weekly-brief.ts",
     "test": "vitest run --exclude 'dist/**'",
     "check": "npm run build && npm test"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1125.0",
     "@aws-sdk/client-dynamodb": "^3.1124.0",
     "@aws-sdk/client-sns": "^3.1124.0",
     "@aws-sdk/lib-dynamodb": "^3.1124.0",

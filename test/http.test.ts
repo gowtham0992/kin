@@ -44,6 +44,19 @@ describe("Kin HTTP surface", () => {
     expect(after.body.tasks[0]).toMatchObject({ id: "morning-water", state: "done" });
   });
 
+  it("serves an evidence-linked weekly brief without caching family state", async () => {
+    const response = await request(createHttpApp(createDemoStore(fixedNow)))
+      .get("/api/weekly-brief");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.body).toMatchObject({
+      generatedBy: "deterministic",
+      stats: { scheduled: 2, completed: 0 },
+    });
+    expect(response.body.safetyNotice).toContain("not medical advice");
+  });
+
   it("does not expose escalation delivery internals in the public snapshot", async () => {
     const now = new Date("2026-09-02T16:00:00.000Z");
     const store = createDemoStore(() => now);

@@ -8,12 +8,44 @@ const syncLabel = document.querySelector("#sync-label");
 const toast = document.querySelector("#toast");
 const dutyLabel = document.querySelector("#duty-label");
 const escalationCard = document.querySelector("#escalation-card");
+const todayView = document.querySelector("#today-view");
+const weekView = document.querySelector("#week-view");
+const phoneHeading = document.querySelector("#phone-heading");
+const phoneKicker = document.querySelector("#phone-kicker");
+const phoneNav = document.querySelector(".phone-nav");
+const briefPeriod = document.querySelector("#brief-period");
+const briefHeadline = document.querySelector("#brief-headline");
+const briefOverview = document.querySelector("#brief-overview");
+const briefStats = document.querySelector("#brief-stats");
+const briefPoints = document.querySelector("#brief-points");
+const briefSource = document.querySelector("#brief-source");
+const evidenceSummary = document.querySelector("#evidence-summary");
+const evidenceList = document.querySelector("#evidence-list");
+const briefSafety = document.querySelector("#brief-safety");
 
 let snapshot = null;
 let submitting = false;
+let weeklyBrief = null;
+let loadingBrief = false;
 
 function formatTime(iso) {
   return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+}
+
+function formatDate(date) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T00:00:00.000Z`));
+}
+
+function formatShortDate(iso) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(iso));
 }
 
 function setLoading() {
@@ -55,6 +87,7 @@ function render(data) {
   const escalationsByTask = new Map(escalations.map((record) => [record.taskId, record]));
   taskList.replaceChildren(...data.tasks.map((task) => createTaskItem(task, escalationsByTask.get(task.id))));
   const { completed, total, remaining } = data.summary;
+  if (weekView.hidden) phoneKicker.textContent = formatDate(data.date);
   progressCount.textContent = `${completed} of ${total}`;
   progressBar.style.width = `${total ? Math.round((completed / total) * 100) : 0}%`;
   const needsAttention = escalations.some((record) => ["sent", "blocked", "failed"].includes(record.status));
@@ -107,6 +140,106 @@ function render(data) {
     : latestSent
       ? "Kin shared the missed check-in with the person on duty."
       : "Kin has quietly updated your family.";
+}
+
+function setBriefLoading() {
+  briefHeadline.textContent = "Gathering the week…";
+  briefOverview.textContent = "Kin is reading only the activity your family recorded.";
+  briefStats.replaceChildren();
+  briefPoints.replaceChildren();
+  evidenceList.replaceChildren();
+  briefSafety.textContent = "";
+  briefSource.textContent = "Recorded facts";
+}
+
+function createStat(value, label) {
+  const item = document.createElement("div");
+  const number = document.createElement("strong");
+  const copy = document.createElement("span");
+  number.textContent = String(value);
+  copy.textContent = label;
+  item.append(number, copy);
+  return item;
+}
+
+function renderBrief(brief) {
+  weeklyBrief = brief;
+  briefPeriod.textContent = `${formatDate(brief.period.startDate).replace(/^\w+, /, "")} — ${formatDate(brief.period.endDate).replace(/^\w+, /, "")}`;
+  briefHeadline.textContent = brief.headline;
+  briefOverview.textContent = brief.overview;
+  briefStats.replaceChildren(
+    createStat(brief.stats.completed, "completed"),
+    createStat(brief.stats.stillOpen, "still open"),
+    createStat(brief.stats.escalations, "alerts"),
+  );
+  const points = [...brief.highlights, ...brief.followUps.map((point) => ({ ...point, followUp: true }))];
+  briefPoints.replaceChildren(...points.map((point) => {
+    const item = document.createElement("li");
+    if (point.followUp) item.className = "is-follow-up";
+    const mark = document.createElement("span");
+    mark.textContent = point.followUp ? "→" : "·";
+    const copy = document.createElement("p");
+    copy.textContent = point.text;
+    item.append(mark, copy);
+    return item;
+  }));
+  briefSource.textContent = brief.generatedBy === "bedrock" ? "Grounded by Nova" : "Recorded facts";
+  evidenceSummary.textContent = `${brief.evidence.length} source event${brief.evidence.length === 1 ? "" : "s"}`;
+  evidenceList.replaceChildren(...brief.evidence.map((evidence) => {
+    const item = document.createElement("li");
+    const time = document.createElement("span");
+    const fact = document.createElement("p");
+    time.textContent = formatShortDate(evidence.occurredAt);
+    fact.textContent = evidence.fact;
+    item.append(time, fact);
+    return item;
+  }));
+  briefSafety.textContent = brief.safetyNotice;
+}
+
+function showBriefError() {
+  briefHeadline.textContent = "The week isn’t available yet";
+  briefOverview.textContent = "Today’s care circle is still live. Try the weekly view again in a moment.";
+  briefStats.replaceChildren();
+  briefPoints.replaceChildren();
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "brief-retry";
+  retry.textContent = "Try again";
+  retry.addEventListener("click", loadWeeklyBrief);
+  briefPoints.append(retry);
+}
+
+async function loadWeeklyBrief() {
+  if (loadingBrief) return;
+  loadingBrief = true;
+  setBriefLoading();
+  try {
+    const response = await fetch("/api/weekly-brief", { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error("Could not load the weekly brief");
+    renderBrief(await response.json());
+  } catch {
+    showBriefError();
+  } finally {
+    loadingBrief = false;
+  }
+}
+
+function switchPhoneView(view) {
+  const showWeek = view === "week";
+  todayView.hidden = showWeek;
+  weekView.hidden = !showWeek;
+  phoneHeading.textContent = showWeek ? "This week" : "Mom’s day";
+  phoneKicker.textContent = showWeek
+    ? "A family handoff, grounded in facts"
+    : snapshot
+      ? formatDate(snapshot.date)
+      : "Today";
+  for (const button of phoneNav.querySelectorAll("button[data-view]")) {
+    button.classList.toggle("active", button.dataset.view === view);
+    button.setAttribute("aria-current", button.dataset.view === view ? "page" : "false");
+  }
+  if (showWeek && !weeklyBrief) void loadWeeklyBrief();
 }
 
 function renderEscalation(escalations) {
@@ -201,6 +334,11 @@ async function confirmTask(responseValue) {
 echoActions.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-response]");
   if (button) void confirmTask(button.dataset.response);
+});
+
+phoneNav.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-view]");
+  if (button) switchPhoneView(button.dataset.view);
 });
 
 setLoading();

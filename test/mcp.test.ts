@@ -27,9 +27,21 @@ describe("Kin MCP contract", () => {
     const result = await client.listTools();
     expect(result.tools.map((tool) => tool.name)).toEqual([
       "show_today",
+      "show_weekly_brief",
       "confirm_care_task",
     ]);
     expect(result.tools[0]?._meta?.ui).toEqual({ resourceUri: "ui://kin/today.html" });
+  });
+
+  it("returns a structured, non-medical weekly brief", async () => {
+    const result = await client.callTool({ name: "show_weekly_brief", arguments: {} });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      generatedBy: "deterministic",
+      stats: { scheduled: 2 },
+    });
+    expect(JSON.stringify(result.structuredContent)).toContain("not medical advice");
   });
 
   it("runs the complete show-confirm-show loop", async () => {

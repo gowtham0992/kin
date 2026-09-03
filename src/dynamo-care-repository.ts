@@ -9,6 +9,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import {
   TaskNotFoundError,
+  type CareActivityWindow,
   type CareRepository,
   type CareTask,
   type Confirmation,
@@ -23,6 +24,7 @@ import type {
   MissedTaskEscalation,
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
+import { calendarDate, validateTimeZone } from "./calendar.js";
 
 interface DynamoSender {
   send(
@@ -79,21 +81,24 @@ export class DynamoCareRepository implements CareRepository {
   readonly #tableName: string;
   readonly #circleId: string;
   readonly #now: () => Date;
+  readonly #timeZone: string;
 
   constructor(input: {
     client: DynamoSender;
     tableName: string;
     circleId: string;
     now?: () => Date;
+    timeZone?: string;
   }) {
     this.#client = input.client;
     this.#tableName = input.tableName;
     this.#circleId = input.circleId;
     this.#now = input.now ?? (() => new Date());
+    this.#timeZone = validateTimeZone(input.timeZone ?? "UTC");
   }
 
   async today(): Promise<TodaySnapshot> {
-    const date = this.#now().toISOString().slice(0, 10);
+    const date = calendarDate(this.#now(), this.#timeZone);
     const [taskResult, dutyResult, escalationResult] = await Promise.all([
       this.#client.send(new QueryCommand({
         TableName: this.#tableName,
@@ -132,6 +137,43 @@ export class DynamoCareRepository implements CareRepository {
       : null;
     const escalations = storedEscalations.map(stripEscalationStorage).map(toEscalationSummary);
     return snapshotFor(date, tasks, onDuty, escalations);
+  }
+
+  async activityBetween(input: {
+    startDate: string;
+    endDate: string;
+  }): Promise<CareActivityWindow> {
+    const [taskResult, escalationResult] = await Promise.all([
+      this.#client.send(new QueryCommand({
+        TableName: this.#tableName,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": this.#partitionKey(),
+          ":start": `TASK#${input.startDate}`,
+          ":end": `TASK#${input.endDate}\uffff`,
+        },
+        ConsistentRead: true,
+      })),
+      this.#client.send(new QueryCommand({
+        TableName: this.#tableName,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": this.#partitionKey(),
+          ":start": `ESCALATION#${input.startDate}`,
+          ":end": `ESCALATION#${input.endDate}\uffff`,
+        },
+        ConsistentRead: true,
+      })),
+    ]);
+    const tasks = ((taskResult as { Items?: StoredTask[] }).Items ?? [])
+      .map(({ PK: _pk, SK: _sk, entityType: _entityType, ...task }) => task)
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
+    const escalations = ((escalationResult as { Items?: StoredEscalation[] }).Items ?? [])
+      .map(stripEscalationStorage)
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
+      .map(toEscalationSummary);
+
+    return { ...input, tasks, escalations };
   }
 
   async confirm(input: {
@@ -388,6 +430,7 @@ export function createDynamoCareRepository(input: {
   circleId: string;
   region?: string;
   now?: () => Date;
+  timeZone?: string;
 }): DynamoCareRepository {
   const baseClient = new DynamoDBClient({ region: input.region });
   const client = DynamoDBDocumentClient.from(baseClient, {

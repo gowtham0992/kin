@@ -5,6 +5,7 @@ import type {
   MissedTaskEscalation,
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
+import { calendarDate, validateTimeZone } from "./calendar.js";
 
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
@@ -50,8 +51,16 @@ export interface TodaySnapshot {
   };
 }
 
+export interface CareActivityWindow {
+  startDate: string;
+  endDate: string;
+  tasks: CareTask[];
+  escalations: EscalationSummary[];
+}
+
 export interface CareRepository {
   today(): Promise<TodaySnapshot>;
+  activityBetween(input: { startDate: string; endDate: string }): Promise<CareActivityWindow>;
   confirm(input: {
     taskId: string;
     response: ConfirmationResponse;
@@ -95,19 +104,22 @@ export class InMemoryCareStore implements CareRepository {
   readonly #now: () => Date;
   readonly #onDuty: DutyAssignment | null;
   readonly #escalations = new Map<string, EscalationRecord>();
+  readonly #timeZone: string;
 
   constructor(
     tasks: CareTask[],
     now: () => Date = () => new Date(),
     onDuty: DutyAssignment | null = null,
+    timeZone = "UTC",
   ) {
     this.#now = now;
     this.#onDuty = onDuty ? structuredClone(onDuty) : null;
+    this.#timeZone = validateTimeZone(timeZone);
     for (const task of tasks) this.#tasks.set(task.id, structuredClone(task));
   }
 
   async today(): Promise<TodaySnapshot> {
-    const date = this.#now().toISOString().slice(0, 10);
+    const date = calendarDate(this.#now(), this.#timeZone);
     const tasks = [...this.#tasks.values()]
       .filter((task) => task.dueAt.startsWith(date))
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
@@ -130,6 +142,28 @@ export class InMemoryCareStore implements CareRepository {
         remaining: tasks.length - completed - skipped,
       },
     };
+  }
+
+  async activityBetween(input: {
+    startDate: string;
+    endDate: string;
+  }): Promise<CareActivityWindow> {
+    const tasks = [...this.#tasks.values()]
+      .filter((task) => {
+        const date = task.dueAt.slice(0, 10);
+        return date >= input.startDate && date <= input.endDate;
+      })
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
+      .map((task) => structuredClone(task));
+    const escalations = [...this.#escalations.values()]
+      .filter((record) => {
+        const date = record.dueAt.slice(0, 10);
+        return date >= input.startDate && date <= input.endDate;
+      })
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
+      .map(toEscalationSummary);
+
+    return { ...input, tasks, escalations };
   }
 
   async queueEscalation(input: MissedTaskEscalation | BlockedEscalation) {
@@ -265,8 +299,11 @@ export class InMemoryCareStore implements CareRepository {
   }
 }
 
-export function createDemoStore(now: () => Date = () => new Date()): InMemoryCareStore {
-  const date = now().toISOString().slice(0, 10);
+export function createDemoStore(
+  now: () => Date = () => new Date(),
+  timeZone = "UTC",
+): InMemoryCareStore {
+  const date = calendarDate(now(), validateTimeZone(timeZone));
   const dutyEndsAt = new Date(`${date}T02:00:00.000Z`);
   dutyEndsAt.setUTCDate(dutyEndsAt.getUTCDate() + 1);
   return new InMemoryCareStore(
@@ -297,5 +334,6 @@ export function createDemoStore(now: () => Date = () => new Date()): InMemoryCar
       startsAt: `${date}T08:00:00.000Z`,
       endsAt: dutyEndsAt.toISOString(),
     },
+    timeZone,
   );
 }

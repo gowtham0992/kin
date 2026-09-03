@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { TaskNotFoundError, type CareRepository } from "./domain.js";
 import { createMcpServer } from "./mcp.js";
+import { WeeklyBriefService } from "./weekly-brief.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -14,7 +15,10 @@ const confirmationBody = z.object({
   requestId: z.string().min(8).max(100),
 }).strict();
 
-export function createHttpApp(store: CareRepository) {
+export function createHttpApp(
+  store: CareRepository,
+  weeklyBrief: WeeklyBriefService = new WeeklyBriefService(store),
+) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "128kb" }));
@@ -27,6 +31,14 @@ export function createHttpApp(store: CareRepository) {
   app.get("/api/today", async (_request, response, next) => {
     try {
       response.set("cache-control", "no-store").json(await store.today());
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/weekly-brief", async (_request, response, next) => {
+    try {
+      response.set("cache-control", "no-store").json(await weeklyBrief.create());
     } catch (error) {
       next(error);
     }
@@ -56,7 +68,7 @@ export function createHttpApp(store: CareRepository) {
   });
 
   app.post("/mcp", async (request, response) => {
-    const server = createMcpServer(store);
+    const server = createMcpServer(store, weeklyBrief);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     response.on("close", () => {
       void transport.close();
