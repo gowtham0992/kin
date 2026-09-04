@@ -20,7 +20,13 @@ import {
   ComparisonOperator,
   TreatMissingData,
 } from "aws-cdk-lib/aws-cloudwatch";
-import type { ITable } from "aws-cdk-lib/aws-dynamodb";
+import {
+  AttributeType,
+  BillingMode,
+  Table,
+  TableEncryption,
+  type ITable,
+} from "aws-cdk-lib/aws-dynamodb";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import {
   ApplicationLogLevel,
@@ -69,6 +75,20 @@ export class KinApiStack extends Stack {
     const apiLogGroup = new LogGroup(this, "ApiAccessLogs", {
       logGroupName: "/aws/apigateway/kin-mcp",
       retention: RetentionDays.TWO_WEEKS,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    const oauthStateTable = new Table(this, "OAuthState", {
+      tableName: "kin-oauth-state",
+      partitionKey: { name: "PK", type: AttributeType.STRING },
+      sortKey: { name: "SK", type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      encryption: TableEncryption.AWS_MANAGED,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+        recoveryPeriodInDays: 7,
+      },
+      timeToLiveAttribute: "expiresAt",
+      deletionProtection: true,
       removalPolicy: RemovalPolicy.RETAIN,
     });
     const functionLogGroup = new LogGroup(this, "ApiFunctionLogs", {
@@ -209,5 +229,6 @@ export class KinApiStack extends Stack {
     });
 
     new CfnOutput(this, "CanonicalMcpUri", { value: canonicalMcpUri });
+    new CfnOutput(this, "OAuthStateTableName", { value: oauthStateTable.tableName });
   }
 }

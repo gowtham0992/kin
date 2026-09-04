@@ -20,6 +20,12 @@ This repository begins with the portable core: an MCP `2025-11-25`-compatible se
 - `show_weekly_brief` and `/api/weekly-brief` summarize a seven-day activity window with evidence IDs for every observation.
 - Bedrock ranks recorded events and selects safe follow-up categories; Kin renders every user-visible sentence directly from stored facts.
 - Model output is schema-checked and rejected if it cites an unknown event or applies a follow-up to the wrong event type; failures fall back to a deterministic brief.
+- The Alexa OAuth foundation uses `oidc-provider` for protocol and cryptographic
+  behavior, issues only resource-bound one-hour service tokens, and rejects
+  service credentials that request user permissions.
+- Authorization codes, sessions, refresh tokens, replay consumption, and grant
+  revocation use an encrypted, TTL-backed DynamoDB adapter rather than Lambda
+  memory.
 
 ## Run locally
 

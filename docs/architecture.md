@@ -41,6 +41,17 @@ The current AWS transaction writes the updated task and `CONFIRMATION#<requestId
 7. Consent-based filtered SMS subscriptions and authenticated roster administration.
 8. OAuth 2.1/PKCE, deployment hardening, telemetry, and a recorded Alexa+ demo.
 
+OAuth authorization state is isolated from family care records in the
+`kin-oauth-state` table. The authorization server uses the maintained
+`oidc-provider` protocol implementation rather than custom token or PKCE logic.
+Its DynamoDB adapter atomically stores authorization artifacts with TTL, treats
+expired records as absent before asynchronous TTL cleanup, records one-time code
+consumption, and maintains grant, session-UID, and user-code indexes needed for
+revocation and replay resistance. The table is encrypted, deletion-protected,
+retained, and configured for seven-day point-in-time recovery. Signing keys,
+cookie keys, and client secrets will remain outside the table and deployment
+artifact in Secrets Manager.
+
 Each slice must keep `npm run check` green and expose one end-to-end behavior a judge can see. AWS deployment, phone-number messaging, and public repository publication require explicit owner approval because they change external state or can incur cost.
 
 SNS standard topics provide at-least-once delivery. The outbox prevents concurrent workers and successful replays from publishing twice, but a network failure after SNS accepts a message and before Kin receives the message identifier remains an ambiguity window. Kin stores only a provider error code, never raw provider text, and uses privacy-minimized alert copy so a rare duplicate is understandable rather than alarming.

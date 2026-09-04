@@ -139,6 +139,17 @@ describe("Kin AWS infrastructure", () => {
       Type: "String",
       Value: Match.anyValue(),
     });
+    template.hasResourceProperties("AWS::DynamoDB::Table", {
+      TableName: "kin-oauth-state",
+      BillingMode: "PAY_PER_REQUEST",
+      DeletionProtectionEnabled: true,
+      SSESpecification: { SSEEnabled: true },
+      TimeToLiveSpecification: { AttributeName: "expiresAt", Enabled: true },
+      PointInTimeRecoverySpecification: {
+        PointInTimeRecoveryEnabled: true,
+        RecoveryPeriodInDays: 7,
+      },
+    });
     template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
       StageName: "$default",
       AutoDeploy: true,
