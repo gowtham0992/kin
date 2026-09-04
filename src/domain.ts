@@ -134,10 +134,14 @@ export class InMemoryCareStore implements CareRepository {
     now: () => Date = () => new Date(),
     onDuty: DutyAssignment | null = null,
     timeZone = "UTC",
+    initialDuties: Array<DutyAssignment & { date: string }> = [],
   ) {
     this.#now = now;
     this.#onDuty = onDuty ? structuredClone(onDuty) : null;
     this.#timeZone = validateTimeZone(timeZone);
+    for (const { date, ...assignment } of initialDuties) {
+      this.#dutyByDate.set(date, structuredClone(assignment));
+    }
     if (onDuty) {
       this.#dutyByDate.set(calendarDate(new Date(onDuty.startsAt), this.#timeZone), structuredClone(onDuty));
     }
@@ -385,6 +389,16 @@ export function createDemoStore(
   const date = calendarDate(now(), validateTimeZone(timeZone));
   const dutyEndsAt = new Date(`${date}T02:00:00.000Z`);
   dutyEndsAt.setUTCDate(dutyEndsAt.getUTCDate() + 1);
+  const initialDuties = Array.from({ length: 7 }, (_, index) => {
+    const dutyDate = shiftCalendarDate(date, index);
+    const isTheo = index % 2 === 0;
+    return {
+      date: dutyDate,
+      memberId: isTheo ? "theo" : "maya",
+      memberName: isTheo ? "Theo" : "Maya",
+      ...calendarDayBounds(dutyDate, timeZone),
+    };
+  });
   return new InMemoryCareStore(
     [
       {
@@ -414,6 +428,7 @@ export function createDemoStore(
       endsAt: dutyEndsAt.toISOString(),
     },
     timeZone,
+    initialDuties,
   );
 }
 

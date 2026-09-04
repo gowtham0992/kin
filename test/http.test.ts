@@ -132,6 +132,7 @@ describe("Kin HTTP surface", () => {
       expect.objectContaining({ id: "maya", canReceiveAlerts: true }),
       expect.objectContaining({ id: "theo", canReceiveAlerts: true }),
     ]));
+    expect(before.body.assignments).toHaveLength(7);
 
     const updated = await request(app).put("/api/circle/duty").send({
       date: "2026-09-03",

@@ -13,6 +13,21 @@ describe("Kin care loop", () => {
     expect(snapshot.summary).toEqual({ total: 2, completed: 0, remaining: 2, skipped: 0 });
   });
 
+  it("shows the complete seven-day sibling rotation in the demo", async () => {
+    const circle = await createDemoStore(fixedNow).circle();
+
+    expect(circle.assignments).toHaveLength(7);
+    expect(circle.assignments.map(({ memberName }) => memberName)).toEqual([
+      "Theo",
+      "Maya",
+      "Theo",
+      "Maya",
+      "Theo",
+      "Maya",
+      "Theo",
+    ]);
+  });
+
   it("records a completed task and updates shared state", async () => {
     const store = createDemoStore(fixedNow);
     const result = await store.confirm({
