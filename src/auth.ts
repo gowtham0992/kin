@@ -20,7 +20,7 @@ export interface AccessAuthorizer {
 
 export interface JwtAccessTokenConfig {
   issuer: string;
-  audience: string;
+  audience: string | (() => Promise<string>);
   jwksUri: string;
 }
 
@@ -45,7 +45,19 @@ function requireHttpsUrl(value: string, name: string): string {
 
 export function createJwtAccessAuthorizer(config: JwtAccessTokenConfig): AccessAuthorizer {
   const issuer = requireHttpsUrl(config.issuer, "OAuth issuer");
-  const audience = requireHttpsUrl(config.audience, "OAuth audience");
+  let audiencePromise: Promise<string> | undefined;
+  const configuredAudience = config.audience;
+  const audience = typeof configuredAudience === "string"
+    ? async () => requireHttpsUrl(configuredAudience, "OAuth audience")
+    : async () => {
+        audiencePromise ??= configuredAudience()
+          .then((value) => requireHttpsUrl(value, "OAuth audience"))
+          .catch((error) => {
+            audiencePromise = undefined;
+            throw error;
+          });
+        return audiencePromise;
+      };
   const jwks = createRemoteJWKSet(new URL(requireHttpsUrl(config.jwksUri, "OAuth JWKS URI")));
 
   return {
@@ -56,10 +68,11 @@ export function createJwtAccessAuthorizer(config: JwtAccessTokenConfig): AccessA
       }
 
       let claims: JWTPayload;
+      const expectedAudience = await audience();
       try {
         ({ payload: claims } = await jwtVerify(token, jwks, {
           issuer,
-          audience,
+          audience: expectedAudience,
           algorithms: ["RS256", "ES256"],
         }));
       } catch {

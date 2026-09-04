@@ -27,7 +27,7 @@ const dutyBody = z.object({
 
 export interface HttpAppOptions {
   accessAuthorizer?: AccessAuthorizer;
-  canonicalMcpUri?: string;
+  canonicalMcpUri?: string | (() => Promise<string>);
   authorizationServer?: string;
   serveSimulator?: boolean;
 }
@@ -48,13 +48,20 @@ export function createHttpApp(
     if (!options.canonicalMcpUri || !options.authorizationServer) {
       throw new Error("Both canonicalMcpUri and authorizationServer are required for OAuth metadata");
     }
-    app.get("/.well-known/oauth-protected-resource", (_request, response) => {
-      response.set("cache-control", "public, max-age=300").json({
-        resource: options.canonicalMcpUri,
-        authorization_servers: [options.authorizationServer],
-        bearer_methods_supported: ["header"],
-        scopes_supported: Object.values(alexaScopes),
-      });
+    app.get("/.well-known/oauth-protected-resource", async (_request, response, next) => {
+      try {
+        const resource = typeof options.canonicalMcpUri === "string"
+          ? options.canonicalMcpUri
+          : await options.canonicalMcpUri!();
+        response.set("cache-control", "public, max-age=300").json({
+          resource,
+          authorization_servers: [options.authorizationServer],
+          bearer_methods_supported: ["header"],
+          scopes_supported: Object.values(alexaScopes),
+        });
+      } catch (error) {
+        next(error);
+      }
     });
   }
 

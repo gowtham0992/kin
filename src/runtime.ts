@@ -2,6 +2,7 @@ import { createJwtAccessAuthorizer } from "./auth.js";
 import { createDemoStore } from "./domain.js";
 import { createDynamoCareRepository } from "./dynamo-care-repository.js";
 import { createHttpApp } from "./http.js";
+import { createStringParameterProvider } from "./parameter.js";
 import { createBedrockBriefGenerator, WeeklyBriefService } from "./weekly-brief.js";
 
 export interface RuntimeOptions {
@@ -38,11 +39,23 @@ export function createConfiguredApp(
   );
 
   const canonicalMcpUri = environment.KIN_MCP_CANONICAL_URI?.trim();
+  const canonicalMcpParameter = environment.KIN_MCP_RESOURCE_PARAMETER?.trim();
+  if (canonicalMcpUri && canonicalMcpParameter) {
+    throw new Error(
+      "Configure either KIN_MCP_CANONICAL_URI or KIN_MCP_RESOURCE_PARAMETER, not both",
+    );
+  }
+  const canonicalMcpResource = canonicalMcpUri || (canonicalMcpParameter
+    ? createStringParameterProvider({
+        parameterName: canonicalMcpParameter,
+        region: environment.AWS_REGION,
+      })
+    : undefined);
   const oauthIssuer = environment.KIN_OAUTH_ISSUER?.trim();
   const oauthJwksUri = environment.KIN_OAUTH_JWKS_URI?.trim();
   const oauthAuthorizationServer =
     environment.KIN_OAUTH_AUTHORIZATION_SERVER?.trim() || oauthIssuer;
-  const oauthValues = [canonicalMcpUri, oauthIssuer, oauthJwksUri];
+  const oauthValues = [canonicalMcpResource, oauthIssuer, oauthJwksUri];
   if (oauthValues.some(Boolean) && !oauthValues.every(Boolean)) {
     throw new Error(
       "KIN_MCP_CANONICAL_URI, KIN_OAUTH_ISSUER, and KIN_OAUTH_JWKS_URI must be configured together",
@@ -55,14 +68,14 @@ export function createConfiguredApp(
   return createHttpApp(
     repository,
     weeklyBrief,
-    canonicalMcpUri && oauthIssuer && oauthJwksUri
+    canonicalMcpResource && oauthIssuer && oauthJwksUri
       ? {
           accessAuthorizer: createJwtAccessAuthorizer({
             issuer: oauthIssuer,
-            audience: canonicalMcpUri,
+            audience: canonicalMcpResource,
             jwksUri: oauthJwksUri,
           }),
-          canonicalMcpUri,
+          canonicalMcpUri: canonicalMcpResource,
           authorizationServer: oauthAuthorizationServer,
           serveSimulator: environment.KIN_SERVE_SIMULATOR === "true",
         }

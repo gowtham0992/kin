@@ -34,13 +34,19 @@ The Alexa+-style web simulator is served at `http://127.0.0.1:3000/` and uses th
 Its Circle tab reads and updates the duty assignments used by the escalation worker without exposing phone numbers or delivery internals.
 
 Local development intentionally runs without OAuth. To expose Kin as an Alexa+
-MCP server, configure all three production variables together:
+MCP server outside the supplied AWS stack, configure these production variables
+together:
 
 ```text
 KIN_MCP_CANONICAL_URI=https://api.example.com/mcp
 KIN_OAUTH_ISSUER=https://auth.example.com/
 KIN_OAUTH_JWKS_URI=https://auth.example.com/.well-known/jwks.json
 ```
+
+The AWS stack instead writes its generated API Gateway `execute-api` MCP URL to
+SSM Parameter Store and supplies `KIN_MCP_RESOURCE_PARAMETER`; the Lambda reads
+and caches that exact URL for metadata and token-audience validation. No custom
+domain or certificate is required.
 
 `KIN_OAUTH_AUTHORIZATION_SERVER` can override the issuer URL advertised in
 protected-resource metadata. When OAuth is configured, Kin validates JWT

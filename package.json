@@ -19,6 +19,7 @@
     "@aws-sdk/client-bedrock-runtime": "^3.1125.0",
     "@aws-sdk/client-dynamodb": "^3.1124.0",
     "@aws-sdk/client-sns": "^3.1124.0",
+    "@aws-sdk/client-ssm": "^3.1126.0",
     "@aws-sdk/lib-dynamodb": "^3.1124.0",
     "@codegenie/serverless-express": "^4.17.1",
     "@modelcontextprotocol/ext-apps": "1.7.5",

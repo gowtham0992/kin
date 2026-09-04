@@ -8,10 +8,8 @@ import {
   Stack,
   type StackProps,
 } from "aws-cdk-lib";
-import { Certificate } from "aws-cdk-lib/aws-certificatemanager";
 import { AccessLogFormat } from "aws-cdk-lib/aws-apigateway";
 import {
-  DomainName,
   HttpApi,
   HttpStage,
   LogGroupLogDestination,
@@ -34,6 +32,7 @@ import {
 } from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction, OutputFormat } from "aws-cdk-lib/aws-lambda-nodejs";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
+import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -46,16 +45,6 @@ export class KinApiStack extends Stack {
   constructor(scope: Construct, id: string, props: KinApiStackProps) {
     super(scope, id, props);
 
-    const domainParameter = new CfnParameter(this, "McpDomainName", {
-      type: "String",
-      description: "Stable public hostname for Kin, for example api.kin.example.",
-      allowedPattern: "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$",
-    });
-    const certificateArnParameter = new CfnParameter(this, "CertificateArn", {
-      type: "String",
-      description: "ARN of an ACM certificate in us-east-1 covering McpDomainName.",
-      allowedPattern: "^arn:[^:]+:acm:[^:]+:[0-9]{12}:certificate/.+$",
-    });
     const oauthIssuerParameter = new CfnParameter(this, "OAuthIssuer", {
       type: "String",
       description: "Exact HTTPS issuer claim expected in Kin access tokens.",
@@ -75,7 +64,7 @@ export class KinApiStack extends Stack {
         allowedPattern: "^https://.+$",
       },
     );
-    const canonicalMcpUri = `https://${domainParameter.valueAsString}/mcp`;
+    const canonicalResourceParameterName = "/kin/mcp/canonical-uri";
 
     const apiLogGroup = new LogGroup(this, "ApiAccessLogs", {
       logGroupName: "/aws/apigateway/kin-mcp",
@@ -107,7 +96,7 @@ export class KinApiStack extends Stack {
         KIN_TIME_ZONE: "America/Denver",
         KIN_BEDROCK_MODEL_ID: "amazon.nova-micro-v1:0",
         KIN_BEDROCK_TIMEOUT_MS: "300",
-        KIN_MCP_CANONICAL_URI: canonicalMcpUri,
+        KIN_MCP_RESOURCE_PARAMETER: canonicalResourceParameterName,
         KIN_OAUTH_ISSUER: oauthIssuerParameter.valueAsString,
         KIN_OAUTH_JWKS_URI: oauthJwksUriParameter.valueAsString,
         KIN_OAUTH_AUTHORIZATION_SERVER: oauthAuthorizationServerParameter.valueAsString,
@@ -151,15 +140,6 @@ export class KinApiStack extends Stack {
         `arn:${this.partition}:bedrock:${this.region}::foundation-model/amazon.nova-micro-v1:0`,
       ],
     }));
-
-    const domainName = new DomainName(this, "DomainName", {
-      domainName: domainParameter.valueAsString,
-      certificate: Certificate.fromCertificateArn(
-        this,
-        "Certificate",
-        certificateArnParameter.valueAsString,
-      ),
-    });
     const integration = new HttpLambdaIntegration("KinIntegration", apiFunction, {
       scopePermissionToRoute: false,
     });
@@ -168,13 +148,11 @@ export class KinApiStack extends Stack {
       description: "Public HTTPS transport for the Kin Alexa+ MCP add-on.",
       defaultIntegration: integration,
       createDefaultStage: false,
-      disableExecuteApiEndpoint: true,
     });
     const stage = new HttpStage(this, "DefaultStage", {
       httpApi,
       stageName: "$default",
       autoDeploy: true,
-      domainMapping: { domainName },
       throttle: { rateLimit: 20, burstLimit: 40 },
       detailedMetricsEnabled: true,
       accessLogSettings: {
@@ -192,6 +170,21 @@ export class KinApiStack extends Stack {
         }),
       },
     });
+    const canonicalMcpUri = `${httpApi.apiEndpoint}/mcp`;
+    const canonicalResourceParameter = new StringParameter(
+      this,
+      "CanonicalResourceParameter",
+      {
+        parameterName: canonicalResourceParameterName,
+        description: "Canonical AWS-hosted resource URI for Kin OAuth audience validation.",
+        stringValue: canonicalMcpUri,
+      },
+    );
+    apiFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ["ssm:GetParameter"],
+      resources: [canonicalResourceParameter.parameterArn],
+    }));
 
     new Alarm(this, "ApiServerErrors", {
       alarmName: "kin-mcp-api-server-errors",
@@ -216,12 +209,5 @@ export class KinApiStack extends Stack {
     });
 
     new CfnOutput(this, "CanonicalMcpUri", { value: canonicalMcpUri });
-    new CfnOutput(this, "ApiGatewayDomainTarget", {
-      value: domainName.regionalDomainName,
-      description: "Create a DNS alias for McpDomainName pointing to this target.",
-    });
-    new CfnOutput(this, "ApiGatewayHostedZoneId", {
-      value: domainName.regionalHostedZoneId,
-    });
   }
 }

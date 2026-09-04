@@ -17,4 +17,11 @@ describe("Kin runtime configuration", () => {
       KIN_MCP_CANONICAL_URI: "https://api.kin.example/mcp",
     })).toThrow("must be configured together");
   });
+
+  it("rejects two competing canonical resource sources", () => {
+    expect(() => createConfiguredApp({
+      KIN_MCP_CANONICAL_URI: "https://api.kin.example/mcp",
+      KIN_MCP_RESOURCE_PARAMETER: "/kin/mcp/canonical-uri",
+    })).toThrow("not both");
+  });
 });

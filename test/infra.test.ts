@@ -106,11 +106,6 @@ describe("Kin AWS infrastructure", () => {
       table: data.table,
     }));
 
-    template.hasParameter("McpDomainName", {
-      Type: "String",
-      AllowedPattern: Match.stringLikeRegexp("A-Za-z0-9"),
-    });
-    template.hasParameter("CertificateArn", { Type: "String" });
     template.hasParameter("OAuthIssuer", { Type: "String" });
     template.hasParameter("OAuthJwksUri", { Type: "String" });
     template.hasParameter("OAuthAuthorizationServer", { Type: "String" });
@@ -127,7 +122,7 @@ describe("Kin AWS infrastructure", () => {
           KIN_CIRCLE_ID: "demo-family",
           KIN_BEDROCK_TIMEOUT_MS: "300",
           KIN_SERVE_SIMULATOR: "false",
-          KIN_MCP_CANONICAL_URI: Match.anyValue(),
+          KIN_MCP_RESOURCE_PARAMETER: "/kin/mcp/canonical-uri",
           KIN_OAUTH_ISSUER: Match.anyValue(),
           KIN_OAUTH_JWKS_URI: Match.anyValue(),
           KIN_WIDGET_PATH: "/var/task/widget/today.html",
@@ -137,10 +132,12 @@ describe("Kin AWS infrastructure", () => {
     template.hasResourceProperties("AWS::ApiGatewayV2::Api", {
       Name: "kin-mcp",
       ProtocolType: "HTTP",
-      DisableExecuteApiEndpoint: true,
     });
-    template.hasResourceProperties("AWS::ApiGatewayV2::DomainName", {
-      DomainName: Match.anyValue(),
+    template.resourceCountIs("AWS::ApiGatewayV2::DomainName", 0);
+    template.hasResourceProperties("AWS::SSM::Parameter", {
+      Name: "/kin/mcp/canonical-uri",
+      Type: "String",
+      Value: Match.anyValue(),
     });
     template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
       StageName: "$default",
@@ -157,6 +154,7 @@ describe("Kin AWS infrastructure", () => {
     expect(policies).toContain("bedrock:InvokeModel");
     expect(policies).toContain("foundation-model/amazon.nova-micro-v1:0");
     expect(policies).toContain("dynamodb:TransactWriteItems");
+    expect(policies).toContain("ssm:GetParameter");
     expect(policies).not.toContain("dynamodb:Scan");
     expect(policies).not.toContain("dynamodb:DeleteItem");
   });
