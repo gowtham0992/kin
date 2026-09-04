@@ -21,6 +21,12 @@ import {
   TreatMissingData,
 } from "aws-cdk-lib/aws-cloudwatch";
 import {
+  AccountRecovery,
+  Mfa,
+  UserPool,
+  UserPoolClient,
+} from "aws-cdk-lib/aws-cognito";
+import {
   AttributeType,
   BillingMode,
   Table,
@@ -90,6 +96,39 @@ export class KinApiStack extends Stack {
       timeToLiveAttribute: "expiresAt",
       deletionProtection: true,
       removalPolicy: RemovalPolicy.RETAIN,
+    });
+    const userPool = new UserPool(this, "FamilyAccounts", {
+      userPoolName: "kin-family-accounts",
+      selfSignUpEnabled: false,
+      signInAliases: { email: true },
+      signInCaseSensitive: false,
+      autoVerify: { email: true },
+      standardAttributes: {
+        email: { required: true, mutable: true },
+      },
+      passwordPolicy: {
+        minLength: 12,
+        requireDigits: true,
+        requireLowercase: true,
+        requireSymbols: true,
+        requireUppercase: true,
+        tempPasswordValidity: Duration.days(3),
+      },
+      accountRecovery: AccountRecovery.EMAIL_ONLY,
+      mfa: Mfa.OFF,
+      deletionProtection: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    const userPoolClient = new UserPoolClient(this, "FamilyAccountClient", {
+      userPool,
+      userPoolClientName: "kin-oauth-login",
+      generateSecret: false,
+      authFlows: { userPassword: true },
+      preventUserExistenceErrors: true,
+      enableTokenRevocation: true,
+      accessTokenValidity: Duration.minutes(10),
+      idTokenValidity: Duration.minutes(10),
+      refreshTokenValidity: Duration.days(30),
     });
     const functionLogGroup = new LogGroup(this, "ApiFunctionLogs", {
       logGroupName: "/aws/lambda/kin-mcp-api",
@@ -230,5 +269,7 @@ export class KinApiStack extends Stack {
 
     new CfnOutput(this, "CanonicalMcpUri", { value: canonicalMcpUri });
     new CfnOutput(this, "OAuthStateTableName", { value: oauthStateTable.tableName });
+    new CfnOutput(this, "FamilyUserPoolId", { value: userPool.userPoolId });
+    new CfnOutput(this, "FamilyUserPoolClientId", { value: userPoolClient.userPoolClientId });
   }
 }

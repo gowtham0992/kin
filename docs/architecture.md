@@ -52,6 +52,17 @@ retained, and configured for seven-day point-in-time recovery. Signing keys,
 cookie keys, and client secrets will remain outside the table and deployment
 artifact in Secrets Manager.
 
+Family passwords belong to a separate, retained Cognito user pool, not Kin's
+tables. Public self-registration is disabled for the hackathon deployment;
+accounts are deliberately invited by the owner. The pool requires 12-character
+mixed passwords, suppresses user-existence errors, verifies email, and exposes a
+secretless internal app client only for the server-side password flow. The Kin
+authenticator bounds credential sizes, converts expected account failures to one
+generic result, reads Cognito's stable `sub` after authentication, and refuses
+unimplemented challenge flows. MFA remains off until the interaction UI supports
+the full challenge ceremony; enabling it earlier would strand account linking
+mid-flow rather than improve it.
+
 Each slice must keep `npm run check` green and expose one end-to-end behavior a judge can see. AWS deployment, phone-number messaging, and public repository publication require explicit owner approval because they change external state or can incur cost.
 
 SNS standard topics provide at-least-once delivery. The outbox prevents concurrent workers and successful replays from publishing twice, but a network failure after SNS accepts a message and before Kin receives the message identifier remains an ambiguity window. Kin stores only a provider error code, never raw provider text, and uses privacy-minimized alert copy so a rare duplicate is understandable rather than alarming.

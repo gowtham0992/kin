@@ -26,6 +26,8 @@ This repository begins with the portable core: an MCP `2025-11-25`-compatible se
 - Authorization codes, sessions, refresh tokens, replay consumption, and grant
   revocation use an encrypted, TTL-backed DynamoDB adapter rather than Lambda
   memory.
+- A retained Cognito user pool owns family credentials and stable account IDs;
+  Kin receives only the login form submission and never stores a password.
 
 ## Run locally
 

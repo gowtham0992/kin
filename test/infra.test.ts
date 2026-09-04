@@ -24,7 +24,6 @@ describe("Kin AWS infrastructure", () => {
         RecoveryPeriodInDays: 7,
       },
     });
-
     const resources = template.findResources("AWS::DynamoDB::Table");
     expect(Object.values(resources)[0]).toMatchObject({
       DeletionPolicy: "Retain",
@@ -99,7 +98,7 @@ describe("Kin AWS infrastructure", () => {
     expect(policies).not.toContain("dynamodb:DeleteItem");
   });
 
-  it("defines a fail-closed public MCP runtime behind a custom HTTPS domain", () => {
+  it("defines a fail-closed public MCP runtime on AWS-managed HTTPS", () => {
     const app = new App();
     const data = new KinDataStack(app, "ApiTestData");
     const template = Template.fromStack(new KinApiStack(app, "ApiTest", {
@@ -149,6 +148,27 @@ describe("Kin AWS infrastructure", () => {
         PointInTimeRecoveryEnabled: true,
         RecoveryPeriodInDays: 7,
       },
+    });
+    template.hasResourceProperties("AWS::Cognito::UserPool", {
+      UserPoolName: "kin-family-accounts",
+      DeletionProtection: "ACTIVE",
+      UsernameConfiguration: { CaseSensitive: false },
+      Policies: {
+        PasswordPolicy: Match.objectLike({
+          MinimumLength: 12,
+          RequireLowercase: true,
+          RequireNumbers: true,
+          RequireSymbols: true,
+          RequireUppercase: true,
+        }),
+      },
+    });
+    template.hasResourceProperties("AWS::Cognito::UserPoolClient", {
+      ClientName: "kin-oauth-login",
+      GenerateSecret: false,
+      PreventUserExistenceErrors: "ENABLED",
+      EnableTokenRevocation: true,
+      ExplicitAuthFlows: Match.arrayWith(["ALLOW_USER_PASSWORD_AUTH"]),
     });
     template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
       StageName: "$default",
