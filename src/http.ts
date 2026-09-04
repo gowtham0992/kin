@@ -62,6 +62,12 @@ export function createHttpApp(
     response.json({ status: "ok", service: "kin", version: "0.1.0" });
   });
 
+  if (options.serveSimulator === false) {
+    app.use("/api", (_request, response) => {
+      response.status(404).json({ error: "Not found" });
+    });
+  }
+
   app.get("/api/today", async (_request, response, next) => {
     try {
       response.set("cache-control", "no-store").json(await store.today());

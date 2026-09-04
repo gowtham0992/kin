@@ -17,6 +17,8 @@ import { WeeklyBriefService } from "./weekly-brief.js";
 
 const widgetUri = "ui://kin/today.html";
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+const widgetPath = process.env.KIN_WIDGET_PATH?.trim() ||
+  path.resolve(moduleDirectory, "../widget/today.html");
 
 export function createMcpServer(
   store: CareRepository,
@@ -119,7 +121,7 @@ export function createMcpServer(
     widgetUri,
     { mimeType: RESOURCE_MIME_TYPE },
     async () => {
-      const html = await readFile(path.resolve(moduleDirectory, "../widget/today.html"), "utf8");
+      const html = await readFile(widgetPath, "utf8");
       return {
         contents: [{ uri: widgetUri, mimeType: RESOURCE_MIME_TYPE, text: html }],
       };

@@ -215,11 +215,14 @@ describe("Kin HTTP surface", () => {
   });
 
   it("does not serve the family simulator on the production OAuth surface", async () => {
-    const response = await request(createHttpApp(
+    const app = createHttpApp(
       createDemoStore(fixedNow),
       undefined,
       { serveSimulator: false },
-    )).get("/");
-    expect(response.status).toBe(404);
+    );
+    const page = await request(app).get("/");
+    const familyData = await request(app).get("/api/today");
+    expect(page.status).toBe(404);
+    expect(familyData.status).toBe(404);
   });
 });
