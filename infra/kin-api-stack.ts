@@ -67,6 +67,12 @@ export class KinApiStack extends Stack {
       description: "Comma-separated exact HTTPS callback URIs supplied by Alexa MCP Toolkit.",
       allowedPattern: "^$|^https://[^,]+(,https://[^,]+)*$",
     });
+    const publicApiEnabledParameter = new CfnParameter(this, "PublicApiEnabled", {
+      type: "String",
+      default: "false",
+      allowedValues: ["true", "false"],
+      description: "Deployment safety switch. Promote to true only after disabled-state verification.",
+    });
     const canonicalResourceParameterName = "/kin/mcp/canonical-uri";
 
     const apiLogGroup = new LogGroup(this, "ApiAccessLogs", {
@@ -186,6 +192,7 @@ export class KinApiStack extends Stack {
         KIN_BEDROCK_MODEL_ID: "amazon.nova-micro-v1:0",
         KIN_BEDROCK_TIMEOUT_MS: "300",
         KIN_MCP_RESOURCE_PARAMETER: canonicalResourceParameterName,
+        KIN_PUBLIC_API_ENABLED: publicApiEnabledParameter.valueAsString,
         KIN_SERVE_SIMULATOR: "false",
         KIN_WIDGET_PATH: "/var/task/widget/today.html",
         NODE_OPTIONS: "--enable-source-maps",
@@ -261,6 +268,7 @@ export class KinApiStack extends Stack {
         KIN_COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
         KIN_OAUTH_SECRET_ID: oauthSecret.secretArn,
         KIN_ALEXA_REDIRECT_URIS: alexaRedirectUrisParameter.valueAsString,
+        KIN_PUBLIC_API_ENABLED: publicApiEnabledParameter.valueAsString,
         NODE_OPTIONS: "--enable-source-maps",
       },
       bundling: {

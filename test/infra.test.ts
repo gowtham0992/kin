@@ -106,6 +106,11 @@ describe("Kin AWS infrastructure", () => {
     }));
 
     template.hasParameter("AlexaRedirectUris", { Type: "String", Default: "" });
+    template.hasParameter("PublicApiEnabled", {
+      Type: "String",
+      Default: "false",
+      AllowedValues: ["true", "false"],
+    });
     expect(template.findParameters("OAuthIssuer")).toEqual({});
     expect(template.findParameters("OAuthJwksUri")).toEqual({});
 
@@ -122,6 +127,7 @@ describe("Kin AWS infrastructure", () => {
           KIN_BEDROCK_TIMEOUT_MS: "300",
           KIN_SERVE_SIMULATOR: "false",
           KIN_MCP_RESOURCE_PARAMETER: "/kin/mcp/canonical-uri",
+          KIN_PUBLIC_API_ENABLED: Match.anyValue(),
           KIN_OAUTH_ISSUER: Match.anyValue(),
           KIN_OAUTH_JWKS_URI: Match.anyValue(),
           KIN_WIDGET_PATH: "/var/task/widget/today.html",
@@ -206,6 +212,7 @@ describe("Kin AWS infrastructure", () => {
           KIN_COGNITO_CLIENT_ID: Match.anyValue(),
           KIN_OAUTH_SECRET_ID: Match.anyValue(),
           KIN_ALEXA_REDIRECT_URIS: Match.anyValue(),
+          KIN_PUBLIC_API_ENABLED: Match.anyValue(),
         }),
       },
     });

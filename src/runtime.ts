@@ -3,6 +3,7 @@ import { createDemoStore } from "./domain.js";
 import { createDynamoCareRepository } from "./dynamo-care-repository.js";
 import { createHttpApp } from "./http.js";
 import { createStringParameterProvider } from "./parameter.js";
+import { createUnavailablePublicApp } from "./public-api-gate.js";
 import { createBedrockBriefGenerator, WeeklyBriefService } from "./weekly-brief.js";
 
 export interface RuntimeOptions {
@@ -13,6 +14,7 @@ export function createConfiguredApp(
   environment: NodeJS.ProcessEnv = process.env,
   options: RuntimeOptions = {},
 ) {
+  if (environment.KIN_PUBLIC_API_ENABLED === "false") return createUnavailablePublicApp();
   const tableName = environment.KIN_DYNAMODB_TABLE?.trim();
   const circleId = environment.KIN_CIRCLE_ID?.trim() || "demo-family";
   const timeZone = environment.KIN_TIME_ZONE?.trim() || "UTC";

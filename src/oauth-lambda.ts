@@ -7,6 +7,7 @@ import { createOAuthInteractionRouter } from "./oauth-interactions.js";
 import type { AccountAuthenticator } from "./oauth-interactions.js";
 import { createKinOAuthProvider } from "./oauth-provider.js";
 import { loadOAuthSecrets, type OAuthSecrets } from "./oauth-secrets.js";
+import { createUnavailablePublicApp } from "./public-api-gate.js";
 
 interface OAuthRuntimeDependencies {
   loadSecrets?: typeof loadOAuthSecrets;
@@ -19,6 +20,7 @@ export async function createConfiguredOAuthApp(
   environment: NodeJS.ProcessEnv,
   dependencies: OAuthRuntimeDependencies = {},
 ) {
+  if (environment.KIN_PUBLIC_API_ENABLED === "false") return createUnavailablePublicApp();
   const issuer = requiredHttpsUrl(environment.KIN_OAUTH_ISSUER, "KIN_OAUTH_ISSUER");
   const resourceUri = requiredHttpsUrl(environment.KIN_MCP_RESOURCE_URI, "KIN_MCP_RESOURCE_URI");
   const tableName = required(environment.KIN_OAUTH_STATE_TABLE, "KIN_OAUTH_STATE_TABLE");

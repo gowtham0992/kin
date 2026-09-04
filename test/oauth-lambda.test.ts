@@ -23,6 +23,16 @@ describe("configured OAuth Lambda application", () => {
     };
   });
 
+  it("serves only a deliberate 503 while the public rollout gate is closed", async () => {
+    const app = await createConfiguredOAuthApp({ KIN_PUBLIC_API_ENABLED: "false" });
+    const response = await request(app).get("/.well-known/oauth-authorization-server").expect(503);
+
+    expect(response.body).toEqual({ error: "Kin's public API is temporarily unavailable" });
+    expect(response.headers["retry-after"]).toBe("60");
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["x-powered-by"]).toBeUndefined();
+  });
+
   it("serves discovery from the AWS-owned issuer and registers Alexa only when callbacks exist", async () => {
     const app = await createConfiguredOAuthApp({
       AWS_REGION: "us-east-1",
