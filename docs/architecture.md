@@ -63,6 +63,14 @@ unimplemented challenge flows. MFA remains off until the interaction UI supports
 the full challenge ceremony; enabling it earlier would strand account linking
 mid-flow rather than improve it.
 
+The account-linking interaction is rendered server-side without JavaScript or
+third-party assets. A short-lived provider interaction cookie and an HMAC bound
+to the interaction identifier protect form submissions; the page is non-cacheable
+and carries a restrictive Content Security Policy. Consent code accepts only
+Kin's exact MCP resource URI and the two user-level Alexa scopes. Any foreign
+resource, elevated scope, stale step, mismatched interaction, or forged form
+token fails closed before a grant is written.
+
 Each slice must keep `npm run check` green and expose one end-to-end behavior a judge can see. AWS deployment, phone-number messaging, and public repository publication require explicit owner approval because they change external state or can incur cost.
 
 SNS standard topics provide at-least-once delivery. The outbox prevents concurrent workers and successful replays from publishing twice, but a network failure after SNS accepts a message and before Kin receives the message identifier remains an ambiguity window. Kin stores only a provider error code, never raw provider text, and uses privacy-minimized alert copy so a rare duplicate is understandable rather than alarming.

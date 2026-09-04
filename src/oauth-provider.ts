@@ -126,6 +126,10 @@ export function createKinOAuthProvider(input: KinOAuthProviderInput): Provider {
       },
       revocation: { enabled: true },
     },
+    interactions: {
+      url: (_context: unknown, interaction: { uid: string }) =>
+        `/interaction/${encodeURIComponent(interaction.uid)}`,
+    },
   });
 }
 

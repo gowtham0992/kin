@@ -28,6 +28,9 @@ This repository begins with the portable core: an MCP `2025-11-25`-compatible se
   memory.
 - A retained Cognito user pool owns family credentials and stable account IDs;
   Kin receives only the login form submission and never stores a password.
+- Alexa account linking has a first-party, accessible Kin interaction flow with
+  explicit consent, CSRF protection, strict browser headers, and a safe cancel
+  path back to the OAuth client.
 
 ## Run locally
 
