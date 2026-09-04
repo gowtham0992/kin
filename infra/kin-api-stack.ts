@@ -33,7 +33,6 @@ import {
   BillingMode,
   Table,
   TableEncryption,
-  type ITable,
 } from "aws-cdk-lib/aws-dynamodb";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import {
@@ -53,9 +52,7 @@ import type { Construct } from "constructs";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 
-export interface KinApiStackProps extends StackProps {
-  table: ITable;
-}
+export type KinApiStackProps = StackProps;
 
 export class KinApiStack extends Stack {
   constructor(scope: Construct, id: string, props: KinApiStackProps) {
@@ -74,6 +71,7 @@ export class KinApiStack extends Stack {
       description: "Deployment safety switch. Promote to true only after disabled-state verification.",
     });
     const canonicalResourceParameterName = "/kin/mcp/canonical-uri";
+    const careStateTable = Table.fromTableName(this, "CareState", "kin-care-state");
 
     const apiLogGroup = new LogGroup(this, "ApiAccessLogs", {
       logGroupName: "/aws/apigateway/kin-mcp",
@@ -186,7 +184,7 @@ export class KinApiStack extends Stack {
       applicationLogLevelV2: ApplicationLogLevel.INFO,
       systemLogLevelV2: SystemLogLevel.WARN,
       environment: {
-        KIN_DYNAMODB_TABLE: props.table.tableName,
+        KIN_DYNAMODB_TABLE: careStateTable.tableName,
         KIN_CIRCLE_ID: "demo-family",
         KIN_TIME_ZONE: "America/Denver",
         KIN_BEDROCK_MODEL_ID: "amazon.nova-micro-v1:0",
@@ -224,7 +222,7 @@ export class KinApiStack extends Stack {
         "dynamodb:TransactWriteItems",
         "dynamodb:UpdateItem",
       ],
-      resources: [props.table.tableArn],
+      resources: [careStateTable.tableArn],
     }));
     apiFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,

@@ -100,10 +100,7 @@ describe("Kin AWS infrastructure", () => {
 
   it("defines a fail-closed public MCP runtime on AWS-managed HTTPS", () => {
     const app = new App();
-    const data = new KinDataStack(app, "ApiTestData");
-    const template = Template.fromStack(new KinApiStack(app, "ApiTest", {
-      table: data.table,
-    }));
+    const template = Template.fromStack(new KinApiStack(app, "ApiTest", {}));
 
     template.hasParameter("AlexaRedirectUris", { Type: "String", Default: "" });
     template.hasParameter("PublicApiEnabled", {
