@@ -11,10 +11,10 @@ type Output = GetSecretValueCommandOutput | PutSecretValueCommandOutput;
 
 describe("OAuth secret provisioning", () => {
   it("creates private signing and client material without returning it to CloudFormation", async () => {
-    const missing = new Error("no current value");
-    missing.name = "ResourceNotFoundException";
     const send = vi.fn(async (command: GetSecretValueCommand | PutSecretValueCommand): Promise<Output> => {
-      if (command instanceof GetSecretValueCommand) throw missing;
+      if (command instanceof GetSecretValueCommand) {
+        return { SecretString: '{"schemaVersion":0,"state":"pending-provisioning"}', $metadata: {} };
+      }
       return { VersionId: "new-version", $metadata: {} };
     });
 

@@ -6,6 +6,7 @@ import {
   CustomResource,
   Duration,
   RemovalPolicy,
+  SecretValue,
   Stack,
   type StackProps,
 } from "aws-cdk-lib";
@@ -128,6 +129,7 @@ export class KinApiStack extends Stack {
     const oauthSecret = new Secret(this, "OAuthConfiguration", {
       secretName: "kin/oauth/configuration",
       description: "Kin OAuth signing JWK, cookie keys, CSRF key, and Alexa client credentials.",
+      secretStringValue: SecretValue.unsafePlainText('{"schemaVersion":0,"state":"pending-provisioning"}'),
       removalPolicy: RemovalPolicy.RETAIN,
     });
     const secretProvisionerLogGroup = new LogGroup(this, "OAuthSecretProvisionerLogs", {

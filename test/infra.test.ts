@@ -188,6 +188,7 @@ describe("Kin AWS infrastructure", () => {
     template.hasResourceProperties("AWS::SecretsManager::Secret", {
       Name: "kin/oauth/configuration",
       Description: Match.stringLikeRegexp("OAuth signing JWK"),
+      SecretString: '{"schemaVersion":0,"state":"pending-provisioning"}',
     });
     const secrets = template.findResources("AWS::SecretsManager::Secret");
     expect(Object.values(secrets)[0]).toMatchObject({

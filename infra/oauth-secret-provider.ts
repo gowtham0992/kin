@@ -37,16 +37,18 @@ export async function provisionOAuthSecret(
     if (!(error instanceof Error) || error.name !== "ResourceNotFoundException") throw error;
   }
   if (existing) {
-    let parsed: { schemaVersion?: unknown };
+    let parsed: { schemaVersion?: unknown; state?: unknown };
     try {
-      parsed = JSON.parse(existing) as { schemaVersion?: unknown };
+      parsed = JSON.parse(existing) as { schemaVersion?: unknown; state?: unknown };
     } catch {
       throw new Error("Existing OAuth secret is not valid JSON; refusing to overwrite it");
     }
-    if (parsed.schemaVersion !== 1) {
+    if (parsed.schemaVersion === 1) {
+      return { PhysicalResourceId: physicalResourceId, Data: { Provisioned: "existing" } };
+    }
+    if (parsed.schemaVersion !== 0 || parsed.state !== "pending-provisioning") {
       throw new Error("Existing OAuth secret has an unknown schema; refusing to overwrite it");
     }
-    return { PhysicalResourceId: physicalResourceId, Data: { Provisioned: "existing" } };
   }
 
   const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2_048 });
