@@ -8,7 +8,7 @@ import {
   type AuthenticatedAccount,
 } from "./cognito-authenticator.js";
 
-interface AccountAuthenticator {
+export interface AccountAuthenticator {
   authenticate(username: string, password: string): Promise<AuthenticatedAccount>;
 }
 
@@ -34,14 +34,14 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
     response.setHeader("X-Frame-Options", "DENY");
     next();
   });
-  router.use(urlencoded({ extended: false, limit: maxFormBytes }));
+  const parseForm = urlencoded({ extended: false, limit: maxFormBytes });
 
   router.get("/interaction/:uid", asyncHandler(async (request, response) => {
     const details = await verifiedDetails(input.provider, request, response);
     renderPrompt(response, details, csrfToken(input.csrfSecret, details.uid));
   }));
 
-  router.post("/interaction/:uid/login", asyncHandler(async (request, response) => {
+  router.post("/interaction/:uid/login", parseForm, asyncHandler(async (request, response) => {
     const details = await verifiedDetails(input.provider, request, response);
     verifyPost(request, input.csrfSecret, details.uid, "login", details.prompt.name);
     const username = scalarBody(request.body?.username);
@@ -81,7 +81,7 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
     }
   }));
 
-  router.post("/interaction/:uid/consent", asyncHandler(async (request, response) => {
+  router.post("/interaction/:uid/consent", parseForm, asyncHandler(async (request, response) => {
     const details = await verifiedDetails(input.provider, request, response);
     verifyPost(request, input.csrfSecret, details.uid, "consent", details.prompt.name);
     const accountId = details.session?.accountId;
@@ -90,6 +90,12 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
 
     let grant = details.grantId ? await input.provider.Grant.find(details.grantId) : undefined;
     grant ??= new input.provider.Grant({ accountId, clientId });
+    const oidcScopes = details.prompt.details.missingOIDCScope ?? [];
+    const oidcClaims = details.prompt.details.missingOIDCClaims ?? [];
+    if (oidcScopes.some((scope) => !allowedUserScopes.has(scope)) || oidcClaims.length > 0) {
+      throw new InteractionRequestError("Authorization request contains an unsupported permission");
+    }
+    if (oidcScopes.length > 0) grant.addOIDCScope(oidcScopes.join(" "));
     const resources = details.prompt.details.missingResourceScopes ?? {};
     for (const [resource, scopes] of Object.entries(resources)) {
       if (resource !== input.resourceUri || scopes.some((scope) => !allowedUserScopes.has(scope))) {
@@ -106,7 +112,7 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
     );
   }));
 
-  router.post("/interaction/:uid/cancel", asyncHandler(async (request, response) => {
+  router.post("/interaction/:uid/cancel", parseForm, asyncHandler(async (request, response) => {
     const details = await verifiedDetails(input.provider, request, response);
     verifyCsrf(request, input.csrfSecret, details.uid);
     await input.provider.interactionFinished(

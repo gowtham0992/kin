@@ -7,6 +7,7 @@ declare module "oidc-provider" {
 
   export class Provider {
     constructor(issuer: string, configuration?: OAuthProviderConfiguration);
+    proxy: boolean;
     callback(): RequestListener;
     interactionDetails(req: IncomingMessage, res: ServerResponse): Promise<InteractionDetails>;
     interactionFinished(

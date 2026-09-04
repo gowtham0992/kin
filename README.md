@@ -31,6 +31,10 @@ This repository begins with the portable core: an MCP `2025-11-25`-compatible se
 - Alexa account linking has a first-party, accessible Kin interaction flow with
   explicit consent, CSRF protection, strict browser headers, and a safe cancel
   path back to the OAuth client.
+- The AWS stack hosts that standards server on the same `execute-api` origin,
+  generates all private OAuth material inside retained Secrets Manager storage,
+  and keeps the heavier authorization runtime out of the latency-critical MCP
+  Lambda.
 
 ## Run locally
 

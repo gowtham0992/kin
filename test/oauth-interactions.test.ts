@@ -24,10 +24,12 @@ function fixture(prompt: "login" | "consent" = "login") {
     session: prompt === "consent" ? { accountId: "family-account" } : undefined,
   };
   const addResourceScope = vi.fn();
+  const addOIDCScope = vi.fn();
   const save = vi.fn(async () => "grant-123");
   class Grant {
     static find = vi.fn();
     addResourceScope = addResourceScope;
+    addOIDCScope = addOIDCScope;
     save = save;
   }
   const interactionFinished = vi.fn(async (
@@ -56,7 +58,7 @@ function fixture(prompt: "login" | "consent" = "login") {
   app.use((_error: unknown, _request: Request, response: Response, _next: unknown) => {
     response.status(500).send("Something went wrong");
   });
-  return { app, details, authenticate, interactionFinished, addResourceScope, save };
+  return { app, details, authenticate, interactionFinished, addOIDCScope, addResourceScope, save };
 }
 
 function csrfFrom(html: string) {

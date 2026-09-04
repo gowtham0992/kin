@@ -26,7 +26,7 @@ describe("Kin OAuth provider contract", () => {
       resourceUri,
       jwks: { keys: [privateJwk] },
       cookieKeys: ["a".repeat(32), "b".repeat(32)],
-      adapter: () => ({}),
+      adapter: class TestAdapter {},
       serviceClient,
     });
     app = provider.callback();

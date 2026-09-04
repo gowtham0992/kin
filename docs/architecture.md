@@ -39,7 +39,10 @@ The current AWS transaction writes the updated task and `CONFIRMATION#<requestId
 5. Bedrock-assisted weekly family brief grounded only in recorded events — complete, with bounded DynamoDB reads, constrained event selection, schema and applicability validation, token metadata, and deterministic fallback.
 6. Five-minute scheduled escalation worker — deployed and live, including strict scheduler input, immutable outbox recipient routing, local-midnight coverage, least-privilege IAM, retry destinations, DLQ, alarms, structured logs, and X-Ray.
 7. Consent-based filtered SMS subscriptions and authenticated roster administration.
-8. OAuth 2.1/PKCE, deployment hardening, telemetry, and a recorded Alexa+ demo.
+8. OAuth 2.1/PKCE implementation — complete in code, including Cognito login,
+   explicit consent, AWS-only secret generation, durable grants, revocation, and
+   a real authorization-code/refresh integration test. Scoped-policy expansion,
+   public deployment, live telemetry, and the recorded Alexa+ demo remain.
 
 OAuth authorization state is isolated from family care records in the
 `kin-oauth-state` table. The authorization server uses the maintained
@@ -49,8 +52,11 @@ expired records as absent before asynchronous TTL cleanup, records one-time code
 consumption, and maintains grant, session-UID, and user-code indexes needed for
 revocation and replay resistance. The table is encrypted, deletion-protected,
 retained, and configured for seven-day point-in-time recovery. Signing keys,
-cookie keys, and client secrets will remain outside the table and deployment
-artifact in Secrets Manager.
+cookie keys, CSRF key, and client secrets remain outside the table and deployment
+artifact in a retained Secrets Manager secret. An idempotent deployment function
+generates the private RSA key and random credentials inside AWS, preserves valid
+existing material during updates, returns no secret values to CloudFormation,
+and performs no deletion when the retained stack resource is removed.
 
 Family passwords belong to a separate, retained Cognito user pool, not Kin's
 tables. Public self-registration is disabled for the hackathon deployment;
@@ -70,6 +76,14 @@ and carries a restrictive Content Security Policy. Consent code accepts only
 Kin's exact MCP resource URI and the two user-level Alexa scopes. Any foreign
 resource, elevated scope, stale step, mismatched interaction, or forged form
 token fails closed before a grant is written.
+
+OAuth runs in a separate Lambda from MCP requests. API Gateway sends only the
+well-known metadata, authorization, token, JWKS, revocation, and interaction
+paths to it; the default integration stays with the MCP runtime. Both share the
+same generated `execute-api` origin, so issuer, JWKS, protected-resource metadata,
+and token audience are derived from one AWS-owned URL rather than manually
+coordinated configuration. Reverse-proxy URL generation is enabled explicitly
+and covered with forwarded-host/protocol tests.
 
 Each slice must keep `npm run check` green and expose one end-to-end behavior a judge can see. AWS deployment, phone-number messaging, and public repository publication require explicit owner approval because they change external state or can incur cost.
 

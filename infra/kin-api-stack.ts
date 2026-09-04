@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
   CfnOutput,
   CfnParameter,
+  CustomResource,
   Duration,
   RemovalPolicy,
   Stack,
@@ -11,6 +12,7 @@ import {
 import { AccessLogFormat } from "aws-cdk-lib/aws-apigateway";
 import {
   HttpApi,
+  HttpMethod,
   HttpStage,
   LogGroupLogDestination,
 } from "aws-cdk-lib/aws-apigatewayv2";
@@ -44,7 +46,9 @@ import {
 } from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction, OutputFormat } from "aws-cdk-lib/aws-lambda-nodejs";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
+import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
+import { Provider as CustomResourceProvider } from "aws-cdk-lib/custom-resources";
 import type { Construct } from "constructs";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -57,25 +61,12 @@ export class KinApiStack extends Stack {
   constructor(scope: Construct, id: string, props: KinApiStackProps) {
     super(scope, id, props);
 
-    const oauthIssuerParameter = new CfnParameter(this, "OAuthIssuer", {
+    const alexaRedirectUrisParameter = new CfnParameter(this, "AlexaRedirectUris", {
       type: "String",
-      description: "Exact HTTPS issuer claim expected in Kin access tokens.",
-      allowedPattern: "^https://.+$",
+      default: "",
+      description: "Comma-separated exact HTTPS callback URIs supplied by Alexa MCP Toolkit.",
+      allowedPattern: "^$|^https://[^,]+(,https://[^,]+)*$",
     });
-    const oauthJwksUriParameter = new CfnParameter(this, "OAuthJwksUri", {
-      type: "String",
-      description: "HTTPS JWKS endpoint used to verify Kin access tokens.",
-      allowedPattern: "^https://.+$",
-    });
-    const oauthAuthorizationServerParameter = new CfnParameter(
-      this,
-      "OAuthAuthorizationServer",
-      {
-        type: "String",
-        description: "Authorization server URL advertised to Alexa+.",
-        allowedPattern: "^https://.+$",
-      },
-    );
     const canonicalResourceParameterName = "/kin/mcp/canonical-uri";
 
     const apiLogGroup = new LogGroup(this, "ApiAccessLogs", {
@@ -130,6 +121,45 @@ export class KinApiStack extends Stack {
       idTokenValidity: Duration.minutes(10),
       refreshTokenValidity: Duration.days(30),
     });
+    const oauthSecret = new Secret(this, "OAuthConfiguration", {
+      secretName: "kin/oauth/configuration",
+      description: "Kin OAuth signing JWK, cookie keys, CSRF key, and Alexa client credentials.",
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    const secretProvisionerLogGroup = new LogGroup(this, "OAuthSecretProvisionerLogs", {
+      logGroupName: "/aws/lambda/kin-oauth-secret-provisioner",
+      retention: RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    const secretProvisioner = new NodejsFunction(this, "OAuthSecretProvisioner", {
+      functionName: "kin-oauth-secret-provisioner",
+      description: "Idempotently creates Kin OAuth key material without exposing it to CloudFormation.",
+      entry: path.resolve(moduleDirectory, "oauth-secret-provider.ts"),
+      handler: "handler",
+      runtime: Runtime.NODEJS_22_X,
+      architecture: Architecture.ARM_64,
+      memorySize: 256,
+      timeout: Duration.seconds(30),
+      logGroup: secretProvisionerLogGroup,
+      loggingFormat: LoggingFormat.JSON,
+      applicationLogLevelV2: ApplicationLogLevel.INFO,
+      systemLogLevelV2: SystemLogLevel.WARN,
+      bundling: { minify: true, sourceMap: true, sourcesContent: false, target: "node22" },
+    });
+    oauthSecret.grantRead(secretProvisioner);
+    oauthSecret.grantWrite(secretProvisioner);
+    const secretProvider = new CustomResourceProvider(this, "OAuthSecretProvider", {
+      onEventHandler: secretProvisioner,
+      logGroup: new LogGroup(this, "OAuthSecretProviderFrameworkLogs", {
+        logGroupName: "/aws/lambda/kin-oauth-secret-provider-framework",
+        retention: RetentionDays.ONE_WEEK,
+        removalPolicy: RemovalPolicy.RETAIN,
+      }),
+    });
+    const secretProvisioning = new CustomResource(this, "OAuthSecretMaterial", {
+      serviceToken: secretProvider.serviceToken,
+      properties: { SecretId: oauthSecret.secretArn, SchemaVersion: 1 },
+    });
     const functionLogGroup = new LogGroup(this, "ApiFunctionLogs", {
       logGroupName: "/aws/lambda/kin-mcp-api",
       retention: RetentionDays.TWO_WEEKS,
@@ -156,9 +186,6 @@ export class KinApiStack extends Stack {
         KIN_BEDROCK_MODEL_ID: "amazon.nova-micro-v1:0",
         KIN_BEDROCK_TIMEOUT_MS: "300",
         KIN_MCP_RESOURCE_PARAMETER: canonicalResourceParameterName,
-        KIN_OAUTH_ISSUER: oauthIssuerParameter.valueAsString,
-        KIN_OAUTH_JWKS_URI: oauthJwksUriParameter.valueAsString,
-        KIN_OAUTH_AUTHORIZATION_SERVER: oauthAuthorizationServerParameter.valueAsString,
         KIN_SERVE_SIMULATOR: "false",
         KIN_WIDGET_PATH: "/var/task/widget/today.html",
         NODE_OPTIONS: "--enable-source-maps",
@@ -208,6 +235,71 @@ export class KinApiStack extends Stack {
       defaultIntegration: integration,
       createDefaultStage: false,
     });
+    const oauthFunctionLogGroup = new LogGroup(this, "OAuthFunctionLogs", {
+      logGroupName: "/aws/lambda/kin-oauth-api",
+      retention: RetentionDays.TWO_WEEKS,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    const oauthFunction = new NodejsFunction(this, "OAuthFunction", {
+      functionName: "kin-oauth-api",
+      description: "Standards-compliant OAuth server and family account-linking interaction for Alexa+.",
+      entry: path.resolve(moduleDirectory, "../src/oauth-lambda.ts"),
+      handler: "handler",
+      runtime: Runtime.NODEJS_22_X,
+      architecture: Architecture.ARM_64,
+      memorySize: 768,
+      timeout: Duration.seconds(10),
+      tracing: Tracing.ACTIVE,
+      logGroup: oauthFunctionLogGroup,
+      loggingFormat: LoggingFormat.JSON,
+      applicationLogLevelV2: ApplicationLogLevel.INFO,
+      systemLogLevelV2: SystemLogLevel.WARN,
+      environment: {
+        KIN_OAUTH_ISSUER: httpApi.apiEndpoint,
+        KIN_MCP_RESOURCE_URI: `${httpApi.apiEndpoint}/mcp`,
+        KIN_OAUTH_STATE_TABLE: oauthStateTable.tableName,
+        KIN_COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
+        KIN_OAUTH_SECRET_ID: oauthSecret.secretArn,
+        KIN_ALEXA_REDIRECT_URIS: alexaRedirectUrisParameter.valueAsString,
+        NODE_OPTIONS: "--enable-source-maps",
+      },
+      bundling: {
+        minify: true,
+        sourceMap: true,
+        sourcesContent: false,
+        target: "node22",
+        format: OutputFormat.ESM,
+        banner:
+          "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+      },
+    });
+    oauthFunction.node.addDependency(secretProvisioning);
+    oauthSecret.grantRead(oauthFunction);
+    oauthFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:TransactWriteItems",
+        "dynamodb:UpdateItem",
+      ],
+      resources: [oauthStateTable.tableArn],
+    }));
+    const oauthIntegration = new HttpLambdaIntegration("KinOAuthIntegration", oauthFunction, {
+      scopePermissionToRoute: false,
+    });
+    for (const route of [
+      { path: "/.well-known/oauth-authorization-server", methods: [HttpMethod.GET] },
+      { path: "/.well-known/openid-configuration", methods: [HttpMethod.GET] },
+      { path: "/auth", methods: [HttpMethod.GET, HttpMethod.POST] },
+      { path: "/token", methods: [HttpMethod.POST] },
+      { path: "/jwks", methods: [HttpMethod.GET] },
+      { path: "/token/revocation", methods: [HttpMethod.POST] },
+      { path: "/interaction/{proxy+}", methods: [HttpMethod.ANY] },
+    ]) {
+      httpApi.addRoutes({ ...route, integration: oauthIntegration });
+    }
     const stage = new HttpStage(this, "DefaultStage", {
       httpApi,
       stageName: "$default",
@@ -230,6 +322,9 @@ export class KinApiStack extends Stack {
       },
     });
     const canonicalMcpUri = `${httpApi.apiEndpoint}/mcp`;
+    apiFunction.addEnvironment("KIN_OAUTH_ISSUER", httpApi.apiEndpoint);
+    apiFunction.addEnvironment("KIN_OAUTH_JWKS_URI", `${httpApi.apiEndpoint}/jwks`);
+    apiFunction.addEnvironment("KIN_OAUTH_AUTHORIZATION_SERVER", httpApi.apiEndpoint);
     const canonicalResourceParameter = new StringParameter(
       this,
       "CanonicalResourceParameter",
@@ -268,6 +363,9 @@ export class KinApiStack extends Stack {
     });
 
     new CfnOutput(this, "CanonicalMcpUri", { value: canonicalMcpUri });
+    new CfnOutput(this, "OAuthIssuer", { value: httpApi.apiEndpoint });
+    new CfnOutput(this, "OAuthJwksUri", { value: `${httpApi.apiEndpoint}/jwks` });
+    new CfnOutput(this, "OAuthConfigurationSecretArn", { value: oauthSecret.secretArn });
     new CfnOutput(this, "OAuthStateTableName", { value: oauthStateTable.tableName });
     new CfnOutput(this, "FamilyUserPoolId", { value: userPool.userPoolId });
     new CfnOutput(this, "FamilyUserPoolClientId", { value: userPoolClient.userPoolClientId });

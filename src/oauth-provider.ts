@@ -15,7 +15,7 @@ export interface KinOAuthProviderInput {
   resourceUri: string;
   jwks: { keys: Array<Record<string, unknown>> };
   cookieKeys: string[];
-  adapter: (model: string) => object;
+  adapter: new (model: string) => object;
   serviceClient: OAuthClientDefinition;
   userClient?: AlexaUserOAuthClient;
   findAccount?: (accountId: string) => Promise<object | undefined>;
@@ -52,7 +52,7 @@ export function createKinOAuthProvider(input: KinOAuthProviderInput): Provider {
     });
   }
 
-  return new Provider(issuer, {
+  const provider = new Provider(issuer, {
     adapter: input.adapter,
     clients,
     jwks: input.jwks,
@@ -106,8 +106,10 @@ export function createKinOAuthProvider(input: KinOAuthProviderInput): Provider {
           }
           if (
             client.clientId !== serviceClientId &&
-            params?.grant_type !== "refresh_token" &&
-            (requestedScopes.length === 0 || requestedScopes.includes(alexaScopes.service))
+            (
+              requestedScopes.includes(alexaScopes.service) ||
+              (params?.grant_type === undefined && requestedScopes.length === 0)
+            )
           ) {
             throw new errors.InvalidScope(
               "user authorization requires user-level MCP scopes",
@@ -131,6 +133,8 @@ export function createKinOAuthProvider(input: KinOAuthProviderInput): Provider {
         `/interaction/${encodeURIComponent(interaction.uid)}`,
     },
   });
+  provider.proxy = true;
+  return provider;
 }
 
 function secureUrl(value: string, name: string) {

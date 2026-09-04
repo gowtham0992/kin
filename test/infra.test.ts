@@ -105,9 +105,9 @@ describe("Kin AWS infrastructure", () => {
       table: data.table,
     }));
 
-    template.hasParameter("OAuthIssuer", { Type: "String" });
-    template.hasParameter("OAuthJwksUri", { Type: "String" });
-    template.hasParameter("OAuthAuthorizationServer", { Type: "String" });
+    template.hasParameter("AlexaRedirectUris", { Type: "String", Default: "" });
+    expect(template.findParameters("OAuthIssuer")).toEqual({});
+    expect(template.findParameters("OAuthJwksUri")).toEqual({});
 
     template.hasResourceProperties("AWS::Lambda::Function", {
       FunctionName: "kin-mcp-api",
@@ -133,6 +133,18 @@ describe("Kin AWS infrastructure", () => {
       ProtocolType: "HTTP",
     });
     template.resourceCountIs("AWS::ApiGatewayV2::DomainName", 0);
+    for (const routeKey of [
+      "GET /.well-known/oauth-authorization-server",
+      "GET /.well-known/openid-configuration",
+      "GET /auth",
+      "POST /auth",
+      "POST /token",
+      "GET /jwks",
+      "POST /token/revocation",
+      "ANY /interaction/{proxy+}",
+    ]) {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: routeKey });
+    }
     template.hasResourceProperties("AWS::SSM::Parameter", {
       Name: "/kin/mcp/canonical-uri",
       Type: "String",
@@ -170,6 +182,38 @@ describe("Kin AWS infrastructure", () => {
       EnableTokenRevocation: true,
       ExplicitAuthFlows: Match.arrayWith(["ALLOW_USER_PASSWORD_AUTH"]),
     });
+    template.hasResourceProperties("AWS::SecretsManager::Secret", {
+      Name: "kin/oauth/configuration",
+      Description: Match.stringLikeRegexp("OAuth signing JWK"),
+    });
+    const secrets = template.findResources("AWS::SecretsManager::Secret");
+    expect(Object.values(secrets)[0]).toMatchObject({
+      DeletionPolicy: "Retain",
+      UpdateReplacePolicy: "Retain",
+    });
+    template.hasResourceProperties("AWS::Lambda::Function", {
+      FunctionName: "kin-oauth-api",
+      Runtime: "nodejs22.x",
+      Architectures: ["arm64"],
+      MemorySize: 768,
+      Timeout: 10,
+      TracingConfig: { Mode: "Active" },
+      Environment: {
+        Variables: Match.objectLike({
+          KIN_OAUTH_ISSUER: Match.anyValue(),
+          KIN_MCP_RESOURCE_URI: Match.anyValue(),
+          KIN_OAUTH_STATE_TABLE: Match.anyValue(),
+          KIN_COGNITO_CLIENT_ID: Match.anyValue(),
+          KIN_OAUTH_SECRET_ID: Match.anyValue(),
+          KIN_ALEXA_REDIRECT_URIS: Match.anyValue(),
+        }),
+      },
+    });
+    template.hasResourceProperties("AWS::Lambda::Function", {
+      FunctionName: "kin-oauth-secret-provisioner",
+      Runtime: "nodejs22.x",
+      Architectures: ["arm64"],
+    });
     template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
       StageName: "$default",
       AutoDeploy: true,
@@ -186,6 +230,8 @@ describe("Kin AWS infrastructure", () => {
     expect(policies).toContain("foundation-model/amazon.nova-micro-v1:0");
     expect(policies).toContain("dynamodb:TransactWriteItems");
     expect(policies).toContain("ssm:GetParameter");
+    expect(policies).toContain("secretsmanager:GetSecretValue");
+    expect(policies).toContain("secretsmanager:PutSecretValue");
     expect(policies).not.toContain("dynamodb:Scan");
     expect(policies).not.toContain("dynamodb:DeleteItem");
   });
