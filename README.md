@@ -33,6 +33,21 @@ The MCP endpoint is `http://127.0.0.1:3000/mcp`; health is available at `/health
 The Alexa+-style web simulator is served at `http://127.0.0.1:3000/` and uses the same care-state operation as the MCP tools.
 Its Circle tab reads and updates the duty assignments used by the escalation worker without exposing phone numbers or delivery internals.
 
+Local development intentionally runs without OAuth. To expose Kin as an Alexa+
+MCP server, configure all three production variables together:
+
+```text
+KIN_MCP_CANONICAL_URI=https://api.example.com/mcp
+KIN_OAUTH_ISSUER=https://auth.example.com/
+KIN_OAUTH_JWKS_URI=https://auth.example.com/.well-known/jwks.json
+```
+
+`KIN_OAUTH_AUTHORIZATION_SERVER` can override the issuer URL advertised in
+protected-resource metadata. When OAuth is configured, Kin validates JWT
+signatures, issuer, audience/resource binding, expiration, and Alexa's reserved
+scopes. The local family simulator is not served unless
+`KIN_SERVE_SIMULATOR=true` is explicitly set.
+
 Set `KIN_DYNAMODB_TABLE`, `KIN_CIRCLE_ID`, `KIN_TIME_ZONE`, and `AWS_REGION` to use the AWS-backed repository. `KIN_TIME_ZONE` is an IANA identifier such as `America/Denver` and keeps daily care state aligned with the family's calendar after UTC midnight. With no table configured, Kin intentionally starts in local demo mode.
 
 Seed the cloud demo without overwriting existing confirmations:
@@ -72,11 +87,15 @@ npm run brief:aws
 ```
 
 Without `KIN_BEDROCK_MODEL_ID`, the server deliberately uses the evidence-linked deterministic brief. Model errors, incomplete generations, invalid JSON, schema violations, unknown evidence references, and inapplicable follow-up selections take the same safe fallback path.
+The live model call is aborted after 300 ms by default so the deterministic path
+can preserve Alexa's 500 ms round-trip budget. Override this only for offline
+generation with `KIN_BEDROCK_TIMEOUT_MS`.
 
 `npm run infra:synth` bundles the Lambda and produces a reviewable CloudFormation template without deploying it. The table uses on-demand billing, AWS-managed encryption, seven-day point-in-time recovery, deletion protection, and retain-on-delete behavior. Lambda assets require a standard CDK bootstrap before deployment; the exact current account status is documented in `docs/aws-deployment.md`.
 
 The reasoning and reversal conditions behind these choices live in [docs/architecture.md](docs/architecture.md).
 The verified cloud state and restricted deployment workflow live in [docs/aws-deployment.md](docs/aws-deployment.md).
+The Alexa access gate and integration contract live in [docs/alexa-readiness.md](docs/alexa-readiness.md).
 
 ## Product boundary
 

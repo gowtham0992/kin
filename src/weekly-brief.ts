@@ -73,7 +73,10 @@ export interface BriefGenerator {
 }
 
 interface BedrockSender {
-  send(command: ConverseCommand): Promise<ConverseCommandOutput>;
+  send(
+    command: ConverseCommand,
+    options?: { abortSignal?: AbortSignal },
+  ): Promise<ConverseCommandOutput>;
 }
 
 const safetyNotice =
@@ -124,23 +127,35 @@ export class WeeklyBriefService {
 export class BedrockBriefGenerator implements BriefGenerator {
   readonly #client: BedrockSender;
   readonly #modelId: string;
+  readonly #timeoutMs: number;
 
-  constructor(input: { client: BedrockSender; modelId: string }) {
+  constructor(input: { client: BedrockSender; modelId: string; timeoutMs?: number }) {
     this.#client = input.client;
     this.#modelId = input.modelId;
+    this.#timeoutMs = input.timeoutMs ?? 300;
+    if (!Number.isInteger(this.#timeoutMs) || this.#timeoutMs < 50 || this.#timeoutMs > 10_000) {
+      throw new Error("Bedrock brief timeout must be an integer from 50 to 10000 milliseconds");
+    }
   }
 
   async generate(source: WeeklyBriefSource) {
-    const response = await this.#client.send(new ConverseCommand({
-      modelId: this.#modelId,
-      system: [{ text: systemPrompt }],
-      messages: [{
-        role: "user",
-        content: [{ text: JSON.stringify(source) }],
-      }],
-      inferenceConfig: { maxTokens: 700, temperature: 0.1, topP: 0.9 },
-      requestMetadata: { application: "kin", feature: "weekly-brief" },
-    }));
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), this.#timeoutMs);
+    let response: ConverseCommandOutput;
+    try {
+      response = await this.#client.send(new ConverseCommand({
+        modelId: this.#modelId,
+        system: [{ text: systemPrompt }],
+        messages: [{
+          role: "user",
+          content: [{ text: JSON.stringify(source) }],
+        }],
+        inferenceConfig: { maxTokens: 700, temperature: 0.1, topP: 0.9 },
+        requestMetadata: { application: "kin", feature: "weekly-brief" },
+      }), { abortSignal: abortController.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (response.stopReason !== "end_turn") {
       throw new Error(`Bedrock did not complete the brief: ${response.stopReason ?? "unknown"}`);
     }
@@ -168,10 +183,12 @@ export class BedrockBriefGenerator implements BriefGenerator {
 export function createBedrockBriefGenerator(input: {
   modelId: string;
   region?: string;
+  timeoutMs?: number;
 }): BedrockBriefGenerator {
   return new BedrockBriefGenerator({
     client: new BedrockRuntimeClient({ region: input.region }),
     modelId: input.modelId,
+    timeoutMs: input.timeoutMs,
   });
 }
 

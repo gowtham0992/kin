@@ -2,6 +2,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createDemoStore } from "../src/domain.js";
 import { createHttpApp } from "../src/http.js";
+import { AccessDeniedError, alexaScopes, type AccessAuthorizer } from "../src/auth.js";
 
 const fixedNow = () => new Date("2026-09-02T08:00:00.000Z");
 
@@ -28,6 +29,30 @@ describe("Kin HTTP surface", () => {
     expect(getResponse.status).toBe(405);
     expect(deleteResponse.status).toBe(405);
   });
+
+  it.each(["2025-03-26", "2025-11-25"])(
+    "accepts Alexa initialization protocol %s over Streamable HTTP",
+    async (protocolVersion) => {
+      const response = await request(createHttpApp(createDemoStore(fixedNow)))
+        .post("/mcp")
+        .set("accept", "application/json, text/event-stream")
+        .send({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion,
+            capabilities: {},
+            clientInfo: { name: "Alexa+ MCP Client", version: "1.0.0" },
+          },
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.headers["content-type"]).toContain("text/event-stream");
+      expect(response.text).toContain(`\"protocolVersion\":\"${protocolVersion}\"`);
+      expect(response.text).toContain(`\"name\":\"kin\"`);
+    },
+  );
 
   it("drives the simulator through the same shared care state", async () => {
     const app = createHttpApp(createDemoStore(fixedNow));
@@ -123,5 +148,78 @@ describe("Kin HTTP surface", () => {
       .put("/api/circle/duty")
       .send({ date: "2026-09-03", memberId: "evelyn" });
     expect(response.status).toBe(400);
+  });
+
+  it("publishes Alexa-compatible protected resource metadata", async () => {
+    const response = await request(createHttpApp(
+      createDemoStore(fixedNow),
+      undefined,
+      {
+        canonicalMcpUri: "https://api.kin.example/mcp",
+        authorizationServer: "https://auth.kin.example",
+      },
+    )).get("/.well-known/oauth-protected-resource");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      resource: "https://api.kin.example/mcp",
+      authorization_servers: ["https://auth.kin.example"],
+      bearer_methods_supported: ["header"],
+      scopes_supported: ["mcp:service", "mcp:tools", "mcp:resources"],
+    });
+  });
+
+  it("requires service scope for MCP discovery without advertising a challenge", async () => {
+    const authorizer: AccessAuthorizer = {
+      async authorize(header, scopes) {
+        expect(header).toBeUndefined();
+        expect(scopes).toEqual([alexaScopes.service]);
+        throw new AccessDeniedError(401, "invalid_token");
+      },
+    };
+    const response = await request(createHttpApp(
+      createDemoStore(fixedNow),
+      undefined,
+      { accessAuthorizer: authorizer },
+    )).post("/mcp").send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: "invalid_token" });
+    expect(response.headers["www-authenticate"]).toBeUndefined();
+  });
+
+  it("requires user tools scope before a care action reaches MCP", async () => {
+    const authorizer: AccessAuthorizer = {
+      async authorize(header, scopes) {
+        expect(header).toBe("Bearer signed-token");
+        expect(scopes).toEqual([alexaScopes.tools]);
+        throw new AccessDeniedError(403, "insufficient_scope");
+      },
+    };
+    const response = await request(createHttpApp(
+      createDemoStore(fixedNow),
+      undefined,
+      { accessAuthorizer: authorizer },
+    ))
+      .post("/mcp")
+      .set("authorization", "Bearer signed-token")
+      .send({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "show_today", arguments: {} },
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: "insufficient_scope" });
+  });
+
+  it("does not serve the family simulator on the production OAuth surface", async () => {
+    const response = await request(createHttpApp(
+      createDemoStore(fixedNow),
+      undefined,
+      { serveSimulator: false },
+    )).get("/");
+    expect(response.status).toBe(404);
   });
 });

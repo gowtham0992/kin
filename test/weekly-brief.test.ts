@@ -221,4 +221,31 @@ describe("BedrockBriefGenerator", () => {
       }],
     })).rejects.toThrow("inapplicable follow-up");
   });
+
+  it("aborts model selection before it can consume Alexa's response budget", async () => {
+    const send = vi.fn((_command: ConverseCommand, options?: { abortSignal?: AbortSignal }) =>
+      new Promise<ConverseCommandOutput>((_resolve, reject) => {
+        options?.abortSignal?.addEventListener("abort", () => reject(new Error("aborted")));
+      }));
+    const generator = new BedrockBriefGenerator({
+      client: { send },
+      modelId: "model",
+      timeoutMs: 50,
+    });
+    const startedAt = Date.now();
+
+    await expect(generator.generate({
+      period: { startDate: "2026-08-27", endDate: "2026-09-02" },
+      stats: { scheduled: 1, completed: 0, skipped: 0, stillOpen: 1, escalations: 0 },
+      evidence: [{
+        id: "task:one",
+        kind: "care_task",
+        occurredAt: "2026-09-02T15:00:00.000Z",
+        fact: "Drink water was still open.",
+      }],
+    })).rejects.toThrow("aborted");
+
+    expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(send.mock.calls[0]?.[1]?.abortSignal).toBeInstanceOf(AbortSignal);
+  });
 });

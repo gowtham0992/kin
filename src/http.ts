@@ -3,6 +3,12 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import {
+  AccessDeniedError,
+  alexaScopes,
+  requiredScopesForMcpRequest,
+  type AccessAuthorizer,
+} from "./auth.js";
 import { TaskNotFoundError, type CareRepository } from "./domain.js";
 import { createMcpServer } from "./mcp.js";
 import { WeeklyBriefService } from "./weekly-brief.js";
@@ -19,14 +25,38 @@ const dutyBody = z.object({
   memberId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
 }).strict();
 
+export interface HttpAppOptions {
+  accessAuthorizer?: AccessAuthorizer;
+  canonicalMcpUri?: string;
+  authorizationServer?: string;
+  serveSimulator?: boolean;
+}
+
 export function createHttpApp(
   store: CareRepository,
   weeklyBrief: WeeklyBriefService = new WeeklyBriefService(store),
+  options: HttpAppOptions = {},
 ) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "128kb" }));
-  app.use(express.static(simulatorDirectory, { extensions: ["html"] }));
+  if (options.serveSimulator !== false) {
+    app.use(express.static(simulatorDirectory, { extensions: ["html"] }));
+  }
+
+  if (options.canonicalMcpUri || options.authorizationServer) {
+    if (!options.canonicalMcpUri || !options.authorizationServer) {
+      throw new Error("Both canonicalMcpUri and authorizationServer are required for OAuth metadata");
+    }
+    app.get("/.well-known/oauth-protected-resource", (_request, response) => {
+      response.set("cache-control", "public, max-age=300").json({
+        resource: options.canonicalMcpUri,
+        authorization_servers: [options.authorizationServer],
+        bearer_methods_supported: ["header"],
+        scopes_supported: Object.values(alexaScopes),
+      });
+    });
+  }
 
   app.get("/health", (_request, response) => {
     response.json({ status: "ok", service: "kin", version: "0.1.0" });
@@ -97,6 +127,22 @@ export function createHttpApp(
   });
 
   app.post("/mcp", async (request, response) => {
+    if (options.accessAuthorizer) {
+      try {
+        await options.accessAuthorizer.authorize(
+          request.get("authorization"),
+          requiredScopesForMcpRequest(request.body),
+        );
+      } catch (error) {
+        if (error instanceof AccessDeniedError) {
+          // Alexa+ explicitly forbids WWW-Authenticate on this integration.
+          response.status(error.status).json({ error: error.code });
+          return;
+        }
+        throw error;
+      }
+    }
+
     const server = createMcpServer(store, weeklyBrief);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     response.on("close", () => {
