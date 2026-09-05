@@ -8,4 +8,5 @@ new KinDataStack(app, "KinDataStack", {
 });
 new KinApiStack(app, "KinApiStack", {
   env: { region: "us-east-1" },
+  terminationProtection: true,
 });

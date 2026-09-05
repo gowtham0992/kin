@@ -234,7 +234,7 @@ export class KinApiStack extends Stack {
       ],
     }));
     const integration = new HttpLambdaIntegration("KinIntegration", apiFunction, {
-      scopePermissionToRoute: false,
+      scopePermissionToRoute: true,
     });
     const httpApi = new HttpApi(this, "HttpApi", {
       apiName: "kin-mcp",
@@ -273,6 +273,8 @@ export class KinApiStack extends Stack {
       },
       bundling: {
         minify: true,
+        // oidc-provider resolves token formats using constructor.name.
+        keepNames: true,
         sourceMap: true,
         sourcesContent: false,
         target: "node22",

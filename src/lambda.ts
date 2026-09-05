@@ -1,6 +1,6 @@
-import { configure as serverlessExpress } from "@codegenie/serverless-express";
+import { createLambdaHttpHandler } from "./lambda-http.js";
 import { createConfiguredApp } from "./runtime.js";
 
-export const handler = serverlessExpress({
-  app: createConfiguredApp(process.env, { requireOAuth: true }),
-});
+export const handler = createLambdaHttpHandler(
+  createConfiguredApp(process.env, { requireOAuth: true }),
+);

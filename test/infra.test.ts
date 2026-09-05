@@ -3,8 +3,55 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import { describe, expect, it } from "vitest";
 import { KinDataStack } from "../infra/kin-data-stack.js";
 import { KinApiStack } from "../infra/kin-api-stack.js";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+import { exportJWK, generateKeyPair, jwtVerify } from "jose";
+import request from "supertest";
 
 describe("Kin AWS infrastructure", () => {
+  it("issues a valid service JWT from the actual minified OAuth deployment artifact", async () => {
+    const app = new App();
+    const stack = new KinApiStack(app, "BundledOAuthTest", {});
+    const template = Template.fromStack(stack);
+    const resources = template.findResources("AWS::Lambda::Function", {
+      Properties: { FunctionName: "kin-oauth-api" },
+    });
+    const codeKey = Object.values(resources)[0]!.Properties.Code.S3Key as string;
+    const assembly = app.synth();
+    const moduleUrl = pathToFileURL(path.join(assembly.directory, `asset.${codeKey.replace(/\.zip$/, "")}`, "index.mjs")).href;
+    const { createConfiguredOAuthApp } = await import(/* @vite-ignore */ moduleUrl);
+    const pair = await generateKeyPair("RS256", { extractable: true });
+    const key = await exportJWK(pair.privateKey);
+    const issuer = "https://api.example.com";
+    const serviceClient = { clientId: "bundled-service-client", clientSecret: "test-secret-32-characters-or-more!" };
+    const oauth = await createConfiguredOAuthApp({
+      KIN_OAUTH_ISSUER: issuer,
+      KIN_MCP_RESOURCE_URI: `${issuer}/mcp`,
+      KIN_OAUTH_STATE_TABLE: "test-state",
+      KIN_COGNITO_CLIENT_ID: "test-cognito-client",
+      KIN_OAUTH_SECRET_ID: "test-secret",
+    }, {
+      secrets: {
+        schemaVersion: 1,
+        jwks: { keys: [{ ...key, kid: "bundle-test", use: "sig", alg: "RS256" }] },
+        cookieKeys: ["a".repeat(32), "b".repeat(32)],
+        csrfSecret: "c".repeat(32),
+        serviceClient,
+      },
+      adapter: class TestAdapter {},
+    });
+    const response = await request(oauth).post("/token")
+      .auth(serviceClient.clientId, serviceClient.clientSecret)
+      .type("form")
+      .send({ grant_type: "client_credentials", scope: "mcp:service", resource: `${issuer}/mcp` });
+    expect(response.status).toBe(200);
+    const { payload } = await jwtVerify(response.body.access_token, pair.publicKey, {
+      issuer, audience: `${issuer}/mcp`, algorithms: ["RS256"],
+    });
+    expect(payload.scope).toBe("mcp:service");
+    expect(response.body.expires_in).toBe(3600);
+  }, 30_000);
+
   it("synthesizes an encrypted, recoverable, on-demand table", () => {
     const app = new App();
     const template = Template.fromStack(new KinDataStack(app, "TestKinData"));

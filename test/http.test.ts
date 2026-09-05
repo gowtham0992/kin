@@ -1,4 +1,5 @@
 import request from "supertest";
+import { createLambdaHttpHandler } from "../src/lambda-http.js";
 import { describe, expect, it } from "vitest";
 import { createDemoStore } from "../src/domain.js";
 import { createHttpApp } from "../src/http.js";
@@ -7,6 +8,21 @@ import { AccessDeniedError, alexaScopes, type AccessAuthorizer } from "../src/au
 const fixedNow = () => new Date("2026-09-02T08:00:00.000Z");
 
 describe("Kin HTTP surface", () => {
+  it("preserves MCP content type through the Lambda HTTP adapter", async () => {
+    const handler = createLambdaHttpHandler(createHttpApp(createDemoStore(fixedNow)));
+    const response = await handler({
+      version: "2.0", routeKey: "$default", rawPath: "/mcp", rawQueryString: "",
+      headers: { host: "api.example.com", "content-type": "application/json", accept: "application/json, text/event-stream" },
+      requestContext: { http: { method: "POST", path: "/mcp", protocol: "HTTP/1.1", sourceIp: "127.0.0.1" }, stage: "$default" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {
+        protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "1" },
+      } }), isBase64Encoded: false,
+    }, {} as never, () => {});
+    expect(response.statusCode).toBe(200);
+    expect(new Headers(response.headers).get("content-type")).toContain("text/event-stream");
+    expect(response.body).toContain('"protocolVersion":"2025-11-25"');
+  });
+
   it("reports health without exposing framework details", async () => {
     const response = await request(createHttpApp(createDemoStore(fixedNow))).get("/health");
     expect(response.status).toBe(200);
