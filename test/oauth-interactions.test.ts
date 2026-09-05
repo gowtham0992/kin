@@ -4,12 +4,13 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { InvalidCredentialsError } from "../src/cognito-authenticator.js";
 import { createOAuthInteractionRouter } from "../src/oauth-interactions.js";
+import { familyConsentVersion, type FamilyEnrollment, type Invitation } from "../src/invitations.js";
 
 const uid = "interaction-123";
 const resourceUri = "https://example.execute-api.us-east-1.amazonaws.com/mcp";
 const csrfSecret = "a-secure-interaction-secret-that-is-long-enough";
 
-function fixture(prompt: "login" | "consent" = "login") {
+function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrollment) {
   const details = {
     uid,
     prompt: {
@@ -54,6 +55,7 @@ function fixture(prompt: "login" | "consent" = "login") {
     authenticator: { authenticate },
     resourceUri,
     csrfSecret,
+    enrollment,
   }));
   app.use((_error: unknown, _request: Request, response: Response, _next: unknown) => {
     response.status(500).send("Something went wrong");
@@ -68,6 +70,27 @@ function csrfFrom(html: string) {
 }
 
 describe("OAuth account-linking interaction", () => {
+  it("reviews a role before explicit acceptance and rejects changed review proofs", async () => {
+    const invitation: Invitation = { circleId: "family-a", circleName: "Evelyn <family>", memberId: "maya", name: "Maya", role: "viewer", targetKey: "ACCESS#" + "a".repeat(64), expiresAt: 9999999999, status: "pending" };
+    const enrollment = { review: vi.fn(async () => invitation), accept: vi.fn(async () => {}) };
+    const { app, save } = fixture("consent", enrollment);
+    const initial = await request(app).get(`/interaction/${uid}`);
+    const csrf = csrfFrom(initial.text);
+    const reviewed = await request(app).post(`/interaction/${uid}/invitation`).type("form").send({ csrf, invitation: "a".repeat(43) }).expect(200);
+    expect(reviewed.text).toContain("Evelyn &lt;family&gt;");
+    expect(reviewed.text).toContain("You cannot confirm tasks");
+    expect(reviewed.text).toContain('name="familyConsent"');
+    expect(enrollment.accept).not.toHaveBeenCalled();
+    const proof = reviewed.text.match(/name="invitationProof" value="([^"]+)"/)?.[1];
+    const form = { csrf, invitation: "a".repeat(43), invitationProof: proof, familyConsent: familyConsentVersion };
+    await request(app).post(`/interaction/${uid}/consent`).type("form").send({ ...form, familyConsent: "" }).expect(400);
+    await request(app).post(`/interaction/${uid}/consent`).type("form").send({ ...form, invitationProof: "forged" }).expect(400);
+    expect(enrollment.accept).not.toHaveBeenCalled();
+    await request(app).post(`/interaction/${uid}/consent`).type("form").send(form).expect(303);
+    expect(enrollment.accept).toHaveBeenCalledWith("family-account", "a".repeat(43), familyConsentVersion, invitation);
+    expect(save).toHaveBeenCalledOnce();
+  });
+
   it("renders a no-cache, CSP-protected family sign-in form", async () => {
     const { app } = fixture();
 

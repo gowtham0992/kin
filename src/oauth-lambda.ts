@@ -8,12 +8,14 @@ import type { AccountAuthenticator } from "./oauth-interactions.js";
 import { createKinOAuthProvider } from "./oauth-provider.js";
 import { loadOAuthSecrets, type OAuthSecrets } from "./oauth-secrets.js";
 import { createUnavailablePublicApp } from "./public-api-gate.js";
+import { createDynamoFamilyEnrollment, type FamilyEnrollment } from "./invitations.js";
 
 interface OAuthRuntimeDependencies {
   loadSecrets?: typeof loadOAuthSecrets;
   secrets?: OAuthSecrets;
   adapter?: new (model: string) => object;
   authenticator?: AccountAuthenticator;
+  enrollment?: FamilyEnrollment;
 }
 
 export async function createConfiguredOAuthApp(
@@ -62,6 +64,11 @@ export async function createConfiguredOAuthApp(
     }),
     resourceUri,
     csrfSecret: secrets.csrfSecret,
+    enrollment: dependencies.enrollment ?? (environment.KIN_FAMILY_ENROLLMENT_ENABLED === "true"
+      ? createDynamoFamilyEnrollment({
+          tableName: required(environment.KIN_DYNAMODB_TABLE, "KIN_DYNAMODB_TABLE"),
+          circleId: required(environment.KIN_CIRCLE_ID, "KIN_CIRCLE_ID"), issuer, region: environment.AWS_REGION,
+        }) : undefined),
   }));
   const providerCallback = provider.callback();
   app.use((request, response) => providerCallback(request, response));
