@@ -28,11 +28,14 @@
       <ul id="tasks"><li class="empty">Ask Kin to show today’s care plan.</li></ul>
     </main>
     <script type="module">
-      import { App } from "https://unpkg.com/@modelcontextprotocol/ext-apps@1.7.5/dist/index.js";
+      import { App } from "@modelcontextprotocol/ext-apps";
       const app = new App({ name: "Kin Today", version: "0.1.0" });
       const render = (result) => {
         const data = result?.structuredContent;
-        if (!data?.tasks) return;
+        if (!data?.tasks) {
+          if (data?.confirmation) document.querySelector("#summary").textContent = "Saved · ask Kin to refresh the plan";
+          return;
+        }
         document.querySelector("#summary").textContent = `${data.summary.completed}/${data.summary.total} done`;
         const taskList = document.querySelector("#tasks");
         taskList.replaceChildren();
@@ -64,7 +67,12 @@
         }
       };
       app.ontoolresult = render;
-      await app.connect();
+      try {
+        await app.connect();
+      } catch {
+        document.querySelector("#summary").textContent = "Couldn’t connect";
+        document.querySelector("#tasks").textContent = "Close this card and ask Kin to show today’s plan again.";
+      }
     </script>
   </body>
 </html>

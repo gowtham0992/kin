@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDemoStore } from "../src/domain.js";
 import { createMcpServer } from "../src/mcp.js";
 
@@ -9,9 +9,11 @@ const fixedNow = () => new Date("2026-09-02T08:00:00.000Z");
 describe("Kin MCP contract", () => {
   let server: ReturnType<typeof createMcpServer>;
   let client: Client;
+  let store: ReturnType<typeof createDemoStore>;
 
   beforeEach(async () => {
-    server = createMcpServer(createDemoStore(fixedNow));
+    store = createDemoStore(fixedNow);
+    server = createMcpServer(store);
     client = new Client({ name: "kin-test", version: "0.1.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
@@ -44,6 +46,16 @@ describe("Kin MCP contract", () => {
     expect(JSON.stringify(result.structuredContent)).toContain("not medical advice");
   });
 
+  it("serves the bundled widget through the actual MCP resource", async () => {
+    const result = await client.readResource({ uri: "ui://kin/today.html" });
+    const resource = result.contents[0];
+    expect(resource?.mimeType).toBe("text/html;profile=mcp-app");
+    const html = resource && "text" in resource ? resource.text as string : "";
+    expect(html.includes("ui/initialize")).toBe(true);
+    expect(html.includes("https://unpkg.com")).toBe(false);
+    expect(html.includes('from "@modelcontextprotocol/ext-apps"')).toBe(false);
+  });
+
   it("runs the complete show-confirm-show loop", async () => {
     const before = await client.callTool({ name: "show_today", arguments: {} });
     expect(before.isError).toBeFalsy();
@@ -65,6 +77,17 @@ describe("Kin MCP contract", () => {
     const after = await client.callTool({ name: "show_today", arguments: {} });
     expect(after.structuredContent).toMatchObject({
       summary: { total: 2, completed: 1, remaining: 1 },
+    });
+  });
+
+  it("keeps a committed confirmation successful when the view cannot refresh", async () => {
+    vi.spyOn(store, "today").mockRejectedValue(new Error("Read unavailable"));
+    const result = await client.callTool({ name: "confirm_care_task", arguments: {
+      taskId: "morning-water", response: "done", actor: "Evelyn", requestId: "mcp-saved-read-failed",
+    } });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      task: { state: "done" }, confirmation: { requestId: "mcp-saved-read-failed" }, refreshRequired: true,
     });
   });
 

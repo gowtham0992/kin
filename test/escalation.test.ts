@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDemoStore } from "../src/domain.js";
+import { createDemoStore, InMemoryCareStore } from "../src/domain.js";
 import {
   type EscalationRecord,
   planMissedTaskEscalations,
@@ -7,6 +7,27 @@ import {
 } from "../src/escalation.js";
 
 describe("missed-task escalation planning", () => {
+  it("recovers a blocked alert when coverage is assigned and publishes only once", async () => {
+    const now = new Date("2026-09-02T16:00:00Z");
+    const tasks = (await createDemoStore(() => now).today()).tasks;
+    const store = new InMemoryCareStore(tasks, () => now);
+    const recipients: string[] = [];
+    const publisher = { publish: async (record: EscalationRecord) => {
+      recipients.push(record.recipientMemberId!);
+      return { messageId: "recovered-alert" };
+    } };
+    const blocked = await runEscalationSweep({ snapshot: await store.today(), store, publisher, now, attemptId: "no-coverage" });
+    expect(blocked.records[0]?.status).toBe("blocked");
+    await store.assignDuty({ date: "2026-09-02", memberId: "maya" });
+    const snapshot = await store.today();
+    const results = await Promise.all(["recovery-1", "recovery-2"].map(attemptId =>
+      runEscalationSweep({ snapshot, store, publisher, now, attemptId }),
+    ));
+    expect(recipients).toEqual(["maya"]);
+    expect(results.flatMap(result => result.records).some(record => record.status === "sent")).toBe(true);
+    expect((await store.today()).escalations[0]).toMatchObject({ status: "sent", recipientMemberName: "Maya" });
+  });
+
   it("routes an overdue task to the active on-duty caregiver after the grace period", async () => {
     const now = new Date("2026-09-02T16:00:00.000Z");
     const snapshot = await createDemoStore(() => now).today();

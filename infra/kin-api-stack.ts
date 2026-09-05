@@ -209,8 +209,7 @@ export class KinApiStack extends Stack {
           beforeBundling: () => [],
           beforeInstall: () => [],
           afterBundling: (inputDirectory, outputDirectory) => [
-            `mkdir -p ${outputDirectory}/widget`,
-            `cp ${inputDirectory}/widget/today.html ${outputDirectory}/widget/today.html`,
+            `node --import tsx "${inputDirectory}/scripts/build-widget.ts" "${outputDirectory}/widget/today.html"`,
           ],
         },
       },

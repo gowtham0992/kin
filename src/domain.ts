@@ -252,6 +252,13 @@ export class InMemoryCareStore implements CareRepository {
   async queueEscalation(input: MissedTaskEscalation | BlockedEscalation) {
     const id = `missed_${input.taskId}_${input.dueAt}`;
     const previous = this.#escalations.get(id);
+    if (previous?.status === "blocked" && "recipient" in input) {
+      previous.status = "queued";
+      previous.recipientMemberId = input.recipient.memberId;
+      previous.recipientMemberName = input.recipient.memberName;
+      previous.updatedAt = input.createdAt;
+      previous.lastErrorCode = null;
+    }
     if (previous) return { record: structuredClone(previous), replayed: true };
     const routed = "recipient" in input;
     const createdAt = routed ? input.createdAt : this.#now().toISOString();

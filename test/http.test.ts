@@ -1,6 +1,6 @@
 import request from "supertest";
 import { createLambdaHttpHandler } from "../src/lambda-http.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createDemoStore } from "../src/domain.js";
 import { createHttpApp } from "../src/http.js";
 import { AccessDeniedError, alexaScopes, type AccessAuthorizer } from "../src/auth.js";
@@ -8,6 +8,20 @@ import { AccessDeniedError, alexaScopes, type AccessAuthorizer } from "../src/au
 const fixedNow = () => new Date("2026-09-02T08:00:00.000Z");
 
 describe("Kin HTTP surface", () => {
+  it("acknowledges a saved confirmation even when the following snapshot read fails", async () => {
+    const store = createDemoStore(fixedNow);
+    const readToday = store.today.bind(store);
+    vi.spyOn(store, "today").mockRejectedValue(new Error("Read unavailable"));
+    const response = await request(createHttpApp(store)).post("/api/tasks/morning-water/confirm")
+      .send({ response: "done", actor: "Evelyn", requestId: "saved-read-failed" });
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      task: { state: "done" }, confirmation: { requestId: "saved-read-failed" },
+      snapshot: null, refreshRequired: true,
+    });
+    expect((await readToday()).summary.completed).toBe(1);
+  });
+
   it("preserves MCP content type through the Lambda HTTP adapter", async () => {
     const handler = createLambdaHttpHandler(createHttpApp(createDemoStore(fixedNow)));
     const response = await handler({

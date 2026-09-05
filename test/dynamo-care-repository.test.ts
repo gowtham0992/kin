@@ -38,6 +38,32 @@ class FakeDynamoSender {
 }
 
 describe("DynamoCareRepository", () => {
+  it("conditionally binds a previously blocked alert to its first available caregiver", async () => {
+    const blocked = {
+      PK: "CIRCLE#family-1", SK: "ESCALATION#2026-09-02T15:00:00.000Z#morning-water",
+      entityType: "Escalation", id: "missed_morning-water_2026-09-02T15:00:00.000Z",
+      taskId: "morning-water", taskTitle: "Drink a glass of water", dueAt: storedTask.dueAt,
+      createdAt: fixedNow().toISOString(), updatedAt: fixedNow().toISOString(),
+      recipientMemberId: null, recipientMemberName: null, status: "blocked", attemptCount: 0,
+      attemptId: null, leaseUntil: null, providerMessageId: null, lastErrorCode: "no_active_duty_assignment",
+    };
+    const conditionFailure = Object.assign(new Error("Already exists"), { name: "ConditionalCheckFailedException" });
+    const recovered = { ...blocked, status: "queued", recipientMemberId: "maya", recipientMemberName: "Maya", lastErrorCode: null };
+    const client = new FakeDynamoSender([conditionFailure, { Item: blocked }, { Attributes: recovered }]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    const result = await repository.queueEscalation({
+      id: blocked.id, taskId: blocked.taskId, taskTitle: blocked.taskTitle, dueAt: blocked.dueAt,
+      createdAt: fixedNow().toISOString(), recipient: {
+        memberId: "maya", memberName: "Maya", startsAt: "2026-09-02T00:00:00Z", endsAt: "2026-09-03T00:00:00Z",
+      },
+    });
+    expect(result.record).toMatchObject({ status: "queued", recipientMemberId: "maya", attemptCount: 0 });
+    expect(client.commands[2]?.input).toMatchObject({
+      ConditionExpression: "#status = :blocked AND attemptCount = :zero",
+      ExpressionAttributeValues: { ":memberId": "maya", ":blocked": "blocked", ":zero": 0 },
+    });
+  });
+
   it("queries a strongly consistent daily care-plan partition", async () => {
     const client = new FakeDynamoSender([{ Items: [storedTask] }]);
     const repository = new DynamoCareRepository({

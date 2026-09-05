@@ -424,6 +424,31 @@ export class DynamoCareRepository implements CareRepository {
       if (!isConditionCheckFailure(error)) throw error;
       const previous = await this.#getEscalation(record);
       if (!previous) throw error;
+      if (routed && previous.status === "blocked") {
+        try {
+          const recovered = await this.#client.send(new UpdateCommand({
+            TableName: this.#tableName,
+            Key: { PK: this.#partitionKey(), SK: escalationSortKey(record) },
+            ConditionExpression: "#status = :blocked AND attemptCount = :zero",
+            UpdateExpression: "SET #status = :queued, recipientMemberId = :memberId, recipientMemberName = :memberName, updatedAt = :now, lastErrorCode = :clear",
+            ExpressionAttributeNames: { "#status": "status" },
+            ExpressionAttributeValues: {
+              ":blocked": "blocked", ":queued": "queued", ":zero": 0,
+              ":memberId": input.recipient.memberId, ":memberName": input.recipient.memberName,
+              ":now": input.createdAt, ":clear": null,
+            },
+            ReturnValues: "ALL_NEW",
+          })) as { Attributes?: StoredEscalation };
+          if (!recovered.Attributes) throw new Error("Recovered escalation was not returned");
+          return { record: stripEscalationStorage(recovered.Attributes), replayed: true };
+        } catch (recoveryError) {
+          if (!isConditionCheckFailure(recoveryError)) throw recoveryError;
+          // Another worker has already frozen a recipient; never replace it.
+          const winner = await this.#getEscalation(record);
+          if (!winner) throw recoveryError;
+          return { record: winner, replayed: true };
+        }
+      }
       return { record: previous, replayed: true };
     }
   }

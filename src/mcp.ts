@@ -14,11 +14,12 @@ import {
   type CareRepository,
 } from "./domain.js";
 import { WeeklyBriefService } from "./weekly-brief.js";
+import { confirmWithReceipt } from "./confirmation.js";
 
 const widgetUri = "ui://kin/today.html";
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const widgetPath = process.env.KIN_WIDGET_PATH?.trim() ||
-  path.resolve(moduleDirectory, "../widget/today.html");
+  path.resolve(moduleDirectory, "../dist/widget/today.html");
 
 export function createMcpServer(
   store: CareRepository,
@@ -90,8 +91,7 @@ export function createMcpServer(
     },
     async (input) => {
       try {
-        const result = await store.confirm(input);
-        const snapshot = await store.today();
+        const result = await confirmWithReceipt(store, input);
         return {
           content: [
             {
@@ -101,7 +101,10 @@ export function createMcpServer(
                 : `Recorded ${result.confirmation.response.replace("_", " ")} for ${result.task.title}.`,
             },
           ],
-          structuredContent: { ...snapshot, confirmation: result.confirmation },
+          structuredContent: {
+            ...(result.snapshot ?? {}), confirmation: result.confirmation,
+            task: result.task, refreshRequired: result.refreshRequired,
+          },
         };
       } catch (error) {
         if (error instanceof TaskNotFoundError) {

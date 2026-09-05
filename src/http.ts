@@ -12,6 +12,7 @@ import {
 import { TaskNotFoundError, type CareRepository } from "./domain.js";
 import { createMcpServer } from "./mcp.js";
 import { WeeklyBriefService } from "./weekly-brief.js";
+import { confirmWithReceipt } from "./confirmation.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -125,11 +126,8 @@ export function createHttpApp(
     }
 
     try {
-      const result = await store.confirm({ taskId: taskId.data, ...body.data });
-      response.status(result.replayed ? 200 : 201).json({
-        ...result,
-        snapshot: await store.today(),
-      });
+      const result = await confirmWithReceipt(store, { taskId: taskId.data, ...body.data });
+      response.set("cache-control", "no-store").status(result.replayed ? 200 : 201).json(result);
     } catch (error) {
       if (error instanceof TaskNotFoundError) {
         response.status(404).json({ error: "Care task not found" });

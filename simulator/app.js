@@ -1,3 +1,5 @@
+import { createConfirmationSender, createSnapshotReader } from "./care-client.js";
+
 const taskList = document.querySelector("#phone-tasks");
 const echoTask = document.querySelector("#echo-task");
 const echoActions = document.querySelector("#echo-actions");
@@ -32,6 +34,49 @@ let weeklyBrief = null;
 let loadingBrief = false;
 let circle = null;
 let loadingCircle = false;
+let refreshingToday = false;
+let lastUpdatedAt = null;
+
+const todayReader = createSnapshotReader({
+  fetchSnapshot: async () => {
+    const response = await fetch("/api/today", { headers: { accept: "application/json" }, signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error("Could not load the care circle");
+    return response.json();
+  },
+  onSnapshot: (data) => {
+    const changed = JSON.stringify(data) !== JSON.stringify(snapshot);
+    lastUpdatedAt = new Date();
+    render(data);
+    if (changed) {
+      weeklyBrief = null;
+      if (!weekView.hidden) void loadWeeklyBrief();
+    }
+  },
+  onError: () => {
+    if (!snapshot) showError("Kin couldn’t reach the family circle.");
+    else {
+      syncLabel.textContent = `Connection lost · last checked ${formatTime(lastUpdatedAt)}`;
+      document.querySelector("#connection-status").textContent = "Showing last known update";
+    }
+  },
+});
+
+const confirmationSender = createConfirmationSender({
+  send: async ({ taskId, ...body }) => {
+    const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/confirm`, {
+      method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) {
+      const error = new Error("Confirmation not acknowledged");
+      error.definitiveRejection = [400, 401, 403, 404, 422].includes(response.status);
+      throw error;
+    }
+    const result = await response.json();
+    if (result.confirmation?.requestId !== body.requestId) throw new Error("Confirmation receipt mismatch");
+    return result;
+  },
+});
 
 function formatTime(iso) {
   return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(iso));
@@ -65,7 +110,7 @@ function setLoading() {
 }
 
 function createTaskItem(task, escalation) {
-  const displayState = escalation ? "missed" : task.state;
+  const displayState = escalation && task.state === "scheduled" ? "missed" : task.state;
   const item = document.createElement("li");
   item.className = `task ${["scheduled", "done", "skipped", "missed"].includes(displayState) ? displayState : "scheduled"}`;
   const mark = document.createElement("span");
@@ -96,12 +141,14 @@ function render(data) {
   progressCount.textContent = `${completed} of ${total}`;
   progressBar.style.width = `${total ? Math.round((completed / total) * 100) : 0}%`;
   const needsAttention = escalations.some((record) => ["sent", "blocked", "failed"].includes(record.status));
-  progressMessage.textContent = needsAttention
-    ? "1 check-in needs family attention"
+  const attentionCount = escalations.filter(record => ["sent", "blocked", "failed"].includes(record.status) && data.tasks.some(task => task.id === record.taskId && task.state === "scheduled")).length;
+  progressMessage.textContent = needsAttention && attentionCount
+    ? `${attentionCount} check-in${attentionCount === 1 ? "" : "s"} need${attentionCount === 1 ? "s" : ""} family attention`
     : remaining
       ? `${remaining} gentle check-in${remaining === 1 ? "" : "s"} left today`
       : "Everything is settled for today";
-  syncLabel.textContent = "Live now";
+  syncLabel.textContent = "Checked just now · refreshes every 5s";
+  document.querySelector("#connection-status").textContent = "Family updates connected";
   dutyLabel.textContent = data.onDuty
     ? `${data.onDuty.memberName} · until ${formatTime(data.onDuty.endsAt)}`
     : "No caregiver assigned";
@@ -134,7 +181,7 @@ function render(data) {
   title.textContent = next
     ? next.title
     : latestSent
-      ? `${latestSent.recipientMemberName ?? "Your caregiver"} has been notified.`
+      ? `An alert was submitted for ${latestSent.recipientMemberName ?? "your caregiver"}.`
       : "You’re all set for today, Evelyn.";
   copy.append(label, title);
   echoTask.append(icon, copy);
@@ -143,7 +190,7 @@ function render(data) {
   document.querySelector("#voice-line").textContent = next
     ? "Try saying: “Alexa, tell Kin I did it.”"
     : latestSent
-      ? "Kin shared the missed check-in with the person on duty."
+      ? "Delivery and caregiver acknowledgment are not yet confirmed."
       : "Kin has quietly updated your family.";
 }
 
@@ -305,7 +352,7 @@ async function saveDuty(date, memberId, select) {
     toast.hidden = false;
     window.setTimeout(() => { toast.hidden = true; }, 2200);
   } catch {
-    toast.textContent = "That handoff didn’t save. The roster is unchanged.";
+    toast.textContent = "Kin couldn’t confirm that handoff. Reopen Circle to check the saved roster.";
     toast.hidden = false;
     renderCircle(circle);
   } finally {
@@ -346,8 +393,8 @@ function switchPhoneView(view) {
     button.classList.toggle("active", button.dataset.view === view);
     button.setAttribute("aria-current", button.dataset.view === view ? "page" : "false");
   }
-  if (showWeek && !weeklyBrief) void loadWeeklyBrief();
-  if (showCircle && !circle) void loadCircle();
+  if (showWeek) void loadWeeklyBrief();
+  if (showCircle) void loadCircle();
 }
 
 function renderEscalation(escalations) {
@@ -367,7 +414,7 @@ function renderEscalation(escalations) {
   if (latest.status === "sent") {
     mark.textContent = "↗";
     label.textContent = `Missed · ${formatTime(latest.dueAt)}`;
-    message.textContent = `${latest.recipientMemberName ?? "On-duty caregiver"} was notified`;
+    message.textContent = `Alert submitted for ${latest.recipientMemberName ?? "the on-duty caregiver"} · receipt unconfirmed`;
     return;
   }
   if (latest.status === "blocked") {
@@ -400,42 +447,55 @@ function showError(message) {
   error.append(document.createElement("br"), retry);
   taskList.append(error);
   syncLabel.textContent = "Offline";
+  document.querySelector("#connection-status").textContent = "Family updates unavailable";
 }
 
 async function loadToday() {
-  setLoading();
-  try {
-    const response = await fetch("/api/today", { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error("Could not load the care circle");
-    render(await response.json());
-  } catch {
-    showError("Kin couldn’t reach the family circle.");
-  }
+  if (refreshingToday || submitting) return;
+  refreshingToday = true;
+  if (!snapshot) setLoading();
+  try { await todayReader.read(); }
+  finally { refreshingToday = false; }
 }
 
 async function confirmTask(responseValue) {
   const taskId = echoActions.dataset.taskId;
-  if (!taskId || submitting) return;
+  if (!taskId || submitting || confirmationSender.pending) return;
+  await submitConfirmation(() => confirmationSender.confirm({ taskId, response: responseValue, actor: "Evelyn" }));
+}
+
+async function submitConfirmation(send) {
+  if (submitting) return;
   submitting = true;
+  todayReader.invalidate();
   for (const button of echoActions.querySelectorAll("button")) button.disabled = true;
   try {
-    const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/confirm`, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ response: responseValue, actor: "Evelyn", requestId: crypto.randomUUID() }),
-    });
-    if (!response.ok) throw new Error("Confirmation failed");
-    const result = await response.json();
-    render(result.snapshot);
-    toast.textContent = responseValue === "done" ? "Shared with Maya and Theo · just now" : "Kin will check in again a little later";
+    const result = await send();
+    weeklyBrief = null;
+    if (result.snapshot) { lastUpdatedAt = new Date(); render(result.snapshot); }
+    toast.textContent = result.refreshRequired
+      ? "Your answer is saved. The full plan will refresh when the connection returns."
+      : result.confirmation.response === "done"
+        ? "Saved to the family circle"
+        : "Saved as not yet done. The original check-in time is unchanged.";
     toast.hidden = false;
-    window.setTimeout(() => { toast.hidden = true; }, 2600);
+    window.setTimeout(() => { if (!confirmationSender.pending && !submitting) toast.hidden = true; }, 4000);
   } catch {
-    toast.textContent = "That didn’t go through. Nothing was changed.";
+    toast.textContent = confirmationSender.pending
+      ? "Kin hasn’t confirmed this save. It may already be recorded."
+      : "Kin did not accept that answer. Refresh the plan and try again.";
+    if (confirmationSender.pending) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "Check this save again";
+      retry.addEventListener("click", () => void submitConfirmation(() => confirmationSender.retry()));
+      toast.append(" ", retry);
+    }
     toast.hidden = false;
   } finally {
     submitting = false;
-    for (const button of echoActions.querySelectorAll("button")) button.disabled = false;
+    for (const button of echoActions.querySelectorAll("button")) button.disabled = Boolean(confirmationSender.pending);
+    void loadToday();
   }
 }
 
@@ -451,3 +511,13 @@ phoneNav.addEventListener("click", (event) => {
 
 setLoading();
 void loadToday();
+
+function refreshVisibleViews() {
+  if (document.visibilityState !== "visible" || submitting) return;
+  void loadToday();
+  if (!circleView.hidden && !circleView.contains(document.activeElement)) void loadCircle();
+}
+window.setInterval(refreshVisibleViews, 5000);
+window.addEventListener("focus", refreshVisibleViews);
+window.addEventListener("online", refreshVisibleViews);
+document.addEventListener("visibilitychange", refreshVisibleViews);
