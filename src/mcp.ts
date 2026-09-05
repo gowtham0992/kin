@@ -15,6 +15,7 @@ import {
 } from "./domain.js";
 import { WeeklyBriefService } from "./weekly-brief.js";
 import { confirmWithReceipt } from "./confirmation.js";
+import type { Membership } from "./membership.js";
 
 const widgetUri = "ui://kin/today.html";
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,7 @@ const widgetPath = process.env.KIN_WIDGET_PATH?.trim() ||
 export function createMcpServer(
   store: CareRepository,
   weeklyBrief: WeeklyBriefService = new WeeklyBriefService(store),
+  member?: Membership,
 ): McpServer {
   const server = new McpServer({ name: "kin", version: "0.1.0" });
 
@@ -91,7 +93,7 @@ export function createMcpServer(
     },
     async (input) => {
       try {
-        const result = await confirmWithReceipt(store, input);
+        const result = await confirmWithReceipt(store, input, member);
         return {
           content: [
             {

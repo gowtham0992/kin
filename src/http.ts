@@ -13,6 +13,7 @@ import { TaskNotFoundError, type CareRepository } from "./domain.js";
 import { createMcpServer } from "./mcp.js";
 import { WeeklyBriefService } from "./weekly-brief.js";
 import { confirmWithReceipt } from "./confirmation.js";
+import { FamilyAccessDeniedError, mcpCarePermission, requireMembership, type FamilyAccess, type Membership } from "./membership.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -28,6 +29,7 @@ const dutyBody = z.object({
 
 export interface HttpAppOptions {
   accessAuthorizer?: AccessAuthorizer;
+  familyAccess?: FamilyAccess;
   canonicalMcpUri?: string | (() => Promise<string>);
   authorizationServer?: string;
   serveSimulator?: boolean;
@@ -75,6 +77,19 @@ export function createHttpApp(
       response.status(404).json({ error: "Not found" });
     });
   }
+
+  app.use("/api", async (request, response, next) => {
+    if (!options.accessAuthorizer) { next(); return; }
+    try {
+      const principal = await options.accessAuthorizer.authorize(request.get("authorization"), [alexaScopes.tools]);
+      const permission = request.method === "GET" ? "read"
+        : request.method === "POST" && /^\/tasks\/[^/]+\/confirm$/.test(request.path) ? "confirm"
+        : request.method === "PUT" && request.path === "/circle/duty" ? "manage_duty" : null;
+      if (!permission) throw new FamilyAccessDeniedError();
+      response.locals.member = await requireMembership(options.familyAccess, principal, permission);
+      next();
+    } catch (error) { next(error); }
+  });
 
   app.get("/api/today", async (_request, response, next) => {
     try {
@@ -126,7 +141,8 @@ export function createHttpApp(
     }
 
     try {
-      const result = await confirmWithReceipt(store, { taskId: taskId.data, ...body.data });
+      const member = response.locals.member as Membership | undefined;
+      const result = await confirmWithReceipt(store, { taskId: taskId.data, ...body.data }, member);
       response.set("cache-control", "no-store").status(result.replayed ? 200 : 201).json(result);
     } catch (error) {
       if (error instanceof TaskNotFoundError) {
@@ -138,13 +154,20 @@ export function createHttpApp(
   });
 
   app.post("/mcp", async (request, response) => {
+    let member: Membership | undefined;
     if (options.accessAuthorizer) {
       try {
-        await options.accessAuthorizer.authorize(
+        const principal = await options.accessAuthorizer.authorize(
           request.get("authorization"),
           requiredScopesForMcpRequest(request.body),
         );
+        const permission = mcpCarePermission(request.body);
+        if (permission) member = await requireMembership(options.familyAccess, principal, permission);
       } catch (error) {
+        if (error instanceof FamilyAccessDeniedError) {
+          response.status(403).set("cache-control", "no-store").json({ error: "family_access_denied" });
+          return;
+        }
         if (error instanceof AccessDeniedError) {
           // Alexa+ explicitly forbids WWW-Authenticate on this integration.
           response.status(error.status).json({ error: error.code });
@@ -154,7 +177,7 @@ export function createHttpApp(
       }
     }
 
-    const server = createMcpServer(store, weeklyBrief);
+    const server = createMcpServer(store, weeklyBrief, member);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     response.on("close", () => {
       void transport.close();
@@ -185,6 +208,14 @@ export function createHttpApp(
   });
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+    if (error instanceof FamilyAccessDeniedError) {
+      response.status(403).set("cache-control", "no-store").json({ error: "family_access_denied" });
+      return;
+    }
+    if (error instanceof AccessDeniedError) {
+      response.status(error.status).set("cache-control", "no-store").json({ error: error.code });
+      return;
+    }
     if (
       typeof error === "object" &&
       error !== null &&

@@ -1,4 +1,5 @@
 import { createJwtAccessAuthorizer } from "./auth.js";
+import { createDynamoMembershipDirectory } from "./membership.js";
 import { createDemoStore } from "./domain.js";
 import { createDynamoCareRepository } from "./dynamo-care-repository.js";
 import { createHttpApp } from "./http.js";
@@ -77,6 +78,10 @@ export function createConfiguredApp(
             audience: canonicalMcpResource,
             jwksUri: oauthJwksUri,
           }),
+          familyAccess: tableName ? {
+            circleId,
+            directory: createDynamoMembershipDirectory({ tableName, circleId, region: environment.AWS_REGION }),
+          } : undefined,
           canonicalMcpUri: canonicalMcpResource,
           authorizationServer: oauthAuthorizationServer,
           serveSimulator: environment.KIN_SERVE_SIMULATOR === "true",
