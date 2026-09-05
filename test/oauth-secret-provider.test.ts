@@ -1,15 +1,30 @@
 import {
   GetSecretValueCommand,
   PutSecretValueCommand,
+  SecretsManagerClient,
   type GetSecretValueCommandOutput,
   type PutSecretValueCommandOutput,
 } from "@aws-sdk/client-secrets-manager";
 import { describe, expect, it, vi } from "vitest";
-import { provisionOAuthSecret } from "../infra/oauth-secret-provider.js";
+import { handler, provisionOAuthSecret } from "../infra/oauth-secret-provider.js";
 
 type Output = GetSecretValueCommandOutput | PutSecretValueCommandOutput;
 
 describe("OAuth secret provisioning", () => {
+  it("does not treat Lambda's context argument as an AWS client", async () => {
+    const send = vi.spyOn(SecretsManagerClient.prototype, "send").mockResolvedValue({
+      SecretString: '{"schemaVersion":1}', $metadata: {},
+    } as never);
+    try {
+      await expect(Reflect.apply(handler, undefined, [
+        { RequestType: "Create", ResourceProperties: { SecretId: "secret-arn" } },
+        { awsRequestId: "lambda-request" },
+      ])).resolves.toMatchObject({ Data: { Provisioned: "existing" } });
+      expect(send).toHaveBeenCalledOnce();
+    } finally {
+      send.mockRestore();
+    }
+  });
   it("creates private signing and client material without returning it to CloudFormation", async () => {
     const send = vi.fn(async (command: GetSecretValueCommand | PutSecretValueCommand): Promise<Output> => {
       if (command instanceof GetSecretValueCommand) {

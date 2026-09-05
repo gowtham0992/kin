@@ -75,7 +75,7 @@ export async function provisionOAuthSecret(
   return { PhysicalResourceId: physicalResourceId, Data: { Provisioned: "new" } };
 }
 
-export const handler = provisionOAuthSecret;
+export const handler = (event: ProvisionEvent) => provisionOAuthSecret(event);
 
 function credentials(kind: string) {
   return {
