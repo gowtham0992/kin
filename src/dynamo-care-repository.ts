@@ -28,7 +28,7 @@ import type {
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
 import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
-import { scheduledTask, sameScheduledTask, type ScheduleTaskInput } from "./care-plan.js";
+import { scheduledTask, sameScheduledTask, routineTasks, sameRoutine, type ScheduleRoutineInput, type ScheduleTaskInput } from "./care-plan.js";
 
 interface DynamoSender {
   send(
@@ -139,6 +139,27 @@ export class DynamoCareRepository implements CareRepository {
       throw error;
     }
     return task;
+  }
+
+  async scheduleRoutine(input: ScheduleRoutineInput): Promise<CareTask[]> {
+    const key = { PK: this.#partitionKey(), SK: `ROUTINE_REQUEST#${input.id}` };
+    const read = async () => (await this.#client.send(new GetCommand({ TableName: this.#tableName, Key: key, ConsistentRead: true })) as {
+      Item?: { input: ScheduleRoutineInput; tasks: CareTask[] };
+    }).Item;
+    const existing = await read();
+    if (existing) return sameRoutine(existing, input);
+    const tasks = routineTasks(input, this.#now());
+    try {
+      await this.#client.send(new TransactWriteCommand({ TransactItems: [
+        ...tasks.map(task => ({ Put: { TableName: this.#tableName,
+          Item: { ...task, PK: this.#partitionKey(), SK: taskSortKey(task), entityType: "CareTask" }, ConditionExpression: "attribute_not_exists(PK)" } })),
+        { Put: { TableName: this.#tableName, Item: { ...key, input, tasks, entityType: "RoutineRequest" }, ConditionExpression: "attribute_not_exists(PK)" } },
+      ] }));
+    } catch (error) {
+      if (isConditionalFailure(error)) { const replay = await read(); if (replay) return sameRoutine(replay, input); }
+      throw error;
+    }
+    return tasks;
   }
 
   async today(): Promise<TodaySnapshot> {

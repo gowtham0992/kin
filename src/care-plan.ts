@@ -1,6 +1,29 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { CareTask } from "./domain.js";
+import { calendarDate, shiftCalendarDate } from "./calendar.js";
+
+export const scheduleRoutineBody = z.object({ title: z.string().trim().min(1).max(120),
+  dueAts: z.array(z.iso.datetime()).min(2).max(14), timeZone: z.string().min(1).max(100),
+  requestId: z.string().regex(/^[A-Za-z0-9_-]{8,100}$/) }).strict();
+export interface ScheduleRoutineInput { id: string; title: string; dueAts: string[]; timeZone: string }
+export function routineTasks(input: ScheduleRoutineInput, now: Date): CareTask[] {
+  if (input.dueAts.length < 2 || input.dueAts.length > 14) throw new RangeError("Choose 2 to 14 daily check-ins");
+  const clock = new Intl.DateTimeFormat("en-US", { timeZone: input.timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+  const first = new Date(input.dueAts[0]!);
+  const start = calendarDate(first, input.timeZone), wallTime = clock.format(first);
+  return input.dueAts.map((dueAt, index) => {
+    const date = new Date(dueAt);
+    if (calendarDate(date, input.timeZone) !== shiftCalendarDate(start, index) || clock.format(date) !== wallTime) {
+      throw new RangeError("Daily check-ins must keep the same local time on consecutive dates");
+    }
+    return scheduledTask({ id: `${input.id}-${index + 1}`, title: input.title, dueAt }, now);
+  });
+}
+export function sameRoutine(receipt: { input: ScheduleRoutineInput; tasks: CareTask[] }, input: ScheduleRoutineInput): CareTask[] {
+  if (JSON.stringify(receipt.input) !== JSON.stringify(input)) throw new PlanConflict();
+  return structuredClone(receipt.tasks);
+}
 
 export const scheduleTaskBody = z.object({ title: z.string().trim().min(1).max(120),
   dueAt: z.iso.datetime(), requestId: z.string().regex(/^[A-Za-z0-9_-]{8,100}$/) }).strict();

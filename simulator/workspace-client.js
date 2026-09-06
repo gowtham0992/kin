@@ -23,8 +23,11 @@ export function createWorkspaceClient({ request, newRequestId }) {
   async function savePlan() {
     const current = pendingPlan;
     try {
-      const result = await json("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(current) });
-      if (result.requestId !== current.requestId || result.task?.title !== current.title || result.task?.dueAt !== current.dueAt) throw new Error("Receipt mismatch");
+      const result = await json(current.dueAts ? "/api/routines" : "/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(current) });
+      const matches = current.dueAts ? Array.isArray(result.tasks) && result.tasks.length === current.dueAts.length &&
+        result.tasks.every((task, index) => task.title === current.title && task.dueAt === current.dueAts[index])
+        : result.task?.title === current.title && result.task?.dueAt === current.dueAt;
+      if (result.requestId !== current.requestId || !matches) throw new Error("Receipt mismatch");
       pendingPlan = null; return result;
     } catch (error) { if (error.definitiveRejection) pendingPlan = null; throw error; }
   }
@@ -33,7 +36,7 @@ export function createWorkspaceClient({ request, newRequestId }) {
     today: () => json("/api/today"),
     plan: () => json("/api/plan"),
     schedule(input) {
-if (pendingPlan && (pendingPlan.title !== input.title || pendingPlan.dueAt !== input.dueAt)) return Promise.reject(new Error("Resolve the pending task first"));
+      if (pendingPlan && (pendingPlan.title !== input.title || pendingPlan.dueAt !== input.dueAt || pendingPlan.timeZone !== input.timeZone || JSON.stringify(pendingPlan.dueAts) !== JSON.stringify(input.dueAts))) return Promise.reject(new Error("Resolve the pending task first"));
       pendingPlan ??= { ...input, requestId: newRequestId ? newRequestId() : crypto.randomUUID() };
       return savePlan();
     },

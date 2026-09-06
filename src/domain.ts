@@ -6,7 +6,7 @@ import type {
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
 import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
-import { scheduledTask, sameScheduledTask, type ScheduleTaskInput } from "./care-plan.js";
+import { scheduledTask, sameScheduledTask, routineTasks, sameRoutine, type ScheduleRoutineInput, type ScheduleTaskInput } from "./care-plan.js";
 
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
@@ -76,6 +76,7 @@ export interface CareActivityWindow {
 export interface CareRepository {
   acknowledgeEscalation(input: { id: string; memberId: string; name: string }): Promise<EscalationSummary>;
   scheduleTask(input: ScheduleTaskInput): Promise<CareTask>;
+  scheduleRoutine(input: ScheduleRoutineInput): Promise<CareTask[]>;
   today(): Promise<TodaySnapshot>;
   escalationSnapshot(asOf: Date): Promise<TodaySnapshot>;
   activityBetween(input: { startDate: string; endDate: string }): Promise<CareActivityWindow>;
@@ -120,6 +121,7 @@ export class TaskNotFoundError extends Error {
 export class EscalationNotFoundError extends Error { constructor() { super("Escalation not found"); } }
 
 export class InMemoryCareStore implements CareRepository {
+  readonly #routines = new Map<string, { input: ScheduleRoutineInput; tasks: CareTask[] }>();
   readonly #tasks = new Map<string, CareTask>();
   readonly #confirmationsByRequest = new Map<string, Confirmation>();
   readonly #now: () => Date;
@@ -165,6 +167,16 @@ export class InMemoryCareStore implements CareRepository {
     const task = scheduledTask(input, this.#now());
     this.#tasks.set(task.id, task);
     return structuredClone(task);
+  }
+
+  async scheduleRoutine(input: ScheduleRoutineInput): Promise<CareTask[]> {
+    const receipt = this.#routines.get(input.id);
+    if (receipt) return sameRoutine(receipt, input);
+    const tasks = routineTasks(input, this.#now());
+    if (tasks.some(task => this.#tasks.has(task.id))) throw new Error("Routine task identity conflict");
+    for (const task of tasks) this.#tasks.set(task.id, structuredClone(task));
+    this.#routines.set(input.id, structuredClone({ input, tasks }));
+    return structuredClone(tasks);
   }
 
   async today(): Promise<TodaySnapshot> {

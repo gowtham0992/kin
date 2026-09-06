@@ -18,7 +18,7 @@ import { InvitationIssueError, issueInvitationBody, type InvitationIssuer } from
 import type { BrowserAuthConfig } from "./browser-auth-config.js";
 import { familyAssets } from "./family-assets.js";
 import { AccessChangeConflict, revokeAccessBody, type AccessManagement } from "./access-management.js";
-import { PlanConflict, scheduleTaskBody, scheduledTaskId } from "./care-plan.js";
+import { PlanConflict, scheduleTaskBody, scheduleRoutineBody, scheduledTaskId } from "./care-plan.js";
 import { shiftCalendarDate } from "./calendar.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -125,7 +125,7 @@ export function createHttpApp(
         : request.method === "GET" ? "read"
         : request.method === "POST" && request.path === "/invitations" ? "invite"
         : request.method === "POST" && request.path === "/access/revoke" ? "invite"
-        : request.method === "POST" && request.path === "/tasks" ? "manage_plan"
+        : request.method === "POST" && ["/tasks", "/routines"].includes(request.path) ? "manage_plan"
         : request.method === "POST" && /^\/escalations\/[^/]+\/acknowledge$/.test(request.path) ? "manage_duty"
         : request.method === "POST" && /^\/tasks\/[^/]+\/confirm$/.test(request.path) ? "confirm"
         : request.method === "PUT" && request.path === "/circle/duty" ? "manage_duty" : null;
@@ -156,6 +156,22 @@ export function createHttpApp(
       const plan = await store.activityBetween({ startDate: date, endDate: shiftCalendarDate(date, 30) });
       response.set("cache-control", "no-store").json({ startDate: plan.startDate, endDate: plan.endDate, tasks: plan.tasks });
     } catch (error) { next(error); }
+  });
+
+  app.post("/api/routines", async (request, response, next) => {
+    const parsed = scheduleRoutineBody.safeParse(request.body);
+    if (!parsed.success) { response.status(400).json({ error: "invalid_care_routine" }); return; }
+    const member = response.locals.member as Membership | undefined;
+    if (!member || member.role !== "caregiver") { response.status(403).json({ error: "family_access_denied" }); return; }
+    try {
+      const { requestId, ...input } = parsed.data;
+      const tasks = await store.scheduleRoutine({ id: scheduledTaskId(member.memberId, requestId), ...input });
+      response.set("cache-control", "no-store").json({ tasks, requestId });
+    } catch (error) {
+      if (error instanceof RangeError) { response.status(400).json({ error: "Choose consecutive daily check-ins at the same local time within the next 30 days" }); return; }
+      if (error instanceof PlanConflict) { response.status(409).json({ error: "scheduling_request_conflict" }); return; }
+      next(error);
+    }
   });
 
   app.post("/api/tasks", async (request, response, next) => {

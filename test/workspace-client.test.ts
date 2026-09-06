@@ -3,6 +3,23 @@ const { createWorkspaceClient } = await import(new URL("../simulator/workspace-c
 const ok = (data: unknown) => ({ ok: true, json: async () => data });
 
 describe("authenticated workspace requests", () => {
+  it("retries the exact routine after a partial receipt and refuses changing its dates", async () => {
+    const dueAts = ["2026-09-06T12:00:00.000Z", "2026-09-07T12:00:00.000Z"];
+    const request = vi.fn(async (_url: string, options: { body: string }) => {
+      const body = JSON.parse(options.body);
+      return ok({ requestId: body.requestId, tasks: [{ title: body.title, dueAt: dueAts[0] }] });
+    });
+    const client = createWorkspaceClient({ request, newRequestId: () => "routine-request" });
+    const input = { title: "Call together", dueAts, timeZone: "UTC" };
+    await expect(client.schedule(input)).rejects.toThrow("Receipt mismatch");
+    await expect(client.schedule({ ...input, dueAts: dueAts.slice(0, 1) })).rejects.toThrow("pending task");
+    request.mockImplementation(async (_url, options) => { const body = JSON.parse(options.body);
+      return ok({ requestId: body.requestId, tasks: dueAts.map(dueAt => ({ title: body.title, dueAt })) }); });
+    await client.retry();
+    expect(request.mock.calls.map(call => call[0])).toEqual(["/api/routines", "/api/routines"]);
+    expect(request.mock.calls[0]![1].body).toBe(request.mock.calls[1]![1].body);
+    expect(client.pending).toBeNull();
+  });
   it("keeps one scheduling identity after an uncertain response and rejects changed input", async () => {
     const request = vi.fn(async (_url: string, options: { body: string }) => {
       const body = JSON.parse(options.body);

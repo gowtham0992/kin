@@ -108,21 +108,47 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     content.replaceChildren(heading, balance, roster, node("p", "A roster assignment does not grant account access or confirm SMS delivery. Existing alert recipients do not change when you hand off duty.", "care-note"));
   }
   function renderPlan(data) {
-    const heading = node("div"); heading.append(node("p", "The next 30 days", "kicker"), node("h2", "Make space for the small things."), node("p", "Schedule an ordinary care check-in. Each entry happens once; it is not a recurring reminder or a medication recommendation."));
+    const heading = node("div"); heading.append(node("p", "The next 30 days", "kicker"), node("h2", "Make space for the small things."), node("p", "Agree on an ordinary check-in, once or as a short daily routine. This is care coordination, not a medication recommendation."));
     const form = node("form", null, "invite-panel");
     if (member.permissions.manageDuty) {
       const titleLabel = node("label", "What is the check-in?"); titleLabel.htmlFor = "plan-title";
       const title = node("input"); title.id = "plan-title"; title.required = true; title.maxLength = 120; title.placeholder = "A glass of water, a walk, a call…";
       const dueLabel = node("label", `When? (${Intl.DateTimeFormat().resolvedOptions().timeZone})`); dueLabel.htmlFor = "plan-due";
       const due = node("input"); due.id = "plan-due"; due.type = "datetime-local"; due.required = true;
-      const submit = node("button", "Schedule check-in", "primary"); submit.type = "submit";
-      const note = node("p", "Choose a time in the next 30 days. Missed check-ins may notify the caregiver on duty.", "care-note");
-      form.append(titleLabel, title, dueLabel, due, note, submit);
+      const repeatLabel = node("label", "How often?"); repeatLabel.htmlFor = "plan-repeat";
+      const repeat = node("select"); repeat.id = "plan-repeat";
+      for (const [value, label] of [["1", "Just once"], ["7", "Daily · 7 check-ins"], ["14", "Daily · 14 check-ins"]]) repeat.add(new Option(label, value));
+      const preview = node("p", "", "care-note"); preview.setAttribute("role", "status");
+      function occurrences() {
+        const first = new Date(due.value), times = [];
+        const localStamp = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+        if (localStamp(first) !== due.value.slice(0, 16)) throw new Error("That local time is unavailable. Choose another start time.");
+        for (let index = 0; index < Number(repeat.value); index++) {
+          const next = new Date(first); next.setDate(first.getDate() + index);
+          if (!Number.isFinite(next.getTime()) || next.getHours() !== first.getHours() || next.getMinutes() !== first.getMinutes()) throw new Error("That local time is unavailable during a clock change. Choose another time.");
+          times.push(next.toISOString());
+        }
+        return times;
+      }
+      function updatePreview() {
+        if (!due.value) { preview.textContent = "Choose a start time to review the dates."; return; }
+        try { const times = occurrences(); preview.textContent = `${times.length} check-in${times.length === 1 ? "" : "s"} · ${new Date(times[0]).toLocaleString()}${times.length > 1 ? ` through ${new Date(times.at(-1)).toLocaleString()}. Stops after the last check-in; it does not renew.` : ""}`; }
+        catch (error) { preview.textContent = error.message; }
+      }
+      due.addEventListener("change", updatePreview); repeat.addEventListener("change", updatePreview); updatePreview();
+      const submit = node("button", "Save care plan", "primary"); submit.type = "submit";
+      const note = node("p", "Keep every check-in within the next 30 days. Review the dates before saving: routines cannot yet be edited or removed together. Missed check-ins may notify the caregiver on duty.", "care-note");
+      form.append(titleLabel, title, dueLabel, due, repeatLabel, repeat, preview, note, submit);
       form.addEventListener("submit", event => {
         event.preventDefault(); if (!form.reportValidity()) return;
         const when = new Date(due.value);
         if (!Number.isFinite(when.getTime()) || when <= new Date() || when > new Date(Date.now() + 30 * 86400000)) { status.textContent = "Choose a future time within the next 30 days."; due.focus(); return; }
-        void mutate(() => client.schedule({ title: title.value.trim(), dueAt: when.toISOString() }), "Check-in scheduled.");
+        let dueAts;
+        try { dueAts = occurrences(); } catch (error) { status.textContent = error.message; due.focus(); return; }
+        if (new Date(dueAts.at(-1)) > new Date(Date.now() + 30 * 86400000)) { status.textContent = "The entire routine must fit within the next 30 days."; due.focus(); return; }
+        const input = dueAts.length === 1 ? { title: title.value.trim(), dueAt: dueAts[0] }
+          : { title: title.value.trim(), dueAts, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+        void mutate(() => client.schedule(input), "Care plan saved.");
       });
     } else form.append(node("p", "Your role can view the plan. A caregiver can schedule new check-ins."));
     const list = node("ul", null, "care-plan");
