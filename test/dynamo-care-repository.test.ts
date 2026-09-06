@@ -1,4 +1,5 @@
 import {
+  GetCommand,
   PutCommand,
   QueryCommand,
   TransactWriteCommand,
@@ -6,6 +7,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { describe, expect, it } from "vitest";
 import { DynamoCareRepository } from "../src/dynamo-care-repository.js";
+import { DutyConflict, type DutyChangeReceipt } from "../src/duty-change.js";
 
 const fixedNow = () => new Date("2026-09-02T16:00:00.000Z");
 const storedTask = {
@@ -36,6 +38,94 @@ class FakeDynamoSender {
     return response;
   }
 }
+
+const dutyMembers = [
+  { PK: "CIRCLE#family-1", SK: "MEMBER#maya", entityType: "CircleMember", id: "maya", name: "Maya", relationship: "daughter", canReceiveAlerts: true },
+  { PK: "CIRCLE#family-1", SK: "MEMBER#theo", entityType: "CircleMember", id: "theo", name: "Theo", relationship: "son", canReceiveAlerts: true },
+];
+const storedDuty = { PK: "CIRCLE#family-1", SK: "DUTY#2026-09-02", entityType: "DutyAssignment",
+  memberId: "theo", memberName: "Theo", startsAt: "2026-09-02T00:00:00.000Z", endsAt: "2026-09-03T00:00:00.000Z" };
+const reviewedDuty = { date: "2026-09-02", memberId: "maya", expectedMemberId: "theo", requestId: "handoff-review-1", actor: "Gowtham" };
+
+describe("DynamoDB reviewed duty handoffs", () => {
+  it("atomically binds the reviewed assignment and permanent receipt", async () => {
+    const client = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [storedDuty] }, {}]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    const result = await repository.assignDuty(reviewedDuty);
+    expect(result).toMatchObject({ requestId: reviewedDuty.requestId, assignments: [{
+      date: reviewedDuty.date, memberId: "maya", memberName: "Maya", changedBy: "Gowtham", changedAt: fixedNow().toISOString(),
+    }] });
+    expect(client.commands[0]).toBeInstanceOf(GetCommand);
+    expect(client.commands.slice(0, 3).every(command => (command.input as { ConsistentRead?: boolean }).ConsistentRead)).toBe(true);
+    expect(client.commands[3]).toBeInstanceOf(TransactWriteCommand);
+    expect(client.commands[3]?.input).toMatchObject({ TransactItems: [
+      { Put: { Item: { memberId: "maya", changedBy: "Gowtham", changedAt: fixedNow().toISOString() },
+        ConditionExpression: "memberId = :expectedMember", ExpressionAttributeValues: { ":expectedMember": "theo" } } },
+      { Put: { Item: { PK: "CIRCLE#family-1", SK: `DUTY_CHANGE#${reviewedDuty.requestId}`, input: reviewedDuty, result },
+        ConditionExpression: "attribute_not_exists(PK)" } },
+    ] });
+    const receipt = (client.commands[3]?.input as { TransactItems: { Put?: { Item: DutyChangeReceipt } }[] }).TransactItems[1]!.Put!.Item;
+    const replayClient = new FakeDynamoSender([{ Item: receipt }]);
+    const replayRepository = new DynamoCareRepository({ client: replayClient, tableName: "kin-test", circleId: "family-1", now: () => new Date("2026-10-02T16:00:00.000Z") });
+    expect(await replayRepository.assignDuty(reviewedDuty)).toEqual(result);
+    expect(replayClient.commands).toHaveLength(1);
+    const changedClient = new FakeDynamoSender([{ Item: receipt }]);
+    const changedRepository = new DynamoCareRepository({ client: changedClient, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    await expect(changedRepository.assignDuty({ ...reviewedDuty, memberId: "theo" })).rejects.toThrow(DutyConflict);
+    expect(changedClient.commands).toHaveLength(1);
+  });
+
+  it("requires a still-empty day when the review says there is no coverage", async () => {
+    const client = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [] }, {}]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    await repository.assignDuty({ ...reviewedDuty, expectedMemberId: null });
+    const put = (client.commands[3]?.input as { TransactItems: { Put: Record<string, unknown> }[] }).TransactItems[0]!.Put;
+    expect(put.ConditionExpression).toBe("attribute_not_exists(PK)");
+    expect(put).not.toHaveProperty("ExpressionAttributeValues");
+  });
+
+  it("rejects an already-stale review without issuing a write", async () => {
+    const client = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [{ ...storedDuty, memberId: "maya" }] }]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    await expect(repository.assignDuty(reviewedDuty)).rejects.toThrow(DutyConflict);
+    expect(client.commands.some(command => command instanceof TransactWriteCommand || command instanceof PutCommand)).toBe(false);
+  });
+
+  it("reports a conditional race as a conflict but leaves transient transaction failures retryable", async () => {
+    for (const code of ["ConditionalCheckFailed", "TransactionConflict", "ThrottlingError"]) {
+      const failure = Object.assign(new Error(code), { name: "TransactionCanceledException", CancellationReasons: [{ Code: code }] });
+      const client = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [storedDuty] }, failure, {}]);
+      const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+      if (code === "ConditionalCheckFailed") await expect(repository.assignDuty(reviewedDuty)).rejects.toThrow(DutyConflict);
+      else await expect(repository.assignDuty(reviewedDuty)).rejects.toBe(failure);
+      expect(client.commands[4]?.input).toMatchObject({ ConsistentRead: true, Key: { SK: `DUTY_CHANGE#${reviewedDuty.requestId}` } });
+    }
+  });
+
+  it("recovers the winner's receipt after concurrent identical requests", async () => {
+    const winningClient = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [storedDuty] }, {}]);
+    const winningRepository = new DynamoCareRepository({ client: winningClient, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    const result = await winningRepository.assignDuty(reviewedDuty);
+    const receipt = (winningClient.commands[3]?.input as { TransactItems: { Put?: { Item: DutyChangeReceipt } }[] }).TransactItems[1]!.Put!.Item;
+    const failed = Object.assign(new Error("Receipt exists"), { name: "TransactionCanceledException", CancellationReasons: [{ Code: "None" }, { Code: "ConditionalCheckFailed" }] });
+    const client = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [storedDuty] }, failed, { Item: receipt }]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    expect(await repository.assignDuty(reviewedDuty)).toEqual(result);
+    expect(client.commands.filter(command => command instanceof TransactWriteCommand)).toHaveLength(1);
+  });
+
+  it("recovers an identical request committed between the receipt read and roster read", async () => {
+    const winner = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [storedDuty] }, {}]);
+    const first = new DynamoCareRepository({ client: winner, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    const result = await first.assignDuty(reviewedDuty);
+    const receipt = (winner.commands[3]?.input as { TransactItems: { Put?: { Item: DutyChangeReceipt } }[] }).TransactItems[1]!.Put!.Item;
+    const client = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [{ ...storedDuty, memberId: "maya", memberName: "Maya" }] }, { Item: receipt }]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    expect(await repository.assignDuty(reviewedDuty)).toEqual(result);
+    expect(client.commands).toHaveLength(4);
+    expect(client.commands.some(command => command instanceof TransactWriteCommand)).toBe(false);
+  });
+});
 
 describe("DynamoCareRepository", () => {
   it("records the first acknowledgment without changing task or delivery state", async () => {

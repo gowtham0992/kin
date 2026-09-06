@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AccessDeniedError } from "../src/auth.js";
 import { createDemoStore } from "../src/domain.js";
 import { createHttpApp, type HttpAppOptions } from "../src/http.js";
+import { createFamilyConversationService, familyConversationConsentVersion, BudgetExceeded } from "../src/family-conversation.js";
 
 const config = { clientId: "kin-family-browser", issuer: "https://kin.example", redirectUri: "https://kin.example/invite.html", resource: "https://kin.example/mcp" };
 function setup() {
@@ -19,6 +20,62 @@ function setup() {
 }
 
 describe("separate family workspace", () => {
+  it("keeps optional natural language disabled and requires consent for every model request", async () => {
+    const fixture = setup();
+    const body = { message: "I had some water", mode: "bedrock", transferConsent: true, disclosureVersion: familyConversationConsentVersion };
+    await request(fixture.app()).post("/api/conversation").set("authorization", "Bearer test").send(body).expect(503);
+    const generate = vi.fn(async () => ({ action: "confirm", taskId: "morning-water", response: "done" }));
+    const reserve = vi.fn(async () => {});
+    fixture.options.familyConversation = createFamilyConversationService({ generate, budget: { reserve } });
+    const app = fixture.app();
+    await request(app).post("/api/conversation").send(body).expect(401);
+    for (const invalid of [ { ...body, transferConsent: false }, { ...body, transferConsent: undefined },
+      { ...body, disclosureVersion: "outdated" }, { ...body, memberId: "theo" }, { ...body, mode: undefined } ]) {
+      await request(app).post("/api/conversation").set("authorization", "Bearer test").send(invalid).expect(400);
+    }
+    await request(app).post("/api/conversation").set("authorization", "Bearer test").send({ message: "Show today" }).expect(200);
+    expect(generate).not.toHaveBeenCalled(); expect(reserve).not.toHaveBeenCalled();
+    const session = await request(app).get("/api/session").set("authorization", "Bearer test").expect(200);
+    expect(session.body.conversation).toEqual({ naturalLanguage: true, consentVersion: familyConversationConsentVersion });
+    const result = await request(app).post("/api/conversation").set("authorization", "Bearer test").send(body).expect(200);
+    expect(result.body).toMatchObject({ action: "confirm", mode: "bedrock", task: { id: "morning-water" } });
+    expect(reserve).toHaveBeenCalledExactlyOnceWith({ circleId: "family-a", memberId: "maya" });
+    const today = await request(app).get("/api/today").set("authorization", "Bearer test");
+    expect(today.body.summary.completed).toBe(0);
+    fixture.find.mockResolvedValue({ circleId: "family-a", memberId: "theo", name: "Theo", role: "viewer", status: "active" });
+    await request(app).post("/api/conversation").set("authorization", "Bearer test").send(body).expect(403);
+    const viewer = await request(app).get("/api/session").set("authorization", "Bearer test");
+    expect(viewer.body.conversation).toBeUndefined(); expect(generate).toHaveBeenCalledTimes(1);
+  });
+  it("sanitizes model failures and limits without making a model call when quota is denied", async () => {
+    const fixture = setup(), generate = vi.fn(async () => { throw new Error("PRIVATE PROVIDER CONTENT"); });
+    const reserve = vi.fn(async () => {});
+    fixture.options.familyConversation = createFamilyConversationService({ generate, budget: { reserve } });
+    const app = fixture.app(), body = { message: "I had some water", mode: "bedrock", transferConsent: true, disclosureVersion: familyConversationConsentVersion };
+    await request(app).post("/api/conversation").set("authorization", "Bearer test").send(body).expect(503, { error: "natural_language_unavailable" });
+    reserve.mockRejectedValueOnce(new BudgetExceeded());
+    const limited = await request(app).post("/api/conversation").set("authorization", "Bearer test").send(body).expect(429, { error: "natural_language_limited" });
+    expect(limited.headers["retry-after"]).toBe("60"); expect(limited.headers["cache-control"]).toBe("no-store");
+    reserve.mockRejectedValueOnce(new Error("UNKNOWN BUDGET OUTCOME"));
+    await request(app).post("/api/conversation").set("authorization", "Bearer test").send(body).expect(503, { error: "natural_language_unavailable" });
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+  it("scopes reviewed handoffs to the member and retains the original receipt on retry", async () => {
+    const fixture = setup(), app = fixture.app();
+    const circle = await request(app).get("/api/circle").set("authorization", "Bearer test").expect(200);
+    const old = circle.body.assignments[0], next = old.memberId === "maya" ? "theo" : "maya";
+    const body = { date: old.date, memberId: next, expectedMemberId: old.memberId, requestId: "review-duty-0001" };
+    await request(app).put("/api/circle/duty").send(body).expect(401);
+    const saved = await request(app).put("/api/circle/duty").set("authorization", "Bearer test").send(body).expect(200);
+    expect(saved.body.requestId).toBe(body.requestId);
+    expect(saved.body.assignments.find((day: { date: string }) => day.date === body.date)).toMatchObject({ memberId: next, changedBy: "Maya" });
+    await request(app).put("/api/circle/duty").set("authorization", "Bearer test").send(body).expect(200);
+    await request(app).put("/api/circle/duty").set("authorization", "Bearer test").send({ ...body, requestId: "review-duty-0002" }).expect(409);
+    await request(app).put("/api/circle/duty").set("authorization", "Bearer test").send({ ...body, actor: "Fake name" }).expect(400);
+    await request(app).put("/api/circle/duty").set("authorization", "Bearer test").send({ date: body.date, memberId: next, expectedMemberId: null }).expect(400);
+    fixture.find.mockResolvedValue({ circleId: "family-a", memberId: "theo", name: "Theo", role: "viewer", status: "active" });
+    await request(app).put("/api/circle/duty").set("authorization", "Bearer test").send(body).expect(403);
+  });
   it("protects request interpretation and never uses the demo model for family text", async () => {
     const fixture = setup(); const generate = vi.fn(); fixture.options.demoIntentGenerator = generate;
     const app = fixture.app();

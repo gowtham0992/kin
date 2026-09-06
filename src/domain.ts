@@ -9,6 +9,7 @@ import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } 
 import { scheduledTask, sameScheduledTask, routineTasks, sameRoutine, type ScheduleRoutineInput, type ScheduleTaskInput } from "./care-plan.js";
 import { editableRoutineTasks, changedRoutineTask, RoutineConflict, type RoutineChange } from "./care-plan.js";
 import { assertTaskReview, type TaskReview } from "./task-review.js";
+import { assertDutyReview, replayDutyChange, validateDutyChange, type DutyChangeInput, type DutyChangeReceipt, type DutyChangeResult } from "./duty-change.js";
 
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
@@ -38,6 +39,8 @@ export interface Confirmation {
 }
 
 export interface DutyAssignment {
+  changedBy?: string;
+  changedAt?: string;
   memberId: string;
   memberName: string;
   startsAt: string;
@@ -87,7 +90,7 @@ export interface CareRepository {
   escalationSnapshot(asOf: Date): Promise<TodaySnapshot>;
   activityBetween(input: { startDate: string; endDate: string }): Promise<CareActivityWindow>;
   circle(): Promise<CircleSnapshot>;
-  assignDuty(input: { date: string; memberId: string }): Promise<CircleSnapshot>;
+  assignDuty(input: DutyChangeInput): Promise<DutyChangeResult>;
   confirm(input: {
     expected?: TaskReview;
     taskId: string;
@@ -128,6 +131,7 @@ export class TaskNotFoundError extends Error {
 export class EscalationNotFoundError extends Error { constructor() { super("Escalation not found"); } }
 
 export class InMemoryCareStore implements CareRepository {
+  readonly #dutyChanges = new Map<string, DutyChangeReceipt>();
   readonly #routineChanges = new Map<string, { input: RoutineChange; result: { requestId: string; changed: number } }>();
   readonly #routines = new Map<string, { input: ScheduleRoutineInput; tasks: CareTask[] }>();
   readonly #tasks = new Map<string, CareTask>();
@@ -247,6 +251,10 @@ export class InMemoryCareStore implements CareRepository {
   }
 
   async circle(): Promise<CircleSnapshot> {
+    return this.#circleSnapshot();
+  }
+
+  #circleSnapshot(): CircleSnapshot {
     const startDate = calendarDate(this.#now(), this.#timeZone);
     const endDate = shiftCalendarDate(startDate, 6);
     return {
@@ -260,18 +268,27 @@ export class InMemoryCareStore implements CareRepository {
     };
   }
 
-  async assignDuty(input: { date: string; memberId: string }): Promise<CircleSnapshot> {
+  async assignDuty(rawInput: DutyChangeInput): Promise<DutyChangeResult> {
+    const input = validateDutyChange(rawInput);
+    const receipt = input.requestId ? this.#dutyChanges.get(input.requestId) : undefined;
+    if (receipt) return replayDutyChange(receipt, input);
+    const current = this.#circleSnapshot();
+    if (input.date < current.startDate || input.date > current.endDate) throw new Error("Duty date must be within the visible roster week");
     const member = this.#members.find((candidate) => candidate.id === input.memberId);
     if (!member?.canReceiveAlerts) throw new Error("Caregiver is not eligible for duty");
     const bounds = calendarDayBounds(input.date, this.#timeZone);
+    assertDutyReview(this.#dutyByDate.get(input.date), input);
     const assignment: DutyAssignment = {
       memberId: member.id,
       memberName: member.name,
       ...bounds,
+      ...(input.requestId ? { changedAt: this.#now().toISOString(), ...(input.actor ? { changedBy: input.actor } : {}) } : {}),
     };
     this.#dutyByDate.set(input.date, assignment);
     if (input.date === calendarDate(this.#now(), this.#timeZone)) this.#onDuty = assignment;
-    return this.circle();
+    const result = { ...this.#circleSnapshot(), ...(input.requestId ? { requestId: input.requestId } : {}) };
+    if (input.requestId) this.#dutyChanges.set(input.requestId, structuredClone({ input, result }));
+    return result;
   }
 
   async escalationSnapshot(asOf: Date): Promise<TodaySnapshot> {

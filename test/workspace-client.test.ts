@@ -1,8 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
-const { createWorkspaceClient, createPlanDraft } = await import(new URL("../simulator/workspace-client.js", import.meta.url).href);
+const { createWorkspaceClient, createPlanDraft, dutyDays } = await import(new URL("../simulator/workspace-client.js", import.meta.url).href);
 const ok = (data: unknown) => ({ ok: true, json: async () => data });
 
 describe("authenticated workspace requests", () => {
+  it("materializes seven calendar days with uncovered slots across a month boundary", () => {
+    const result = dutyDays({ startDate: "2026-10-29", endDate: "2026-11-04", assignments: [{ date: "2026-11-01", memberId: "maya" }] });
+    expect(result.map((day: { date: string }) => day.date)).toEqual(["2026-10-29", "2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04"]);
+    expect(result.filter((day: { assignment: unknown }) => day.assignment === null)).toHaveLength(6);
+    expect(() => dutyDays({ startDate: "2026-02-30", endDate: "2026-03-08", assignments: [] })).toThrow("Invalid coverage window");
+  });
+  it("retains the exact reviewed handoff on uncertain retry and releases stale conflicts", async () => {
+    const request = vi.fn(async (_url: string, _options: { body: string }): Promise<unknown> => { throw new Error("Connection lost"); });
+    const client = createWorkspaceClient({ request, newRequestId: () => "duty-request-1" });
+    const change = { date: "2026-09-08", memberId: "maya", expectedMemberId: null };
+    await expect(client.assignDuty(change)).rejects.toThrow("Connection lost");
+    expect(client.pendingKind).toBe("duty handoff");
+    await expect(client.assignDuty({ ...change, memberId: "theo" })).rejects.toThrow("Resolve");
+    request.mockResolvedValue({ ok: false, status: 409 });
+    await expect(client.retry()).rejects.toMatchObject({ status: 409 });
+    expect(request.mock.calls[0]![1].body).toEqual(request.mock.calls[1]![1].body);
+    expect(client.pending).toBeNull();
+  });
+  it("requires a matching handoff receipt and discards late responses after session reset", async () => {
+    let resolve!: (value: unknown) => void;
+    const request = vi.fn(async () => new Promise(done => { resolve = done; }));
+    const client = createWorkspaceClient({ request, newRequestId: () => "duty-request-2" });
+    const saving = client.assignDuty({ date: "2026-09-08", memberId: "maya", expectedMemberId: "theo" });
+    client.reset(); resolve(ok({ requestId: "duty-request-2", assignments: [{ date: "2026-09-08", memberId: "maya" }] }));
+    await expect(saving).rejects.toMatchObject({ stale: true });
+    expect(client.pending).toBeNull();
+  });
   it("clears a definitively rejected reviewed check-in so the user can review again", async () => {
     const request = vi.fn(async () => ({ ok: false, status: 409 }));
     const client = createWorkspaceClient({ request, newRequestId: () => "review-request-1" });

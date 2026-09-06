@@ -1,15 +1,24 @@
 // Local synthetic UI fixture only. No AWS clients, persisted data, or live accounts.
 import express from "express";
 import { createHttpApp } from "../src/http.js";
-import { createDemoStore } from "../src/domain.js";
+import { createDemoStore, InMemoryCareStore } from "../src/domain.js";
+import { createFamilyConversationService, BudgetExceeded } from "../src/family-conversation.js";
 
 const mode = process.argv[2] ?? "success";
 const port = Number(process.argv[3] ?? 3014);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid preview port");
-if (!["success", "denied", "empty", "today-empty", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["success", "denied", "empty", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
-const store = createDemoStore();
+const store = mode === "coverage-empty" || mode === "duty-uncertain" ? new InMemoryCareStore([], () => new Date(), null, "America/Denver") : createDemoStore();
+if (mode === "duty-uncertain") {
+  const assign = store.assignDuty.bind(store); let first = true;
+  store.assignDuty = async input => {
+    const result = await assign(input);
+    if (first) { first = false; throw new Error("Synthetic lost handoff acknowledgment after saving"); }
+    return result;
+  };
+}
 if (["plan-uncertain", "plan-refresh-failure"].includes(mode)) {
   const schedule = store.scheduleRoutine.bind(store), activity = store.activityBetween.bind(store);
   let saved = false;
@@ -35,6 +44,13 @@ if (mode === "offline") store.today = async () => { throw new Error("Synthetic o
 if (mode === "empty") store.circle = async () => ({ startDate: "2026-09-05", endDate: "2026-09-11", members: [], assignments: [] });
 let targetStatus = "active";
 app.use(createHttpApp(store, undefined, {
+  familyConversation: mode.startsWith("model") ? createFamilyConversationService({
+    budget: { async reserve() { if (mode === "model-limited") throw new BudgetExceeded(); } },
+    async generate() {
+      if (mode === "model-unavailable") throw new Error("Synthetic model outage");
+      return { action: "confirm", taskId: "morning-water", response: "done" };
+    },
+  }) : undefined,
   accessAuthorizer: { async authorize() { return { subject: "synthetic-organizer", scopes: new Set(["mcp:tools"]), claims: { iss: "https://example.invalid" } }; } },
   familyAccess: { circleId: "synthetic", directory: { async find() { return {
     circleId: "synthetic", memberId: "maya", name: "Maya", role: mode.startsWith("viewer") ? "viewer" : "caregiver", status: "active", canInvite: mode !== "denied" && !mode.startsWith("viewer"),

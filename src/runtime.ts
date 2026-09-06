@@ -10,6 +10,8 @@ import { createStringParameterProvider } from "./parameter.js";
 import { createUnavailablePublicApp } from "./public-api-gate.js";
 import { createBedrockBriefGenerator, WeeklyBriefService } from "./weekly-brief.js";
 import { createBedrockIntentGenerator } from "./demo-conversation.js";
+import { createFamilyConversationService } from "./family-conversation.js";
+import { createDynamoConversationBudget } from "./conversation-budget.js";
 
 export interface RuntimeOptions {
   requireOAuth?: boolean;
@@ -88,6 +90,14 @@ export function createConfiguredApp(
     clientId: environment.KIN_BROWSER_CLIENT_ID ?? "", issuer: oauthIssuer!,
     redirectUri: environment.KIN_BROWSER_REDIRECT_URI ?? "", resource: canonicalMcpUri ?? `${oauthIssuer}/mcp`,
   }) : undefined;
+  const familyConversationEnabled = environment.KIN_FAMILY_CONVERSATION_ENABLED === "true";
+  if (familyConversationEnabled && (!familyEnabled || !browserAuth || !familyAccess || !oauthValues.every(Boolean))) {
+    throw new Error("Family conversation requires the authenticated family workspace and a care table");
+  }
+  const familyConversation = familyConversationEnabled ? createFamilyConversationService({
+    generate: createBedrockIntentGenerator({ modelId: "amazon.nova-micro-v1:0", region: environment.AWS_REGION, timeoutMs: 5000 }),
+    budget: createDynamoConversationBudget({ tableName: tableName!, region: environment.AWS_REGION }),
+  }) : undefined;
   const issuingEnabled = environment.KIN_INVITATION_ISSUING_ENABLED === "true";
   const userPoolId = environment.KIN_COGNITO_USER_POOL_ID?.trim();
   const circleName = environment.KIN_CIRCLE_NAME?.trim();
@@ -106,6 +116,7 @@ export function createConfiguredApp(
             jwksUri: oauthJwksUri,
           }),
           familyAccess,
+          familyConversation,
           browserAuth: browserAuth && typeof canonicalMcpResource === "function" ? async () => {
             if (await canonicalMcpResource() !== browserAuth.resource) throw new Error("Browser resource does not match canonical MCP resource");
             return browserAuth;

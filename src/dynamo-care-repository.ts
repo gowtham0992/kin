@@ -31,6 +31,7 @@ import { toEscalationSummary } from "./escalation.js";
 import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
 import { scheduledTask, sameScheduledTask, routineTasks, sameRoutine, type ScheduleRoutineInput, type ScheduleTaskInput } from "./care-plan.js";
 import { editableRoutineTasks, RoutineConflict, type RoutineChange } from "./care-plan.js";
+import { appliedDutySnapshot, assertDutyReview, DutyConflict, replayDutyChange, validateDutyChange, type DutyChangeInput, type DutyChangeReceipt, type DutyChangeResult } from "./duty-change.js";
 
 interface DynamoSender {
   send(
@@ -389,7 +390,16 @@ if ((taskResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey || (escalati
     return { startDate, endDate, members, assignments };
   }
 
-  async assignDuty(input: { date: string; memberId: string }): Promise<CircleSnapshot> {
+  async assignDuty(rawInput: DutyChangeInput): Promise<DutyChangeResult> {
+    const input = validateDutyChange(rawInput);
+    const receiptKey = { PK: this.#partitionKey(), SK: `DUTY_CHANGE#${input.requestId}` };
+    const readReceipt = async () => (await this.#client.send(new GetCommand({
+      TableName: this.#tableName, Key: receiptKey, ConsistentRead: true,
+    })) as { Item?: DutyChangeReceipt }).Item;
+    if (input.requestId) {
+      const receipt = await readReceipt();
+      if (receipt) return replayDutyChange(receipt, input);
+    }
     const current = await this.circle();
     if (input.date < current.startDate || input.date > current.endDate) {
       throw new Error("Duty date must be within the visible roster week");
@@ -400,7 +410,41 @@ if ((taskResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey || (escalati
       memberId: member.id,
       memberName: member.name,
       ...calendarDayBounds(input.date, this.#timeZone),
+      ...(input.requestId ? { changedAt: this.#now().toISOString(), ...(input.actor ? { changedBy: input.actor } : {}) } : {}),
     };
+    if (input.requestId) {
+      try { assertDutyReview(current.assignments.find(day => day.date === input.date), input); }
+      catch (error) {
+        const receipt = await readReceipt();
+        if (receipt) return replayDutyChange(receipt, input);
+        throw error;
+      }
+      const result = appliedDutySnapshot(current, input, assignment);
+      try {
+        await this.#client.send(new TransactWriteCommand({ TransactItems: [
+          { Put: {
+            TableName: this.#tableName,
+            Item: { ...assignment, PK: this.#partitionKey(), SK: `DUTY#${input.date}`, entityType: "DutyAssignment" },
+            ConditionExpression: input.expectedMemberId === null ? "attribute_not_exists(PK)" : "memberId = :expectedMember",
+            ...(input.expectedMemberId === null ? {} : { ExpressionAttributeValues: { ":expectedMember": input.expectedMemberId } }),
+          } },
+          { Put: {
+            TableName: this.#tableName,
+            Item: { ...receiptKey, input, result, entityType: "DutyChange" },
+            ConditionExpression: "attribute_not_exists(PK)",
+          } },
+        ] }));
+      } catch (error) {
+        if (isConditionalFailure(error)) {
+          const receipt = await readReceipt();
+          if (receipt) return replayDutyChange(receipt, input);
+          const reasons = (error as Error & { CancellationReasons?: { Code?: string }[] }).CancellationReasons;
+          if (reasons?.some(reason => reason.Code === "ConditionalCheckFailed")) throw new DutyConflict();
+        }
+        throw error;
+      }
+      return result;
+    }
     await this.#client.send(new PutCommand({
       TableName: this.#tableName,
       Item: {

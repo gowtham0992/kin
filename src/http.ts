@@ -24,6 +24,8 @@ import { shiftCalendarDate } from "./calendar.js";
 import { conversationBody, proposeConversation, type IntentGenerator } from "./demo-conversation.js";
 import { createConversationFocus } from "./conversation-focus.js";
 import { taskReviewSchema, TaskReviewConflict } from "./task-review.js";
+import { DutyConflict } from "./duty-change.js";
+import { BudgetExceeded, ConsentRequired, ModelUnavailable, familyConversationConsentVersion, createFamilyConversationService } from "./family-conversation.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -36,10 +38,13 @@ const confirmationBody = z.object({
 const dutyBody = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   memberId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
-}).strict();
+  expectedMemberId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/).nullable().optional(),
+  requestId: z.string().min(8).max(100).optional(),
+}).strict().refine(input => (input.expectedMemberId !== undefined) === (input.requestId !== undefined));
 
 export interface HttpAppOptions {
   demoIntentGenerator?: IntentGenerator;
+  familyConversation?: ReturnType<typeof createFamilyConversationService>;
   accessAuthorizer?: AccessAuthorizer;
   familyAccess?: FamilyAccess;
   invitationIssuer?: InvitationIssuer;
@@ -58,6 +63,9 @@ export function createHttpApp(
   options: HttpAppOptions = {},
 ) {
   const familyEnabled = options.serveFamilyWorkspace === true;
+  if (options.familyConversation && (!options.accessAuthorizer || !options.familyAccess)) {
+    throw new Error("Family conversation requires authentication and membership checks");
+  }
   if (familyEnabled && (!options.accessAuthorizer || !options.familyAccess || !options.browserAuth)) {
     throw new Error("Family workspace requires authentication, membership checks, and browser sign-in");
   }
@@ -168,14 +176,28 @@ export function createHttpApp(
     } catch (error) { next(error); }
   });
 
-  // Authenticated explicit-command interpretation only. Never forwards family text to a model.
+  // Model transfer is a separate, explicitly consented mode. Interpretation cannot save a task.
   app.post("/api/conversation", async (request, response, next) => {
     response.set("cache-control", "no-store");
     if (!options.accessAuthorizer || !response.locals.member) { response.status(401).json({ error: "invalid_token" }); return; }
-    const body = z.object({ message: z.string().trim().min(1).max(800) }).strict().safeParse(request.body);
+    const body = z.union([
+      z.object({ message: z.string().trim().min(1).max(800), mode: z.literal("explicit").optional() }).strict(),
+      z.object({ message: z.string().trim().min(1).max(800), mode: z.literal("bedrock"), transferConsent: z.literal(true),
+        disclosureVersion: z.literal(familyConversationConsentVersion) }).strict(),
+    ]).safeParse(request.body);
     if (!body.success) { response.status(400).json({ error: "invalid_message" }); return; }
-    try { response.json(await proposeConversation(body.data.message, await store.today())); }
-    catch (error) { next(error); }
+    if (body.data.mode === "bedrock" && !options.familyConversation) { response.status(503).json({ error: "natural_language_not_enabled" }); return; }
+    try {
+      const snapshot = await store.today();
+      response.json(body.data.mode === "bedrock"
+        ? await options.familyConversation!.propose({ message: body.data.message, consent: true }, snapshot, response.locals.member)
+        : await proposeConversation(body.data.message, snapshot));
+    } catch (error) {
+      if (error instanceof BudgetExceeded) { response.set("retry-after", String(error.retryAfterSeconds)).status(429).json({ error: "natural_language_limited" }); return; }
+      if (error instanceof ConsentRequired) { response.status(400).json({ error: "transfer_consent_required" }); return; }
+      if (error instanceof ModelUnavailable) { response.status(503).json({ error: "natural_language_unavailable" }); return; }
+      next(error);
+    }
   });
 
   app.post("/api/escalations/:id/acknowledge", async (request, response, next) => {
@@ -278,7 +300,8 @@ export function createHttpApp(
     response.json({ name: member.name, memberId: member.memberId, role: member.role, permissions: {
       confirm: member.role !== "viewer", manageDuty: member.role === "caregiver",
       invite: member.role === "caregiver" && member.canInvite === true,
-    } });
+    }, ...(options.familyConversation && member.role !== "viewer"
+      ? { conversation: { naturalLanguage: true, consentVersion: familyConversationConsentVersion } } : {}) });
   });
 
   app.get("/api/invitations/options", async (_request, response, next) => {
@@ -339,8 +362,12 @@ export function createHttpApp(
       return;
     }
     try {
-      response.set("cache-control", "no-store").json(await store.assignDuty(body.data));
+      const member = response.locals.member as Membership | undefined;
+      const result = await store.assignDuty({ ...body.data,
+        ...(body.data.requestId && member ? { requestId: scheduledTaskId(member.memberId, body.data.requestId), actor: member.name } : {}) });
+      response.set("cache-control", "no-store").json({ ...result, ...(body.data.requestId ? { requestId: body.data.requestId } : {}) });
     } catch (error) {
+      if (error instanceof DutyConflict) { response.status(409).json({ error: "duty_changed_refresh_required" }); return; }
       if (error instanceof Error && /duty|caregiver/i.test(error.message)) {
         response.status(400).json({ error: "Duty assignment is not allowed" });
         return;

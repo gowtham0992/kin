@@ -82,6 +82,10 @@ export class KinApiStack extends Stack {
     const invitationIssuingEnabled = new CfnParameter(this, "InvitationIssuingEnabled", {
       type: "String", default: "false", allowedValues: ["true", "false"], description: "Enable organizer-only invitation creation for existing confirmed accounts.",
     });
+    const familyConversationEnabled = new CfnParameter(this, "FamilyConversationEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Enable optional per-request-consented Bedrock interpretation for authenticated family members. Keep disabled until separately approved.",
+    });
     const careStateTable = Table.fromTableName(this, "CareState", "kin-care-state");
 
     const apiLogGroup = new LogGroup(this, "ApiAccessLogs", {
@@ -205,6 +209,7 @@ export class KinApiStack extends Stack {
         KIN_PUBLIC_API_ENABLED: publicApiEnabledParameter.valueAsString,
         KIN_SERVE_SIMULATOR: "false",
         KIN_FAMILY_WORKSPACE_ENABLED: familyWorkspaceEnabled.valueAsString,
+        KIN_FAMILY_CONVERSATION_ENABLED: familyConversationEnabled.valueAsString,
         KIN_BROWSER_AUTH_ENABLED: familyWorkspaceEnabled.valueAsString,
         KIN_BROWSER_CLIENT_ID: "kin-family-browser",
         KIN_INVITATION_ISSUING_ENABLED: invitationIssuingEnabled.valueAsString,

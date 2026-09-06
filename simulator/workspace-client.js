@@ -10,9 +10,23 @@ export function createPlanDraft() {
   };
 }
 
+// Materialize the whole server-defined week, including days without a stored duty row.
+export function dutyDays(circle) {
+  const first = new Date(`${circle.startDate}T12:00:00Z`);
+  if (Number.isNaN(first.getTime()) || first.toISOString().slice(0, 10) !== circle.startDate) throw new Error("Invalid coverage window");
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(first); day.setUTCDate(day.getUTCDate() + index);
+    const date = day.toISOString().slice(0, 10);
+    return { date, assignment: circle.assignments.find(assignment => assignment.date === date) ?? null };
+  });
+  if (days[6].date !== circle.endDate) throw new Error("Invalid coverage window");
+  return days;
+}
+
 export function createWorkspaceClient({ request, newRequestId }) {
   let generation = 0;
   let pendingPlan = null;
+  let pendingDuty = null;
   async function json(url, options = {}) {
     const revision = generation;
     const response = await request(url, { cache: "no-store", signal: AbortSignal.timeout(8000), ...options });
@@ -30,6 +44,14 @@ export function createWorkspaceClient({ request, newRequestId }) {
     return result;
   } });
   let confirmations = sender();
+  async function saveDuty() {
+    const current = pendingDuty;
+    try {
+      const result = await json("/api/circle/duty", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(current) });
+      if (result.requestId !== current.requestId || !result.assignments?.some(day => day.date === current.date && day.memberId === current.memberId)) throw new Error("Receipt mismatch");
+      pendingDuty = null; return result;
+    } catch (error) { if (error.definitiveRejection || error.status === 409) pendingDuty = null; throw error; }
+  }
   async function savePlan() {
     const current = pendingPlan;
     try {
@@ -49,7 +71,8 @@ export function createWorkspaceClient({ request, newRequestId }) {
   return {
     session: () => json("/api/session"),
     today: () => json("/api/today"),
-    interpret: message => json("/api/conversation", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message }) }),
+    interpret: (message, transfer) => json("/api/conversation", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message,
+      ...(transfer ? { mode: "bedrock", transferConsent: transfer.consent === true, disclosureVersion: transfer.version } : {}) }) }),
     plan: () => json("/api/plan"),
     schedule(input) {
       if (pendingPlan && (pendingPlan.title !== input.title || pendingPlan.dueAt !== input.dueAt || pendingPlan.timeZone !== input.timeZone || JSON.stringify(pendingPlan.dueAts) !== JSON.stringify(input.dueAts))) return Promise.reject(new Error("Resolve the pending task first"));
@@ -67,10 +90,14 @@ export function createWorkspaceClient({ request, newRequestId }) {
     acknowledge: id => json(`/api/escalations/${encodeURIComponent(id)}/acknowledge`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) }),
     revoke: memberId => json("/api/access/revoke", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ memberId, confirm: true }) }),
     confirm: input => confirmations.confirm(input),
-    retry: () => pendingPlan ? savePlan() : confirmations.retry(),
-    get pending() { return pendingPlan ?? confirmations.pending; },
-    get pendingKind() { return pendingPlan?.routineId ? "routine change" : pendingPlan ? "care plan" : "check-in"; },
-    assignDuty: input => json("/api/circle/duty", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }),
-    reset() { generation += 1; confirmations = sender(); pendingPlan = null; },
+    retry: () => pendingDuty ? saveDuty() : pendingPlan ? savePlan() : confirmations.retry(),
+    get pending() { return pendingDuty ?? pendingPlan ?? confirmations.pending; },
+    get pendingKind() { return pendingDuty ? "duty handoff" : pendingPlan?.routineId ? "routine change" : pendingPlan ? "care plan" : "check-in"; },
+    assignDuty(input) {
+      if (pendingPlan || confirmations.pending || (pendingDuty && ["date", "memberId", "expectedMemberId"].some(key => pendingDuty[key] !== input[key]))) return Promise.reject(new Error("Resolve the pending change first"));
+      pendingDuty ??= { date: input.date, memberId: input.memberId, expectedMemberId: input.expectedMemberId, requestId: newRequestId ? newRequestId() : crypto.randomUUID() };
+      return saveDuty();
+    },
+    reset() { generation += 1; confirmations = sender(); pendingPlan = null; pendingDuty = null; },
   };
 }

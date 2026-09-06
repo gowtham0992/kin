@@ -29,10 +29,16 @@
 .care-roster-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; align-items: center; padding: 20px 0; border-bottom: 1px solid var(--line); }
 .care-roster select { font: inherit; padding: 12px; min-height: 48px; color: var(--ink); background: var(--card); border: 1px solid var(--muted); border-radius: 8px; min-width: 0; }
 .care-roster select:focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
+.care-roster-row .care-note { margin: 4px 0 0; }
+.duty-review { grid-column: 1 / -1; margin-top: 0; }
+.care-transfer { display: grid; gap: 12px; border-top: 1px solid var(--line); margin-top: 24px; padding-top: 24px; }
+.care-transfer h3 { margin: 0 0 4px; }
+.care-transfer label { display: flex; gap: 12px; align-items: flex-start; font-weight: 400; }
+.care-transfer input[type="checkbox"] { width: 20px; height: 20px; min-height: 20px; padding: 0; flex: 0 0 20px; margin-top: 3px; accent-color: var(--sage); }
 .access-person { border-bottom: 1px solid var(--line); padding: 24px 0; }
 .access-person .consent-line { display: flex; align-items: flex-start; gap: 12px; margin: 20px 0; font-size: 14px; }
 .access-person .consent-line input { margin-top: 3px; flex-shrink: 0; }
 #workspace-content details { border-top: 1px solid var(--line); margin-top: 32px; padding: 20px 0; }
 #workspace-content summary { cursor: pointer; font-weight: 700; }
-@media (max-width: 620px) { .care-plan li { align-items: flex-start; flex-direction: column; gap: 12px; } .care-roster-row { grid-template-columns: 1fr 1fr; } .care-roster-row button { grid-column: 2; } .workspace-nav { gap: 8px 20px; margin: 16px 0 24px; } }
+@media (max-width: 620px) { .care-plan li { align-items: flex-start; flex-direction: column; gap: 12px; } .care-roster-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .care-roster-row > button { grid-column: 1 / -1; } .workspace-nav { gap: 8px 20px; margin: 16px 0 24px; } }
 @media print { .site-header, .workspace-session, .workspace-nav, .invite-intro, #invite-status, #invite-reload, #workspace-status, #workspace-refresh, #workspace-retry-write, .no-print { display: none !important; } body { background: white; } main { padding: 0; } #workspace { max-width: none; } #workspace-content details { display: block; } }

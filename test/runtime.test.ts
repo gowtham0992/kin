@@ -5,6 +5,9 @@ const parameter = vi.hoisted(() => vi.fn(async () => "https://kin.example/mcp"))
 vi.mock("../src/parameter.js", () => ({ createStringParameterProvider: () => parameter }));
 
 describe("Kin runtime configuration", () => {
+  it("refuses natural-language activation without an authenticated workspace", () => {
+    expect(() => createConfiguredApp({ KIN_FAMILY_CONVERSATION_ENABLED: "true" })).toThrow("Family conversation requires");
+  });
   it("supports the deployed parameter-backed resource and rejects a mismatched browser resource", async () => {
     const environment = { KIN_BROWSER_AUTH_ENABLED: "true", KIN_BROWSER_CLIENT_ID: "kin-family-browser",
       KIN_BROWSER_REDIRECT_URI: "https://kin.example/invite.html", KIN_OAUTH_ISSUER: "https://kin.example",

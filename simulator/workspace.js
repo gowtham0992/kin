@@ -1,4 +1,4 @@
-import { createWorkspaceClient, createPlanDraft } from "./workspace-client.js";
+import { createWorkspaceClient, createPlanDraft, dutyDays } from "./workspace-client.js";
 import { createVoiceInput, appendVoiceDraft } from "./voice-input.js";
 
 const $ = id => document.getElementById(id);
@@ -42,7 +42,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       else if (disabledBeforeSave.has(element)) { element.disabled = disabledBeforeSave.get(element); disabledBeforeSave.delete(element); }
     });
   }
-  async function mutate(action, success, onSaved = () => {}) {
+  async function mutate(action, success, onSaved = () => {}, kind = "plan") {
     if (busy || voice?.active) return;
     const current = ++revision; busy = true; loading = false;
     lockControls(true);
@@ -59,7 +59,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       if (![401, 403].includes(error.status)) status.textContent = client.pending
         ? `Kin has not acknowledged this ${client.pendingKind}. Retry the same request below; do not submit a different one yet.`
         : "The change was not acknowledged. Refresh to check the current state before trying again.";
-      if (error.status === 409 && !client.pending) status.textContent = "The plan changed while you were reviewing it. Refresh, then review the current check-ins again.";
+      if (error.status === 409 && !client.pending) status.textContent = kind === "duty"
+        ? "The duty roster changed while you were reviewing it. Refresh, then review the current assignment again."
+        : "The plan changed while you were reviewing it. Refresh, then review the current check-ins again.";
     } finally {
       if (current === revision) {
         busy = false;
@@ -82,19 +84,26 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const hint = node("p", "Explicit commands only: Show today, Weekly brief, or Done: followed by the exact task title. Use Not yet: or Skip: for other responses. No message is sent to a language model.", "care-note");
     hint.id = "care-request-hint"; input.setAttribute("aria-describedby", hint.id);
     const submit = node("button", "Review request", "primary"); submit.type = "submit";
+    const naturalLanguage = member.conversation?.naturalLanguage === true;
+    const consent = node("input"), modelSubmit = node("button", "Review with Bedrock", "secondary");
+    consent.type = "checkbox"; consent.id = "care-transfer-consent";
+    modelSubmit.type = "submit"; modelSubmit.disabled = true; modelSubmit.dataset.mode = "bedrock";
+    const clearTransferConsent = () => { consent.checked = false; modelSubmit.disabled = true; };
+    consent.addEventListener("change", () => { modelSubmit.disabled = !consent.checked || busy || !!voice?.active; });
     const reply = node("p", "Nothing changes until you review and confirm.", "care-note"); reply.setAttribute("role", "status");
     const review = node("div", null, "care-alerts"); review.hidden = true;
     const voiceStatus = node("p", "Voice input starts only when you press the button.", "care-note"); voiceStatus.setAttribute("role", "status");
     const voiceStart = button("Use voice input", () => {
       if (busy || client.pending) return;
       if (voice.active) voice.stop();
-      else { review.hidden = true; voice.start(); }
+      else { review.hidden = true; clearTransferConsent(); voice.start(); }
     });
     const voiceCancel = button("Cancel voice input", () => { voice.cancel(); voiceStatus.textContent = "Voice input cancelled. Your draft is unchanged."; }); voiceCancel.hidden = true;
     voice = createVoiceInput({ Recognition: window.SpeechRecognition ?? window.webkitSpeechRecognition,
       onState(phase) {
         const active = phase !== "idle";
         lockControls(active || busy || !!client.pending);
+        if (!active && naturalLanguage) modelSubmit.disabled = !consent.checked || busy || !!client.pending;
         voiceStart.textContent = phase === "listening" ? "Stop listening" : phase === "finishing" ? "Finishing…" : "Use voice input";
         voiceStart.disabled = phase === "finishing" || (!active && (busy || !!client.pending));
         voiceCancel.hidden = !active; voiceCancel.disabled = false;
@@ -103,6 +112,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       onTranscript(text) {
         try {
           conversationDraft = appendVoiceDraft(input.value, text); input.value = conversationDraft;
+          clearTransferConsent();
           review.hidden = true; voiceStatus.textContent = "Added to your draft. Check the wording, then press Review request."; input.focus();
         } catch (error) { voiceStatus.textContent = error.message; }
       },
@@ -111,18 +121,31 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     voiceStart.disabled = !voice.supported;
     if (!voice.supported) voiceStatus.textContent = "Voice input is unavailable in this browser. You can still type your request.";
     const voiceActions = node("div", null, "care-actions"); voiceActions.append(voiceStart, voiceCancel);
-    input.addEventListener("input", () => { conversationDraft = input.value; review.hidden = true; });
+    input.addEventListener("input", () => { conversationDraft = input.value; review.hidden = true; clearTransferConsent(); });
     form.append(label, input, hint, submit);
+    if (naturalLanguage) {
+      hint.textContent = "Use Show today, Weekly brief, or Done: followed by the exact task title. Not yet: and Skip: work too. Review request uses exact commands without a language model.";
+      const transfer = node("section", null, "care-transfer"), disclosure = node("label");
+      disclosure.htmlFor = consent.id;
+      disclosure.append(consent, node("span", "For this request, send my text and today’s open check-in titles and internal task IDs to Amazon Bedrock to suggest a response. Nothing is saved until I separately confirm."));
+      transfer.append(node("h3", "Prefer your own words?"), disclosure,
+        node("p", "Optional · up to 20 attempts per day, at least 10 seconds apart. Failed attempts count too. Consent resets after each attempt or draft edit.", "care-note"), modelSubmit);
+      form.append(transfer);
+    }
     const examples = node("div", null, "care-actions");
     for (const task of data.tasks.filter(task => task.state === "scheduled").slice(0, 8)) {
-      examples.append(button(task.title, () => { input.value = `Done: ${task.title}`; conversationDraft = input.value; review.hidden = true; input.focus(); }));
+      examples.append(button(task.title, () => { input.value = `Done: ${task.title}`; conversationDraft = input.value; review.hidden = true; clearTransferConsent(); input.focus(); }));
     }
     form.addEventListener("submit", async event => {
       event.preventDefault(); if (busy || voice?.active || client.pending || !form.reportValidity()) return;
+      const useModel = event.submitter === modelSubmit;
+      if (useModel && (!naturalLanguage || !consent.checked)) { reply.textContent = "Read and select the transfer consent for this request first."; return; }
+      const transfer = useModel ? { consent: true, version: member.conversation.consentVersion } : undefined;
       const current = ++revision; busy = true; loading = false; lockControls(true); review.hidden = true;
-      reply.textContent = "Checking your request…";
+      clearTransferConsent();
+      reply.textContent = useModel ? "Asking Bedrock for a suggestion. Nothing is being saved…" : "Checking your request…";
       try {
-        const result = await client.interpret(input.value);
+        const result = await client.interpret(input.value, transfer);
         if (current !== revision) return;
         if (result.action === "confirm") {
           review.replaceChildren(node("h3", "Review this check-in"), node("p", `${result.task.title} · ${time(result.task.dueAt)}`),
@@ -130,14 +153,19 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
           const actions = node("div", null, "care-actions");
           actions.append(button("Confirm this check-in", () => void mutate(() => client.confirm({ taskId: result.task.id, response: result.response, actor: member.name, expected: result.expected }), "Check-in recorded.", () => { conversationDraft = ""; }), false),
             button("Leave unchanged", () => { review.hidden = true; reply.textContent = "Left unchanged."; input.focus(); }));
-          review.append(actions); review.hidden = false; reply.textContent = "Please review. Nothing has been saved.";
+          review.append(actions); review.hidden = false; reply.textContent = result.mode === "bedrock"
+            ? "Bedrock suggested this check-in. Check the task and response carefully. Nothing has been saved."
+            : "Please review. Nothing has been saved.";
         } else if (result.action === "today" || result.action === "brief") {
           location.hash = result.action === "today" ? "today" : "week";
         } else reply.textContent = "Name one task and its response using the examples above. Kin cannot assess health or handle emergencies. Nothing changed.";
       } catch (error) {
         if (current !== revision) return;
-        failure(error); reply.textContent = "Could not review this request. Your draft is still here; try again. Nothing was sent to save.";
-      } finally { if (current === revision) { busy = false; lockControls(false); } }
+        failure(error); reply.textContent = error.status === 429
+          ? "Natural-language requests are limited right now. Use an exact command, or try later with fresh consent. Your draft is unchanged."
+          : useModel ? "Bedrock did not return a usable suggestion. Your draft is still here. Use an exact command, or consent again to another attempt. No check-in was saved."
+          : "Could not review this request. Your draft is still here; try again. Nothing was sent to save.";
+      } finally { if (current === revision) { busy = false; lockControls(false); clearTransferConsent(); } }
     });
     content.replaceChildren(heading, form, voiceActions,
       node("p", "Say Done, Not yet, or Skip, then the exact task title. Optional English dictation may send audio to your browser’s speech provider; Kin receives text, not audio. Avoid sensitive details. Always review before confirming.", "care-note"), voiceStatus,
@@ -186,23 +214,45 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   }
   function renderCircle(data) {
     const heading = node("div"); heading.append(node("p", "Seven days, shared fairly", "kicker"), node("h2", "Who’s taking the next turn?"));
-    const balance = node("p", null, "care-note");
-    balance.textContent = data.members.filter(person => person.canReceiveAlerts).map(person => `${person.name}: ${data.assignments.filter(day => day.memberId === person.id).length} days`).join(" · ");
+    const days = dutyDays(data), caregivers = data.members.filter(person => person.canReceiveAlerts);
+    const covered = days.filter(day => day.assignment).length;
+    const coverage = node("p", `${covered} of 7 days assigned${covered < 7 ? ` · ${7 - covered} uncovered` : ""}`, "care-count");
+    const balance = node("p", caregivers.map(person => {
+      const count = days.filter(day => day.assignment?.memberId === person.id).length;
+      return `${person.name}: ${count} ${count === 1 ? "day" : "days"}`;
+    }).join(" · "), "care-note");
     const roster = node("div", null, "care-roster");
-    for (const day of data.assignments) {
+    for (const day of days) {
       const row = node("form", null, "care-roster-row"), label = node("label", date(day.date));
       const select = node("select"); select.id = `duty-${day.date}`; label.htmlFor = select.id;
-      for (const person of data.members.filter(person => person.canReceiveAlerts)) select.add(new Option(person.name, person.id));
-      select.value = day.memberId; select.disabled = !member.permissions.manageDuty;
-      row.append(label, select);
-      if (member.permissions.manageDuty) {
-        const save = node("button", "Save handoff", "secondary"); save.type = "submit"; row.append(save);
-        row.addEventListener("submit", event => { event.preventDefault(); void mutate(() => client.assignDuty({ date: day.date, memberId: select.value }), "Duty handoff saved."); });
+      const placeholder = new Option(caregivers.length ? "Choose a caregiver" : "No eligible caregivers", ""); placeholder.disabled = true; select.add(placeholder);
+      for (const person of caregivers) select.add(new Option(person.name, person.id));
+      select.value = day.assignment?.memberId ?? ""; select.required = true;
+      select.disabled = !member.permissions.manageDuty || !caregivers.length;
+      const dayCopy = node("div"); dayCopy.append(label, node("p", day.assignment ? `Assigned to ${day.assignment.memberName}` : "Uncovered", "care-note"));
+      if (day.assignment?.changedBy) dayCopy.append(node("p", `Updated by ${day.assignment.changedBy}`, "care-note"));
+      row.append(dayCopy, select);
+      if (member.permissions.manageDuty && caregivers.length) {
+        const save = node("button", day.assignment ? "Review handoff" : "Review assignment", "secondary"); save.type = "submit"; row.append(save);
+        const review = node("section", null, "duty-review care-alerts"); review.hidden = true; row.append(review);
+        select.addEventListener("change", () => { review.hidden = true; });
+        row.addEventListener("submit", event => {
+          event.preventDefault(); if (busy || client.pending || !row.reportValidity()) return;
+          const person = caregivers.find(candidate => candidate.id === select.value);
+          if (!person || person.id === day.assignment?.memberId) { status.textContent = "That caregiver is already assigned. Choose someone else for a handoff."; return; }
+          const change = { date: day.date, memberId: person.id, expectedMemberId: day.assignment?.memberId ?? null };
+          review.replaceChildren(node("h3", day.assignment ? "Review the handoff" : "Cover this day"),
+            node("p", `${date(day.date)}: ${day.assignment?.memberName ?? "Uncovered"} → ${person.name}`),
+            node("p", "This changes the day's duty assignment. It does not redirect alerts already queued or confirm SMS delivery.", "care-note"));
+          const actions = node("div", null, "care-actions");
+          const confirm = button("Confirm duty assignment", () => void mutate(() => client.assignDuty(change), "Duty assignment saved.", () => {}, "duty"), false);
+          actions.append(confirm, button("Keep unchanged", () => { review.hidden = true; select.focus(); })); review.append(actions); review.hidden = false; confirm.focus();
+        });
       }
       roster.append(row);
     }
-    if (!data.assignments.length) roster.append(node("p", "There is no rotation configured yet. Ask your circle organizer to set up coverage."));
-    content.replaceChildren(heading, balance, roster, node("p", "A roster assignment does not grant account access or confirm SMS delivery. Existing alert recipients do not change when you hand off duty.", "care-note"));
+    if (!caregivers.length) roster.append(node("p", "No roster member is eligible for duty. The organizer needs to configure the caregiver roster before these days can be assigned."));
+    content.replaceChildren(heading, coverage, balance, roster, node("p", "A roster assignment does not grant account access or confirm SMS delivery. Existing alert recipients do not change when you hand off duty.", "care-note"));
   }
   function renderPlan(data) {
     const heading = node("div"); heading.append(node("p", "The next 30 days", "kicker"), node("h2", "Make space for the small things."), node("p", "Agree on an ordinary check-in, once or as a short daily routine. This is care coordination, not a medication recommendation."));
@@ -326,7 +376,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     try {
       const identity = await client.session();
       const data = await (view === "plan" ? client.plan() : view === "access" ? client.access() : view === "week" ? client.brief() : view === "circle" ? client.circle() : client.today());
-      if (current !== revision || view !== tab()) return;
+      if (current !== revision || view !== tab() || voice?.active) return;
       member = identity;
       $("workspace-ask-link").hidden = !member.permissions.confirm;
       if (!member.permissions.manageDuty) planDraft.clear();
@@ -365,7 +415,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   $("workspace-refresh").addEventListener("click", () => void refresh());
   $("workspace-retry-write").addEventListener("click", () => {
     const kind = client.pendingKind;
-    void mutate(() => client.retry(), kind === "care plan" ? "Care plan saved." : kind === "routine change" ? "Routine updated." : "Check-in recorded.",
+    void mutate(() => client.retry(), kind === "duty handoff" ? "Duty assignment saved." : kind === "care plan" ? "Care plan saved." : kind === "routine change" ? "Routine updated." : "Check-in recorded.",
       () => { if (kind === "care plan") clearPlanDraft(); });
   });
   window.addEventListener("hashchange", () => void navigate());
