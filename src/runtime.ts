@@ -9,6 +9,7 @@ import { createHttpApp } from "./http.js";
 import { createStringParameterProvider } from "./parameter.js";
 import { createUnavailablePublicApp } from "./public-api-gate.js";
 import { createBedrockBriefGenerator, WeeklyBriefService } from "./weekly-brief.js";
+import { createBedrockIntentGenerator } from "./demo-conversation.js";
 
 export interface RuntimeOptions {
   requireOAuth?: boolean;
@@ -121,6 +122,7 @@ export function createConfiguredApp(
           authorizationServer: oauthAuthorizationServer,
           serveSimulator: environment.KIN_SERVE_SIMULATOR === "true",
         }
-      : {},
+      : { demoIntentGenerator: environment.KIN_DEMO_CONVERSATION_MODEL_ID?.trim()
+        ? createBedrockIntentGenerator({ modelId: environment.KIN_DEMO_CONVERSATION_MODEL_ID.trim(), region: environment.AWS_REGION }) : undefined },
   );
 }

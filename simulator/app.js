@@ -1,4 +1,7 @@
 import { createConfirmationSender, createSnapshotReader } from "./care-client.js";
+import { createMcpCareClient } from "./mcp-client.js";
+
+const mcp = createMcpCareClient(new URL("/mcp", location.origin));
 
 const taskList = document.querySelector("#phone-tasks");
 const echoTask = document.querySelector("#echo-task");
@@ -38,11 +41,7 @@ let refreshingToday = false;
 let lastUpdatedAt = null;
 
 const todayReader = createSnapshotReader({
-  fetchSnapshot: async () => {
-    const response = await fetch("/api/today", { headers: { accept: "application/json" }, signal: AbortSignal.timeout(8000) });
-    if (!response.ok) throw new Error("Could not load the care circle");
-    return response.json();
-  },
+  fetchSnapshot: () => mcp.today(),
   onSnapshot: (data) => {
     const changed = JSON.stringify(data) !== JSON.stringify(snapshot);
     lastUpdatedAt = new Date();
@@ -62,20 +61,7 @@ const todayReader = createSnapshotReader({
 });
 
 const confirmationSender = createConfirmationSender({
-  send: async ({ taskId, ...body }) => {
-    const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/confirm`, {
-      method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify(body), signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) {
-      const error = new Error("Confirmation not acknowledged");
-      error.definitiveRejection = [400, 401, 403, 404, 422].includes(response.status);
-      throw error;
-    }
-    const result = await response.json();
-    if (result.confirmation?.requestId !== body.requestId) throw new Error("Confirmation receipt mismatch");
-    return result;
-  },
+  send: input => mcp.confirm(input),
 });
 
 function formatTime(iso) {
@@ -188,7 +174,7 @@ function render(data) {
   echoActions.hidden = !next;
   echoActions.dataset.taskId = next?.id ?? "";
   document.querySelector("#voice-line").textContent = next
-    ? "Try saying: “Alexa, tell Kin I did it.”"
+    ? "Example voice request: “Alexa, tell Kin I did it.” Use the buttons in this simulation."
     : latestSent
       ? "Delivery and caregiver acknowledgment are not yet confirmed."
       : "Kin has quietly updated your family.";
@@ -365,9 +351,7 @@ async function loadWeeklyBrief() {
   loadingBrief = true;
   setBriefLoading();
   try {
-    const response = await fetch("/api/weekly-brief", { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error("Could not load the weekly brief");
-    renderBrief(await response.json());
+    renderBrief(await mcp.brief());
   } catch {
     showBriefError();
   } finally {
@@ -460,12 +444,12 @@ async function loadToday() {
 
 async function confirmTask(responseValue) {
   const taskId = echoActions.dataset.taskId;
-  if (!taskId || submitting || confirmationSender.pending) return;
+  if (!taskId || submitting || conversationBusy || confirmationSender.pending) return;
   await submitConfirmation(() => confirmationSender.confirm({ taskId, response: responseValue, actor: "Evelyn" }));
 }
 
 async function submitConfirmation(send) {
-  if (submitting) return;
+  if (submitting) return false;
   submitting = true;
   todayReader.invalidate();
   for (const button of echoActions.querySelectorAll("button")) button.disabled = true;
@@ -477,9 +461,11 @@ async function submitConfirmation(send) {
       ? "Your answer is saved. The full plan will refresh when the connection returns."
       : result.confirmation.response === "done"
         ? "Saved to the family circle"
+        : result.confirmation.response === "skipped" ? "Saved as skipped to the family circle."
         : "Saved as not yet done. The original check-in time is unchanged.";
     toast.hidden = false;
     window.setTimeout(() => { if (!confirmationSender.pending && !submitting) toast.hidden = true; }, 4000);
+    return true;
   } catch {
     toast.textContent = confirmationSender.pending
       ? "Kin hasn’t confirmed this save. It may already be recorded."
@@ -492,12 +478,76 @@ async function submitConfirmation(send) {
       toast.append(" ", retry);
     }
     toast.hidden = false;
+    return false;
   } finally {
     submitting = false;
     for (const button of echoActions.querySelectorAll("button")) button.disabled = Boolean(confirmationSender.pending);
     void loadToday();
   }
 }
+
+const conversationForm = document.querySelector("#conversation-form");
+const conversationInput = document.querySelector("#conversation-input");
+const conversationStatus = document.querySelector("#conversation-status");
+const conversationReview = document.querySelector("#conversation-review");
+let proposal = null, conversationBusy = false;
+
+function lockConversation(locked) {
+  document.querySelectorAll(".conversation button, .conversation input").forEach(element => { element.disabled = locked; });
+}
+conversationForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (conversationBusy || submitting || confirmationSender.pending) {
+    conversationStatus.textContent = "Finish or retry the current check-in first."; return;
+  }
+  conversationBusy = true; lockConversation(true); proposal = null; conversationReview.hidden = true;
+  conversationStatus.textContent = "Checking your request…";
+  try {
+    const response = await fetch("/demo/conversation", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: conversationInput.value }), signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error("Interpretation unavailable");
+    const result = await response.json();
+    document.querySelector("#conversation-mode").textContent = result.mode === "bedrock"
+      ? "Bedrock interpreted this request. Review its suggestion; it can be wrong."
+      : "Limited-command mode · no language model used.";
+    if (result.action === "confirm" && result.task && ["done", "not_yet", "skipped"].includes(result.response)) {
+      proposal = result;
+      document.querySelector("#conversation-proposal").textContent = `Record “${result.task.title}” (${formatTime(result.task.dueAt)}) as ${result.response.replace("_", " ")} for Evelyn?`;
+      conversationReview.hidden = false;
+      conversationStatus.textContent = "Please review. No change has been saved.";
+    } else if (result.action === "today") {
+      const data = await mcp.today(); render(data);
+      conversationStatus.textContent = `${data.summary.completed} of ${data.summary.total} check-ins are complete. ${data.tasks.map(task => `${task.title}: ${task.state}`).join(". ") || "No check-ins are scheduled."}`;
+    } else if (result.action === "brief") {
+      const brief = await mcp.brief();
+      conversationStatus.textContent = `${brief.headline}. ${brief.overview} ${brief.safetyNotice}`;
+    } else conversationStatus.textContent = "I need a clearer request. Name the task and whether it is done, not yet, or skipped. I cannot assess health or handle emergencies; nothing has changed.";
+  } catch {
+    conversationStatus.textContent = "Kin couldn’t finish this request. Your message is still here; try again. No check-in was sent.";
+  } finally { conversationBusy = false; lockConversation(false); }
+});
+document.querySelector("#conversation-cancel").addEventListener("click", () => {
+  proposal = null; conversationReview.hidden = true;
+  conversationStatus.textContent = "Left unchanged."; conversationInput.focus();
+});
+document.querySelector("#conversation-confirm").addEventListener("click", async () => {
+  if (!proposal || conversationBusy || submitting || confirmationSender.pending) return;
+  const reviewed = proposal; conversationBusy = true; lockConversation(true);
+  try {
+    const latest = await mcp.today();
+    const task = latest.tasks.find(task => task.id === reviewed.task.id);
+    if (!task || task.state !== "scheduled" || task.title !== reviewed.task.title || task.dueAt !== reviewed.task.dueAt
+      || task.lastResponse !== reviewed.task.lastResponse || task.confirmedAt !== reviewed.task.confirmedAt) {
+      proposal = null; conversationReview.hidden = true;
+      conversationStatus.textContent = "That check-in changed since your request. Ask again to review the current plan."; return;
+    }
+    const saved = await submitConfirmation(() => confirmationSender.confirm({ taskId: task.id, response: reviewed.response, actor: "Evelyn" }));
+    proposal = null; conversationReview.hidden = true;
+    conversationStatus.textContent = saved ? "Your check-in is saved to the shared family plan." : "The save was not acknowledged. Use the save message’s retry button before sending another check-in.";
+    if (saved) conversationInput.value = "";
+  } catch { conversationStatus.textContent = "Kin couldn’t check the current plan. Nothing was sent; try confirming again."; }
+  finally { conversationBusy = false; lockConversation(false); }
+});
 
 echoActions.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-response]");

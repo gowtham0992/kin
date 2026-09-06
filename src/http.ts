@@ -21,6 +21,7 @@ import { AccessChangeConflict, revokeAccessBody, type AccessManagement } from ".
 import { PlanConflict, scheduleTaskBody, scheduleRoutineBody, scheduledTaskId } from "./care-plan.js";
 import { routineChangeBody, RoutineConflict } from "./care-plan.js";
 import { shiftCalendarDate } from "./calendar.js";
+import { conversationBody, proposeConversation, type IntentGenerator } from "./demo-conversation.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -35,6 +36,7 @@ const dutyBody = z.object({
 }).strict();
 
 export interface HttpAppOptions {
+  demoIntentGenerator?: IntentGenerator;
   accessAuthorizer?: AccessAuthorizer;
   familyAccess?: FamilyAccess;
   invitationIssuer?: InvitationIssuer;
@@ -69,7 +71,24 @@ export function createHttpApp(
   });
   app.use(express.json({ limit: "128kb" }));
   if (options.serveSimulator !== false) {
+    app.get("/mcp-client.js", (_request, response) => {
+      response.sendFile(path.resolve(moduleDirectory, "../dist/simulator/mcp-client.js"));
+    });
     app.use(express.static(simulatorDirectory, { extensions: ["html"] }));
+  }
+  // Never register this unauthenticated, optional paid-model route on the family surface.
+  if (options.serveSimulator !== false && !options.accessAuthorizer && !familyEnabled) {
+    let interpreting = false;
+    app.post("/demo/conversation", async (request, response) => {
+      response.set("cache-control", "no-store");
+      const parsed = conversationBody.safeParse(request.body);
+      if (!parsed.success) { response.status(400).json({ error: "invalid_message" }); return; }
+      if (interpreting) { response.status(429).json({ error: "conversation_busy" }); return; }
+      interpreting = true;
+      try { response.json(await proposeConversation(parsed.data.message, await store.today(), options.demoIntentGenerator)); }
+      catch { response.status(503).json({ error: "conversation_unavailable" }); }
+      finally { interpreting = false; }
+    });
   }
   if (familyEnabled) {
     const headers = {

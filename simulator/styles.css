@@ -180,6 +180,20 @@ main { max-width: 1380px; margin: 0 auto; padding: 18px 48px 56px; }
 .roster-note { margin: 9px 1px 0; color: var(--muted); font-size: 7px; line-height: 1.35; }
 
 .trust-strip { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.conversation { max-width: 720px; margin: 64px auto 0; padding-top: 32px; border-top: 1px solid var(--line); }
+.conversation h2 { margin: 8px 0 16px; font: 36px/1.15 Georgia, serif; letter-spacing: -.03em; }
+.conversation p { line-height: 1.6; overflow-wrap: anywhere; }
+.conversation .conversation-note { color: var(--muted); font-size: 13px; }
+.conversation form { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.conversation label { flex-basis: 100%; font-weight: 700; }
+.conversation input { flex: 1 1 260px; min-width: 0; padding: 14px; font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.conversation button { min-height: 48px; padding: 12px 18px; border: 1px solid var(--sage); border-radius: 8px; background: var(--sage); color: var(--card); cursor: pointer; }
+.conversation button:hover { filter: brightness(.9); }
+.conversation button:disabled { opacity: .55; cursor: wait; }
+.conversation input:focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
+#conversation-review { padding: 20px; background: var(--sage-soft); border-radius: 12px; }
+#conversation-review button { margin: 4px 8px 4px 0; }
+#conversation-cancel { background: transparent; color: var(--ink); }
 .trust-strip div { display: flex; gap: 13px; align-items: baseline; }
 .trust-strip span { color: var(--coral); font: italic 18px Georgia, serif; }
 .trust-strip p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
