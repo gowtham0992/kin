@@ -333,6 +333,7 @@ export class KinApiStack extends Stack {
       { path: "/.well-known/oauth-authorization-server", methods: [HttpMethod.GET] },
       { path: "/.well-known/openid-configuration", methods: [HttpMethod.GET] },
       { path: "/auth", methods: [HttpMethod.GET, HttpMethod.POST] },
+      { path: "/auth/{proxy+}", methods: [HttpMethod.GET] },
       { path: "/token", methods: [HttpMethod.POST] },
       { path: "/jwks", methods: [HttpMethod.GET] },
       { path: "/token/revocation", methods: [HttpMethod.POST] },

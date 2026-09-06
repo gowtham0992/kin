@@ -195,6 +195,7 @@ describe("Kin AWS infrastructure", () => {
       "GET /.well-known/oauth-authorization-server",
       "GET /.well-known/openid-configuration",
       "GET /auth",
+      "GET /auth/{proxy+}",
       "POST /auth",
       "POST /token",
       "GET /jwks",
@@ -203,6 +204,9 @@ describe("Kin AWS infrastructure", () => {
     ]) {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: routeKey });
     }
+    const routes = Object.values(template.findResources("AWS::ApiGatewayV2::Route"));
+    expect(routes.find(route => route.Properties.RouteKey === "GET /auth/{proxy+}")?.Properties.Target)
+      .toEqual(routes.find(route => route.Properties.RouteKey === "GET /auth")?.Properties.Target);
     template.hasResourceProperties("AWS::SSM::Parameter", {
       Name: "/kin/mcp/canonical-uri",
       Type: "String",
