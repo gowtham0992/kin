@@ -259,6 +259,13 @@ export class KinApiStack extends Stack {
         `arn:${this.partition}:bedrock:${this.region}::foundation-model/amazon.nova-micro-v1:0`,
       ],
     }));
+    // Invitation and revocation transactions recheck membership atomically.
+    apiFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ["dynamodb:ConditionCheckItem"],
+      resources: [careStateTable.tableArn],
+      conditions: { "ForAnyValue:StringEquals": { "dynamodb:EnclosingOperation": ["TransactWriteItems"] } },
+    }));
     const integration = new HttpLambdaIntegration("KinIntegration", apiFunction, {
       scopePermissionToRoute: true,
     });
@@ -319,6 +326,13 @@ export class KinApiStack extends Stack {
     oauthSecret.grantRead(oauthFunction);
     oauthFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW, actions: ["dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:TransactWriteItems"], resources: [careStateTable.tableArn],
+    }));
+    // Enrollment checks the roster and creates access only in one transaction.
+    oauthFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ["dynamodb:ConditionCheckItem", "dynamodb:PutItem"],
+      resources: [careStateTable.tableArn],
+      conditions: { "ForAnyValue:StringEquals": { "dynamodb:EnclosingOperation": ["TransactWriteItems"] } },
     }));
     oauthFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,

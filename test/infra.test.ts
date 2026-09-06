@@ -9,6 +9,33 @@ import { exportJWK, generateKeyPair, jwtVerify } from "jose";
 import request from "supertest";
 
 describe("Kin AWS infrastructure", () => {
+  it("limits care membership transaction grants to the API and OAuth roles on one table", () => {
+    const template = Template.fromStack(new KinApiStack(new App(), "MembershipPolicyTest", {
+      env: { account: "123456789012", region: "us-east-1" },
+    }));
+    const careTableArn = { "Fn::Join": ["", ["arn:", { Ref: "AWS::Partition" }, ":dynamodb:us-east-1:123456789012:table/kin-care-state"]] };
+    const transactionOnly = { "ForAnyValue:StringEquals": { "dynamodb:EnclosingOperation": ["TransactWriteItems"] } };
+    const functions = template.findResources("AWS::Lambda::Function");
+    const policies = Object.values(template.findResources("AWS::IAM::Policy"));
+    const statements = policies.flatMap(policy => policy.Properties.PolicyDocument.Statement.map((statement: Record<string, unknown>) => ({
+      roles: policy.Properties.Roles, statement,
+    })));
+    const roleFor = (functionName: string) => Object.values(functions)
+      .find(resource => resource.Properties.FunctionName === functionName)!.Properties.Role["Fn::GetAtt"][0];
+    const conditionChecks = statements.filter(({ statement }) => [statement.Action].flat().includes("dynamodb:ConditionCheckItem"));
+    expect(conditionChecks).toEqual([
+      { roles: [{ Ref: roleFor("kin-mcp-api") }], statement: {
+        Effect: "Allow", Action: "dynamodb:ConditionCheckItem", Resource: careTableArn, Condition: transactionOnly,
+      } },
+      { roles: [{ Ref: roleFor("kin-oauth-api") }], statement: {
+        Effect: "Allow", Action: ["dynamodb:ConditionCheckItem", "dynamodb:PutItem"], Resource: careTableArn, Condition: transactionOnly,
+      } },
+    ]);
+    const oauthCarePuts = statements.filter(({ roles, statement }) =>
+      roles.some((role: { Ref: string }) => role.Ref === roleFor("kin-oauth-api")) &&
+      [statement.Action].flat().includes("dynamodb:PutItem") && JSON.stringify(statement.Resource).includes("kin-care-state"));
+    expect(oauthCarePuts).toEqual([conditionChecks[1]]);
+  });
   it("issues a valid service JWT from the actual minified OAuth deployment artifact", async () => {
     const app = new App();
     const stack = new KinApiStack(app, "BundledOAuthTest", {});
