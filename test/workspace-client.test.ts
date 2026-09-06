@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-const { createWorkspaceClient } = await import(new URL("../simulator/workspace-client.js", import.meta.url).href);
+const { createWorkspaceClient, createPlanDraft } = await import(new URL("../simulator/workspace-client.js", import.meta.url).href);
 const ok = (data: unknown) => ({ ok: true, json: async () => data });
 
 describe("authenticated workspace requests", () => {
+  it("keeps scheduling drafts separate from render copies and clears every field on reset", () => {
+    const draft = createPlanDraft();
+    draft.update({ title: "Call together", due: "2026-09-08T12:00", repeat: "7", password: "must-not-be-retained" });
+    const copy = draft.read(); copy.title = "Changed render copy";
+    expect(draft.read()).toEqual({ title: "Call together", due: "2026-09-08T12:00", repeat: "7" });
+    draft.clear();
+    expect(draft.read()).toEqual({ title: "", due: "", repeat: "1" });
+  });
   it("retries a routine change unchanged after a lost response and clears a stale-review conflict", async () => {
     const request = vi.fn(async (_url: string, _options: { body: string }): Promise<{ ok: boolean; status?: number }> => { throw new Error("connection lost"); });
     const client = createWorkspaceClient({ request, newRequestId: () => "change-request" });

@@ -1,4 +1,4 @@
-import { createWorkspaceClient } from "./workspace-client.js";
+import { createWorkspaceClient, createPlanDraft } from "./workspace-client.js";
 
 const $ = id => document.getElementById(id);
 const node = (tag, text, className) => { const element = document.createElement(tag); if (text != null) element.textContent = text; if (className) element.className = className; return element; };
@@ -7,11 +7,17 @@ const time = value => new Date(value).toLocaleTimeString(undefined, { hour: "num
 
 export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite }) {
   const client = createWorkspaceClient({ request });
+  const planDraft = createPlanDraft(), disabledBeforeSave = new WeakMap();
   let member = null, revision = 0, busy = false, loading = false, timer = null, lastRender = "", activeView = "today";
   const content = $("workspace-content"), status = $("workspace-status");
   const tab = () => ["today", "plan", "circle", "week", "invite", "access"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "today";
+  function clearPlanDraft() {
+    planDraft.clear();
+    for (const [id, value] of [["plan-title", ""], ["plan-due", ""], ["plan-repeat", "1"]]) { if ($(id)) $(id).value = value; }
+    $("plan-due")?.dispatchEvent(new Event("change"));
+  }
   function reset() {
-    revision += 1; client.reset(); member = null; busy = false; loading = false;
+    revision += 1; client.reset(); planDraft.clear(); member = null; busy = false; loading = false;
     clearTimeout(timer); content.replaceChildren(); $("workspace").hidden = true;
     $("workspace-nav").hidden = true; $("workspace-identity").textContent = "";
     $("workspace-retry-write").hidden = true;
@@ -26,12 +32,23 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const element = node("button", label, secondary ? "secondary" : "primary"); element.type = "button";
     element.addEventListener("click", action); return element;
   }
-  async function mutate(action, success) {
+  function lockControls(locked) {
+    content.querySelectorAll("button, input, select, textarea").forEach(element => {
+      if (locked) { if (!disabledBeforeSave.has(element)) disabledBeforeSave.set(element, element.disabled); element.disabled = true; }
+      else if (disabledBeforeSave.has(element)) { element.disabled = disabledBeforeSave.get(element); disabledBeforeSave.delete(element); }
+    });
+  }
+  async function mutate(action, success, onSaved = () => {}) {
     if (busy) return;
     const current = ++revision; busy = true; loading = false;
-    content.querySelectorAll("button, select").forEach(element => { element.disabled = true; });
+    lockControls(true);
     status.textContent = "Saving…";
-    try { await action(); if (current !== revision) return; status.textContent = success; await refresh(true); }
+    try {
+      await action(); if (current !== revision) return;
+      onSaved();
+      const refreshed = await refresh(true);
+      if (current === revision) status.textContent = refreshed ? success : `${success} The latest view could not be refreshed; use Refresh to check it.`;
+    }
     catch (error) {
       if (current !== revision) return;
       failure(error);
@@ -42,7 +59,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     } finally {
       if (current === revision) {
         busy = false;
-        content.querySelectorAll("button, select").forEach(element => { element.disabled = !!client.pending || (element.tagName === "SELECT" && !member?.permissions.manageDuty); });
+        lockControls(!!client.pending);
         $("workspace-retry-write").hidden = !client.pending;
         $("workspace-retry-write").textContent = `Retry the same ${client.pendingKind}`;
       }
@@ -112,13 +129,19 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const heading = node("div"); heading.append(node("p", "The next 30 days", "kicker"), node("h2", "Make space for the small things."), node("p", "Agree on an ordinary check-in, once or as a short daily routine. This is care coordination, not a medication recommendation."));
     const form = node("form", null, "invite-panel");
     if (member.permissions.manageDuty) {
+      const draft = planDraft.read();
       const titleLabel = node("label", "What is the check-in?"); titleLabel.htmlFor = "plan-title";
       const title = node("input"); title.id = "plan-title"; title.required = true; title.maxLength = 120; title.placeholder = "A glass of water, a walk, a call…";
+      title.value = draft.title;
       const dueLabel = node("label", `When? (${Intl.DateTimeFormat().resolvedOptions().timeZone})`); dueLabel.htmlFor = "plan-due";
       const due = node("input"); due.id = "plan-due"; due.type = "datetime-local"; due.required = true;
+      due.value = draft.due;
       const repeatLabel = node("label", "How often?"); repeatLabel.htmlFor = "plan-repeat";
       const repeat = node("select"); repeat.id = "plan-repeat";
       for (const [value, label] of [["1", "Just once"], ["7", "Daily · 7 check-ins"], ["14", "Daily · 14 check-ins"]]) repeat.add(new Option(label, value));
+      repeat.value = draft.repeat;
+      const remember = () => planDraft.update({ title: title.value, due: due.value, repeat: repeat.value });
+      for (const field of [title, due, repeat]) { field.addEventListener("input", remember); field.addEventListener("change", remember); }
       const preview = node("p", "", "care-note"); preview.setAttribute("role", "status");
       function occurrences() {
         const first = new Date(due.value), times = [];
@@ -139,7 +162,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       due.addEventListener("change", updatePreview); repeat.addEventListener("change", updatePreview); updatePreview();
       const submit = node("button", "Save care plan", "primary"); submit.type = "submit";
       const note = node("p", "Keep every check-in within the next 30 days. You can rename or cancel future, untouched check-ins below. Time changes require a new routine. Missed check-ins may notify the caregiver on duty.", "care-note");
-      form.append(titleLabel, title, dueLabel, due, repeatLabel, repeat, preview, note, submit);
+      form.append(titleLabel, title, dueLabel, due, repeatLabel, repeat, preview, note,
+        node("p", "Your draft stays while switching Kin tabs. Reloading this page or closing the session clears it.", "care-note"), submit);
       form.addEventListener("submit", event => {
         event.preventDefault(); if (!form.reportValidity()) return;
         const when = new Date(due.value);
@@ -149,7 +173,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         if (new Date(dueAts.at(-1)) > new Date(Date.now() + 30 * 86400000)) { status.textContent = "The entire routine must fit within the next 30 days."; due.focus(); return; }
         const input = dueAts.length === 1 ? { title: title.value.trim(), dueAt: dueAts[0] }
           : { title: title.value.trim(), dueAts, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
-        void mutate(() => client.schedule(input), "Care plan saved.");
+        void mutate(() => client.schedule(input), "Care plan saved.", clearPlanDraft);
       });
     } else form.append(node("p", "Your role can view the plan. A caregiver can schedule new check-ins."));
     const list = node("ul", null, "care-plan");
@@ -225,6 +249,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       const data = await (view === "plan" ? client.plan() : view === "access" ? client.access() : view === "week" ? client.brief() : view === "circle" ? client.circle() : client.today());
       if (current !== revision || view !== tab()) return;
       member = identity;
+      if (!member.permissions.manageDuty) planDraft.clear();
       $("workspace-invite-link").hidden = !member.permissions.invite;
       $("workspace-access-link").hidden = !member.permissions.invite;
       const serialized = JSON.stringify({ view, data, member });
@@ -233,7 +258,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         lastRender = serialized;
       }
       status.textContent = `Checked at ${time(new Date())}${view === "today" ? " · updates every 5 seconds" : ""}.`;
-      if (client.pending) content.querySelectorAll("button, select").forEach(element => { element.disabled = true; });
+      if (client.pending) lockControls(true);
+      return true;
     } catch (error) { if (current === revision) failure(error); }
     finally { if (current === revision) loading = false; }
   }
@@ -256,7 +282,11 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     timer = setTimeout(poll, 5000);
   }
   $("workspace-refresh").addEventListener("click", () => void refresh());
-  $("workspace-retry-write").addEventListener("click", () => void mutate(() => client.retry(), "Check-in recorded."));
+  $("workspace-retry-write").addEventListener("click", () => {
+    const kind = client.pendingKind;
+    void mutate(() => client.retry(), kind === "care plan" ? "Care plan saved." : kind === "routine change" ? "Routine updated." : "Check-in recorded.",
+      () => { if (kind === "care plan") clearPlanDraft(); });
+  });
   window.addEventListener("hashchange", () => void navigate());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
   return { reset, async open() {

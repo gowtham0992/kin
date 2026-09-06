@@ -6,10 +6,23 @@ import { createDemoStore } from "../src/domain.js";
 const mode = process.argv[2] ?? "success";
 const port = Number(process.argv[3] ?? 3014);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid preview port");
-if (!["success", "denied", "empty", "today-empty", "viewer-empty", "conflict", "uncertain", "viewer", "offline", "alerts"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["success", "denied", "empty", "today-empty", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
 const store = createDemoStore();
+if (["plan-uncertain", "plan-refresh-failure"].includes(mode)) {
+  const schedule = store.scheduleRoutine.bind(store), activity = store.activityBetween.bind(store);
+  let saved = false;
+  store.scheduleRoutine = async input => {
+    const result = await schedule(input), first = !saved; saved = true;
+    if (first && mode === "plan-uncertain") throw new Error("Synthetic lost acknowledgment after saving");
+    return result;
+  };
+  store.activityBetween = async input => {
+    if (saved && mode === "plan-refresh-failure") throw new Error("Synthetic refresh failure after saving");
+    return activity(input);
+  };
+}
 if (["today-empty", "viewer-empty"].includes(mode)) {
   const today = await store.today();
   store.today = async () => ({ ...today, tasks: [], escalations: [], summary: { ...today.summary, total: 0, completed: 0 } });

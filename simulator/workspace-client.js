@@ -1,5 +1,15 @@
 import { createConfirmationSender } from "./care-client.js";
 
+// Session memory only. Never persist care drafts or reuse them across identities.
+export function createPlanDraft() {
+  let value = { title: "", due: "", repeat: "1" };
+  return {
+    read: () => ({ ...value }),
+    update(input) { value = { title: String(input.title ?? "").slice(0, 120), due: String(input.due ?? "").slice(0, 30), repeat: ["1", "7", "14"].includes(input.repeat) ? input.repeat : "1" }; },
+    clear() { value = { title: "", due: "", repeat: "1" }; },
+  };
+}
+
 export function createWorkspaceClient({ request, newRequestId }) {
   let generation = 0;
   let pendingPlan = null;
@@ -58,7 +68,7 @@ export function createWorkspaceClient({ request, newRequestId }) {
     confirm: input => confirmations.confirm(input),
     retry: () => pendingPlan ? savePlan() : confirmations.retry(),
     get pending() { return pendingPlan ?? confirmations.pending; },
-    get pendingKind() { return pendingPlan ? "scheduled task" : "check-in"; },
+    get pendingKind() { return pendingPlan?.routineId ? "routine change" : pendingPlan ? "care plan" : "check-in"; },
     assignDuty: input => json("/api/circle/duty", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }),
     reset() { generation += 1; confirmations = sender(); pendingPlan = null; },
   };
