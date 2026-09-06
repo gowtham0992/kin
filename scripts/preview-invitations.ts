@@ -6,10 +6,14 @@ import { createDemoStore } from "../src/domain.js";
 const mode = process.argv[2] ?? "success";
 const port = Number(process.argv[3] ?? 3014);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid preview port");
-if (!["success", "denied", "empty", "conflict", "uncertain", "viewer", "offline", "alerts"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["success", "denied", "empty", "today-empty", "viewer-empty", "conflict", "uncertain", "viewer", "offline", "alerts"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
 const store = createDemoStore();
+if (["today-empty", "viewer-empty"].includes(mode)) {
+  const today = await store.today();
+  store.today = async () => ({ ...today, tasks: [], escalations: [], summary: { ...today.summary, total: 0, completed: 0 } });
+}
 if (mode === "alerts") {
   const task = (await store.today()).tasks[0]!;
   await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
@@ -20,7 +24,7 @@ let targetStatus = "active";
 app.use(createHttpApp(store, undefined, {
   accessAuthorizer: { async authorize() { return { subject: "synthetic-organizer", scopes: new Set(["mcp:tools"]), claims: { iss: "https://example.invalid" } }; } },
   familyAccess: { circleId: "synthetic", directory: { async find() { return {
-    circleId: "synthetic", memberId: "maya", name: "Maya", role: mode === "viewer" ? "viewer" : "caregiver", status: "active", canInvite: mode !== "denied" && mode !== "viewer",
+    circleId: "synthetic", memberId: "maya", name: "Maya", role: mode.startsWith("viewer") ? "viewer" : "caregiver", status: "active", canInvite: mode !== "denied" && !mode.startsWith("viewer"),
   }; } } },
   accessManagement: {
     async list() { return [{ memberId: "maya", name: "Maya", role: "caregiver", status: "active", organizer: true, canRevoke: false },

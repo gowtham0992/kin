@@ -50,7 +50,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   function renderToday(data) {
     const header = node("div", null, "care-summary");
     header.append(node("p", date(data.date), "kicker"), node("h2", "A little care, shared."),
-      node("p", `${data.summary.completed} of ${data.summary.total} check-ins completed`, "care-count"),
+      node("p", data.summary.total ? `${data.summary.completed} of ${data.summary.total} check-ins completed` : "Room for one small check-in.", "care-count"),
       node("p", data.onDuty ? `${data.onDuty.memberName} is on duty until ${time(data.onDuty.endsAt)}.` : "Nobody is assigned today. A caregiver can arrange coverage in Circle."));
     const list = node("ul", null, "care-plan");
     for (const task of data.tasks) {
@@ -67,7 +67,15 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       }
       list.append(item);
     }
-    if (!data.tasks.length) list.append(node("li", "No check-ins are scheduled today. Your circle's plan will appear here when it is set up."));
+    if (!data.tasks.length) {
+      const empty = node("li", null, "care-empty"), copy = node("div");
+      copy.append(node("h3", "Nothing scheduled today."), node("p", member.permissions.manageDuty
+        ? "Agree on one small thing together—a call, a walk, a glass of water. Give it a time, and your circle can follow along."
+        : "Your caregiver can add an agreed-upon check-in. You can also look ahead at the shared plan.", "care-note"));
+      const link = node("a", member.permissions.manageDuty ? "Schedule a check-in" : "View the plan", "primary care-plan-link");
+      link.href = "#plan";
+      empty.append(copy, link); list.append(empty);
+    }
     const alerts = node("section", null, "care-alerts"); alerts.append(node("h3", "Family follow-up"));
     if (!data.escalations.length) alerts.append(node("p", "No missed-task alerts recorded today. This is not a safety check."));
     for (const alert of data.escalations) {
@@ -201,7 +209,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     reset(); const current = revision;
     try {
       const identity = await client.session(); if (current !== revision) return;
-      member = identity; $("workspace-identity").textContent = `${member.name} · ${member.role.replaceAll("_", " ")}`;
+      member = identity; $("workspace-identity").textContent = `${member.name} · ${member.permissions.invite ? "organizer" : member.role.replaceAll("_", " ")}`;
       document.querySelector("main").classList.add("workspace-ready");
       $("workspace-nav").hidden = false; $("workspace-invite-link").hidden = !member.permissions.invite;
       $("workspace-access-link").hidden = !member.permissions.invite;
