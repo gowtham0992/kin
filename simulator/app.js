@@ -1,5 +1,6 @@
 import { createConfirmationSender, createSnapshotReader } from "./care-client.js";
 import { createMcpCareClient } from "./mcp-client.js";
+import { createVoiceInput } from "./voice-input.js";
 
 const mcp = createMcpCareClient(new URL("/mcp", location.origin));
 
@@ -444,7 +445,7 @@ async function loadToday() {
 
 async function confirmTask(responseValue) {
   const taskId = echoActions.dataset.taskId;
-  if (!taskId || submitting || conversationBusy || confirmationSender.pending) return;
+  if (!taskId || submitting || conversationBusy || voice.active || confirmationSender.pending) return;
   await submitConfirmation(() => confirmationSender.confirm({ taskId, response: responseValue, actor: "Evelyn" }));
 }
 
@@ -494,10 +495,45 @@ let proposal = null, conversationBusy = false;
 
 function lockConversation(locked) {
   document.querySelectorAll(".conversation button, .conversation input").forEach(element => { element.disabled = locked; });
+  document.querySelector("#voice-start").disabled = locked || !voice.supported;
 }
+const voiceButton = document.querySelector("#voice-start");
+const voiceCancel = document.querySelector("#voice-cancel");
+const voiceStatus = document.querySelector("#voice-status");
+const voice = createVoiceInput({
+  Recognition: window.SpeechRecognition ?? window.webkitSpeechRecognition,
+  onState: phase => {
+    const active = phase !== "idle";
+    lockConversation(active || conversationBusy || submitting || !!confirmationSender.pending);
+    voiceCancel.hidden = !active; voiceCancel.disabled = false;
+    voiceButton.disabled = phase === "finishing" || (!active && (conversationBusy || submitting || !!confirmationSender.pending));
+    voiceButton.textContent = phase === "listening" ? "Stop listening" : phase === "finishing" ? "Finishing…" : "Use voice input";
+    voiceStatus.textContent = phase === "listening" ? "Listening. Say one short message; nothing will be submitted."
+      : phase === "finishing" ? "Finishing your transcript…" : "Microphone stopped. You can type or try voice again.";
+  },
+  onTranscript: text => {
+    const draft = [conversationInput.value.trim(), text].filter(Boolean).join(" ");
+    if (draft.length > 800) { voiceStatus.textContent = "The combined message is too long. Your original draft was kept."; return; }
+    conversationInput.value = draft;
+    voiceStatus.textContent = "Added to your draft. Review the text, then press Ask Kin. Nothing has been sent to Kin.";
+    conversationInput.focus();
+  },
+  onError: message => { voiceStatus.textContent = message; },
+});
+voiceButton.disabled = !voice.supported;
+voiceStatus.textContent = voice.supported ? "Voice input starts only when you press the button." : "Voice input is unavailable in this browser. Typed messages work normally.";
+voiceButton.addEventListener("click", () => {
+  if (voice.active) { voice.stop(); return; }
+  if (conversationBusy || submitting || confirmationSender.pending) return;
+  proposal = null; conversationReview.hidden = true;
+  voice.start();
+});
+voiceCancel.addEventListener("click", () => voice.cancel());
+document.addEventListener("visibilitychange", () => { if (document.hidden) voice.cancel(); });
+window.addEventListener("pagehide", () => voice.cancel());
 conversationForm.addEventListener("submit", async event => {
   event.preventDefault();
-  if (conversationBusy || submitting || confirmationSender.pending) {
+  if (conversationBusy || voice.active || submitting || confirmationSender.pending) {
     conversationStatus.textContent = "Finish or retry the current check-in first."; return;
   }
   conversationBusy = true; lockConversation(true); proposal = null; conversationReview.hidden = true;
@@ -531,7 +567,7 @@ document.querySelector("#conversation-cancel").addEventListener("click", () => {
   conversationStatus.textContent = "Left unchanged."; conversationInput.focus();
 });
 document.querySelector("#conversation-confirm").addEventListener("click", async () => {
-  if (!proposal || conversationBusy || submitting || confirmationSender.pending) return;
+  if (!proposal || conversationBusy || voice.active || submitting || confirmationSender.pending) return;
   const reviewed = proposal; conversationBusy = true; lockConversation(true);
   try {
     const latest = await mcp.today();

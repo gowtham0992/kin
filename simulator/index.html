@@ -137,6 +137,12 @@
           <button type="submit">Ask Kin</button>
         </form>
         <p id="conversation-examples" class="conversation-note">Try “Show today”, “Weekly brief”, or “Done: Drink a glass of water”. Use a task’s exact title in limited mode.</p>
+        <div class="voice-controls">
+          <button id="voice-start" type="button" aria-describedby="voice-privacy voice-status">Use voice input</button>
+          <button id="voice-cancel" type="button" hidden>Cancel voice input</button>
+        </div>
+        <p id="voice-privacy" class="conversation-note">Optional English dictation. Your browser may send audio to its speech provider. Kin receives text, not audio. Review the text and press Ask Kin yourself.</p>
+        <p id="voice-status" class="conversation-note" role="status" aria-live="polite">Checking voice support…</p>
         <p id="conversation-status" role="status" aria-live="polite">Nothing changes until you confirm.</p>
         <div id="conversation-review" hidden>
           <p id="conversation-proposal"></p>
