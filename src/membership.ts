@@ -10,9 +10,10 @@ const membershipSchema = z.object({
   name: z.string().trim().min(1).max(80),
   role: z.enum(["viewer", "care_recipient", "caregiver"]),
   status: z.literal("active"),
+  canInvite: z.boolean().optional(),
 });
 export type Membership = z.infer<typeof membershipSchema>;
-export type CarePermission = "read" | "confirm" | "manage_duty";
+export type CarePermission = "read" | "confirm" | "manage_duty" | "invite";
 export interface MembershipDirectory {
   find(principal: AccessPrincipal): Promise<unknown>;
 }
@@ -31,6 +32,7 @@ export async function requireMembership(
   const parsed = membershipSchema.safeParse(await access.directory.find(principal));
   if (!parsed.success || parsed.data.circleId !== access.circleId) throw new FamilyAccessDeniedError();
   const member = parsed.data;
+  if (permission === "invite" && (member.role !== "caregiver" || member.canInvite !== true)) throw new FamilyAccessDeniedError();
   if ((permission === "confirm" && member.role === "viewer") ||
       (permission === "manage_duty" && member.role !== "caregiver")) throw new FamilyAccessDeniedError();
   return member;

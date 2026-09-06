@@ -38,6 +38,16 @@ class FakeDynamoSender {
 }
 
 describe("DynamoCareRepository", () => {
+  it("keeps invitation and account metadata out of the public roster", async () => {
+    const member = { id: "maya", name: "Maya", relationship: "daughter", canReceiveAlerts: true };
+    const client = new FakeDynamoSender([{ Items: [{ ...member,
+      PK: "CIRCLE#family-1", SK: "MEMBER#maya", entityType: "CircleMember",
+      accountKey: "ACCESS#private", pendingInvitation: "INVITE#private",
+    }] }, { Items: [] }]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    expect((await repository.circle()).members).toEqual([member]);
+  });
+
   it("conditionally binds a previously blocked alert to its first available caregiver", async () => {
     const blocked = {
       PK: "CIRCLE#family-1", SK: "ESCALATION#2026-09-02T15:00:00.000Z#morning-water",

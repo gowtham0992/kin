@@ -1,5 +1,6 @@
 import { createJwtAccessAuthorizer } from "./auth.js";
 import { createDynamoMembershipDirectory } from "./membership.js";
+import { createCognitoInvitableAccounts, createDynamoInvitationIssuer } from "./invitation-issuer.js";
 import { createDemoStore } from "./domain.js";
 import { createDynamoCareRepository } from "./dynamo-care-repository.js";
 import { createHttpApp } from "./http.js";
@@ -68,6 +69,16 @@ export function createConfiguredApp(
     throw new Error("OAuth configuration is required on the public Kin runtime");
   }
 
+  const familyAccess = tableName ? {
+    circleId, directory: createDynamoMembershipDirectory({ tableName, circleId, region: environment.AWS_REGION }),
+  } : undefined;
+  const issuingEnabled = environment.KIN_INVITATION_ISSUING_ENABLED === "true";
+  const userPoolId = environment.KIN_COGNITO_USER_POOL_ID?.trim();
+  const circleName = environment.KIN_CIRCLE_NAME?.trim();
+  if (issuingEnabled && (!familyAccess || !oauthValues.every(Boolean) || !userPoolId || !circleName)) {
+    throw new Error("Invitation issuing requires OAuth, a care table, user pool, and circle name");
+  }
+
   return createHttpApp(
     repository,
     weeklyBrief,
@@ -78,10 +89,12 @@ export function createConfiguredApp(
             audience: canonicalMcpResource,
             jwksUri: oauthJwksUri,
           }),
-          familyAccess: tableName ? {
-            circleId,
-            directory: createDynamoMembershipDirectory({ tableName, circleId, region: environment.AWS_REGION }),
-          } : undefined,
+          familyAccess,
+          invitationIssuer: issuingEnabled ? createDynamoInvitationIssuer({
+            tableName: tableName!, familyAccess: familyAccess!, circleName: circleName!, issuer: oauthIssuer,
+            accounts: createCognitoInvitableAccounts({ userPoolId: userPoolId!, region: environment.AWS_REGION }),
+            region: environment.AWS_REGION,
+          }) : undefined,
           canonicalMcpUri: canonicalMcpResource,
           authorizationServer: oauthAuthorizationServer,
           serveSimulator: environment.KIN_SERVE_SIMULATOR === "true",

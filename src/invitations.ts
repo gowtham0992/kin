@@ -14,6 +14,7 @@ const invitationSchema = z.object({
   targetKey: z.string().regex(/^ACCESS#[a-f0-9]{64}$/),
   expiresAt: z.number().int().positive(),
   status: z.enum(["pending", "accepted", "revoked"]),
+  rosterBound: z.boolean().optional(),
 });
 export type Invitation = z.infer<typeof invitationSchema>;
 export interface FamilyEnrollment {
@@ -68,6 +69,10 @@ export function createDynamoFamilyEnrollment(input: {
         throw new InvitationUnavailableError();
       }
     }
+    if (parsed.data.rosterBound && parsed.data.status === "pending") {
+      const roster = await get({ PK: `CIRCLE#${input.circleId}`, SK: `MEMBER#${parsed.data.memberId}` }) as Record<string, unknown> | undefined;
+      if (roster?.accountKey !== parsed.data.targetKey || roster.pendingInvitation !== invitationKey(input.circleId, code).SK) throw new InvitationUnavailableError();
+    }
     return parsed.data;
   };
   return {
@@ -81,6 +86,11 @@ export function createDynamoFamilyEnrollment(input: {
       const accessKey = membershipKey(input.circleId, input.issuer, accountId);
       try {
         await client.send(new TransactWriteCommand({ TransactItems: [
+          ...(invitation.rosterBound ? [{ ConditionCheck: {
+            TableName: input.tableName, Key: { PK: `CIRCLE#${input.circleId}`, SK: `MEMBER#${invitation.memberId}` },
+            ConditionExpression: "accountKey = :target AND pendingInvitation = :invitation",
+            ExpressionAttributeValues: { ":target": accessKey.SK, ":invitation": invitationKey(input.circleId, code).SK },
+          } }] : []),
           { Update: {
             TableName: input.tableName, Key: invitationKey(input.circleId, code),
             UpdateExpression: "SET #status = :accepted, acceptedAt = :acceptedAt, consentVersion = :consent",

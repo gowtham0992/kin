@@ -636,8 +636,7 @@ function stripDutyStorage(stored: StoredDutyAssignment): DutyAssignment {
 }
 
 function stripMemberStorage(stored: StoredCircleMember): CircleMember {
-  const { PK: _pk, SK: _sk, entityType: _entityType, ...member } = stored;
-  return member;
+  return { id: stored.id, name: stored.name, relationship: stored.relationship, canReceiveAlerts: stored.canReceiveAlerts };
 }
 
 function activeDutyAt(assignments: DutyAssignment[], asOf: Date): DutyAssignment | null {

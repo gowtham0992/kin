@@ -14,6 +14,7 @@ import { createMcpServer } from "./mcp.js";
 import { WeeklyBriefService } from "./weekly-brief.js";
 import { confirmWithReceipt } from "./confirmation.js";
 import { FamilyAccessDeniedError, mcpCarePermission, requireMembership, type FamilyAccess, type Membership } from "./membership.js";
+import { InvitationIssueError, issueInvitationBody, type InvitationIssuer } from "./invitation-issuer.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -30,6 +31,7 @@ const dutyBody = z.object({
 export interface HttpAppOptions {
   accessAuthorizer?: AccessAuthorizer;
   familyAccess?: FamilyAccess;
+  invitationIssuer?: InvitationIssuer;
   canonicalMcpUri?: string | (() => Promise<string>);
   authorizationServer?: string;
   serveSimulator?: boolean;
@@ -83,12 +85,28 @@ export function createHttpApp(
     try {
       const principal = await options.accessAuthorizer.authorize(request.get("authorization"), [alexaScopes.tools]);
       const permission = request.method === "GET" ? "read"
+        : request.method === "POST" && request.path === "/invitations" ? "invite"
         : request.method === "POST" && /^\/tasks\/[^/]+\/confirm$/.test(request.path) ? "confirm"
         : request.method === "PUT" && request.path === "/circle/duty" ? "manage_duty" : null;
       if (!permission) throw new FamilyAccessDeniedError();
       response.locals.member = await requireMembership(options.familyAccess, principal, permission);
+      response.locals.principal = principal;
       next();
     } catch (error) { next(error); }
+  });
+
+  app.post("/api/invitations", async (request, response, next) => {
+    response.set("cache-control", "no-store");
+    if (!options.invitationIssuer) { response.status(404).json({ error: "Not found" }); return; }
+    if (!options.accessAuthorizer || !response.locals.principal) { response.status(401).json({ error: "invalid_token" }); return; }
+    const body = issueInvitationBody.safeParse(request.body);
+    if (!body.success) { response.status(400).json({ error: "invalid_invitation" }); return; }
+    try {
+      response.status(201).json(await options.invitationIssuer.issue(response.locals.principal, body.data));
+    } catch (error) {
+      if (error instanceof InvitationIssueError) { response.status(409).json({ error: "invitation_unavailable" }); return; }
+      next(error);
+    }
   });
 
   app.get("/api/today", async (_request, response, next) => {

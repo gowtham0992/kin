@@ -18,6 +18,35 @@ function fixture(record: unknown = invitation) {
 }
 
 describe("family invitation acceptance", () => {
+  it("rejects a replaced roster-bound code before writing", async () => {
+    const bound = { ...invitation, rosterBound: true };
+    const { service, send } = fixture(bound);
+    send.mockImplementation(async command => command instanceof GetCommand ? { Item:
+      command.input.Key?.SK === "MEMBER#maya"
+        ? { accountKey: invitation.targetKey, pendingInvitation: invitationKey("family-a", "b".repeat(43)).SK }
+        : bound } : {});
+    await expect(service.accept("account-a", code, familyConsentVersion, bound)).rejects.toThrow("unavailable");
+    expect(send.mock.calls.some(([command]) => command instanceof TransactWriteCommand)).toBe(false);
+  });
+
+  it("rechecks the roster binding inside the acceptance transaction", async () => {
+    const bound = { ...invitation, rosterBound: true };
+    const { service, send } = fixture(bound);
+    send.mockImplementation(async command => command instanceof GetCommand ? { Item:
+      command.input.Key?.SK === "MEMBER#maya"
+        ? { accountKey: invitation.targetKey, pendingInvitation: invitationKey("family-a", code).SK }
+        : bound } : {});
+    await service.accept("account-a", code, familyConsentVersion, bound);
+    const transaction = send.mock.calls.find(([command]) => command instanceof TransactWriteCommand)?.[0] as TransactWriteCommand;
+    expect(transaction.input.TransactItems).toHaveLength(3);
+    expect(transaction.input.TransactItems?.[0]?.ConditionCheck).toMatchObject({
+      Key: { PK: "CIRCLE#family-a", SK: "MEMBER#maya" },
+      ConditionExpression: "accountKey = :target AND pendingInvitation = :invitation",
+      ExpressionAttributeValues: { ":target": invitation.targetKey, ":invitation": invitationKey("family-a", code).SK },
+    });
+    expect(transaction.input.TransactItems?.[2]?.Put?.Item).not.toHaveProperty("canInvite");
+  });
+
   it("prepares an expiring account-bound invitation without storing the raw code", () => {
     const draft = prepareInvitation({ circleId: "family-a", circleName: "Evelyn", issuer, accountId: "account-a", memberId: "maya", name: "Maya", role: "viewer" }, now());
     expect(draft.code).toMatch(/^[A-Za-z0-9_-]{43}$/);
