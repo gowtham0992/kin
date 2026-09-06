@@ -11,6 +11,7 @@ import { createBedrockBriefGenerator, WeeklyBriefService } from "./weekly-brief.
 
 export interface RuntimeOptions {
   requireOAuth?: boolean;
+  familyAssetDirectory?: string;
 }
 
 export function createConfiguredApp(
@@ -105,6 +106,7 @@ export function createConfiguredApp(
           familyAccess,
           browserAuth,
           serveFamilyWorkspace: familyEnabled,
+          familyAssetDirectory: options.familyAssetDirectory,
           invitationIssuer: issuingEnabled ? createDynamoInvitationIssuer({
             tableName: tableName!, familyAccess: familyAccess!, circleName: circleName!, issuer: oauthIssuer,
             accounts: createCognitoInvitableAccounts({ userPoolId: userPoolId!, region: environment.AWS_REGION }),

@@ -16,6 +16,7 @@ import { confirmWithReceipt } from "./confirmation.js";
 import { FamilyAccessDeniedError, mcpCarePermission, requireMembership, type FamilyAccess, type Membership } from "./membership.js";
 import { InvitationIssueError, issueInvitationBody, type InvitationIssuer } from "./invitation-issuer.js";
 import type { BrowserAuthConfig } from "./browser-auth-config.js";
+import { familyAssets } from "./family-assets.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -38,6 +39,7 @@ export interface HttpAppOptions {
   authorizationServer?: string;
   serveSimulator?: boolean;
   serveFamilyWorkspace?: boolean;
+  familyAssetDirectory?: string;
 }
 
 export function createHttpApp(
@@ -72,9 +74,9 @@ export function createHttpApp(
     };
     app.get("/", (_request, response) => { response.set(headers).redirect("/invite.html"); });
     // Never derive a filesystem path from the request or expose the demo directory.
-    for (const asset of ["invite.html", "invite.js", "invite.css", "invite-client.js", "browser-auth.js", "styles.css"]) {
+    for (const asset of familyAssets) {
       app.get(`/${asset}`, (_request, response) => {
-        response.sendFile(asset, { root: simulatorDirectory, dotfiles: "deny", headers, lastModified: false, etag: false });
+        response.sendFile(asset, { root: options.familyAssetDirectory ?? simulatorDirectory, dotfiles: "deny", headers, lastModified: false, etag: false });
       });
     }
   }

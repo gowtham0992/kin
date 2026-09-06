@@ -210,6 +210,7 @@ export class KinApiStack extends Stack {
           beforeInstall: () => [],
           afterBundling: (inputDirectory, outputDirectory) => [
             `node --import tsx "${inputDirectory}/scripts/build-widget.ts" "${outputDirectory}/widget/today.html"`,
+            `node --import tsx "${inputDirectory}/scripts/build-family.ts" "${outputDirectory}/family"`,
           ],
         },
       },
