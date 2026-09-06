@@ -6,6 +6,11 @@ import { createBedrockIntentGenerator, proposeConversation } from "../src/demo-c
 
 const store = () => createDemoStore(() => new Date("2026-09-02T08:00:00Z"));
 describe("read-only conversation proposals", () => {
+  it("accepts a spoken explicit command without punctuation but rejects extra interpretation", async () => {
+    const snapshot = await store().today();
+    expect(await proposeConversation("Not yet drink a glass of water", snapshot)).toMatchObject({ action: "confirm", taskId: "morning-water", response: "not_yet" });
+    expect(await proposeConversation("Done drink a glass of water maybe", snapshot)).toMatchObject({ action: "clarify" });
+  });
   it("proposes an exact named task without writing care state", async () => {
     const repository = store();
     const confirm = vi.spyOn(repository, "confirm");

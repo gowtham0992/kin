@@ -35,7 +35,7 @@ function limitedIntent(message: string, tasks: { id: string; title: string }[], 
     const followUp = /^(?:actually,? )?(done|not yet|skip|i did it)$/.exec(text);
     if (followUp) return { action: "confirm", taskId: focusedTaskId, response: followUp[1] === "skip" ? "skipped" : followUp[1] === "not yet" ? "not_yet" : "done" };
   }
-  const match = /^(done|not yet|skip):\s*(.+)$/.exec(text);
+  const match = /^(done|not yet|skip)(?::\s*|\s+)(.+)$/.exec(text);
   if (!match) return { action: "clarify" };
   const selected = tasks.filter(task => task.title.toLowerCase() === match[2]);
   if (selected.length !== 1) return { action: "clarify" };

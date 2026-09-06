@@ -1,4 +1,5 @@
 import { createWorkspaceClient, createPlanDraft } from "./workspace-client.js";
+import { createVoiceInput, appendVoiceDraft } from "./voice-input.js";
 
 const $ = id => document.getElementById(id);
 const node = (tag, text, className) => { const element = document.createElement(tag); if (text != null) element.textContent = text; if (className) element.className = className; return element; };
@@ -9,6 +10,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   const client = createWorkspaceClient({ request });
   const planDraft = createPlanDraft(), disabledBeforeSave = new WeakMap();
   let conversationDraft = "";
+  let voice = null;
   let member = null, revision = 0, busy = false, loading = false, timer = null, lastRender = "", activeView = "today";
   const content = $("workspace-content"), status = $("workspace-status");
   const tab = () => ["today", "ask", "plan", "circle", "week", "invite", "access"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "today";
@@ -18,6 +20,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     $("plan-due")?.dispatchEvent(new Event("change"));
   }
   function reset() {
+    voice?.cancel(); voice = null;
     revision += 1; client.reset(); planDraft.clear(); conversationDraft = ""; member = null; busy = false; loading = false;
     clearTimeout(timer); content.replaceChildren(); $("workspace").hidden = true;
     $("workspace-nav").hidden = true; $("workspace-identity").textContent = "";
@@ -40,7 +43,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     });
   }
   async function mutate(action, success, onSaved = () => {}) {
-    if (busy) return;
+    if (busy || voice?.active) return;
     const current = ++revision; busy = true; loading = false;
     lockControls(true);
     status.textContent = "Saving…";
@@ -67,6 +70,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     }
   }
   function renderConversation(data) {
+    voice?.cancel(); voice = null;
     const heading = node("div");
     heading.append(node("p", "One clear request", "kicker"), node("h2", "Tell Kin how it went."));
     if (!member.permissions.confirm) {
@@ -80,6 +84,33 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const submit = node("button", "Review request", "primary"); submit.type = "submit";
     const reply = node("p", "Nothing changes until you review and confirm.", "care-note"); reply.setAttribute("role", "status");
     const review = node("div", null, "care-alerts"); review.hidden = true;
+    const voiceStatus = node("p", "Voice input starts only when you press the button.", "care-note"); voiceStatus.setAttribute("role", "status");
+    const voiceStart = button("Use voice input", () => {
+      if (busy || client.pending) return;
+      if (voice.active) voice.stop();
+      else { review.hidden = true; voice.start(); }
+    });
+    const voiceCancel = button("Cancel voice input", () => { voice.cancel(); voiceStatus.textContent = "Voice input cancelled. Your draft is unchanged."; }); voiceCancel.hidden = true;
+    voice = createVoiceInput({ Recognition: window.SpeechRecognition ?? window.webkitSpeechRecognition,
+      onState(phase) {
+        const active = phase !== "idle";
+        lockControls(active || busy || !!client.pending);
+        voiceStart.textContent = phase === "listening" ? "Stop listening" : phase === "finishing" ? "Finishing…" : "Use voice input";
+        voiceStart.disabled = phase === "finishing" || (!active && (busy || !!client.pending));
+        voiceCancel.hidden = !active; voiceCancel.disabled = false;
+        voiceStatus.textContent = phase === "listening" ? "Listening. Say one short request; nothing will be submitted." : phase === "finishing" ? "Finishing recognition…" : "Voice input stopped. Review your text before continuing.";
+      },
+      onTranscript(text) {
+        try {
+          conversationDraft = appendVoiceDraft(input.value, text); input.value = conversationDraft;
+          review.hidden = true; voiceStatus.textContent = "Added to your draft. Check the wording, then press Review request."; input.focus();
+        } catch (error) { voiceStatus.textContent = error.message; }
+      },
+      onError(message) { voiceStatus.textContent = message; },
+    });
+    voiceStart.disabled = !voice.supported;
+    if (!voice.supported) voiceStatus.textContent = "Voice input is unavailable in this browser. You can still type your request.";
+    const voiceActions = node("div", null, "care-actions"); voiceActions.append(voiceStart, voiceCancel);
     input.addEventListener("input", () => { conversationDraft = input.value; review.hidden = true; });
     form.append(label, input, hint, submit);
     const examples = node("div", null, "care-actions");
@@ -87,7 +118,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       examples.append(button(task.title, () => { input.value = `Done: ${task.title}`; conversationDraft = input.value; review.hidden = true; input.focus(); }));
     }
     form.addEventListener("submit", async event => {
-      event.preventDefault(); if (busy || client.pending || !form.reportValidity()) return;
+      event.preventDefault(); if (busy || voice?.active || client.pending || !form.reportValidity()) return;
       const current = ++revision; busy = true; loading = false; lockControls(true); review.hidden = true;
       reply.textContent = "Checking your request…";
       try {
@@ -108,7 +139,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         failure(error); reply.textContent = "Could not review this request. Your draft is still here; try again. Nothing was sent to save.";
       } finally { if (current === revision) { busy = false; lockControls(false); } }
     });
-    content.replaceChildren(heading, form, reply, review, node("h3", "Start with today’s plan"), examples,
+    content.replaceChildren(heading, form, voiceActions,
+      node("p", "Say Done, Not yet, or Skip, then the exact task title. Optional English dictation may send audio to your browser’s speech provider; Kin receives text, not audio. Avoid sensitive details. Always review before confirming.", "care-note"), voiceStatus,
+      reply, review, node("h3", "Start with today’s plan"), examples,
       node("p", data.tasks.length ? "Choose a title to draft a request. Check-ins record what a family member reports; they are not proof of safety." : "No check-ins are scheduled today. A caregiver can add one in Plan.", "care-note"));
   }
   function renderToday(data) {
@@ -287,7 +320,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     content.replaceChildren(heading, list, node("p", "This screen cannot revoke your own access or another organizer’s access, restore revoked access, or grant organizer privileges.", "care-note"));
   }
   async function refresh(afterWrite = false) {
-    if (!member || (busy && !afterWrite) || loading || tab() === "invite") return;
+    if (!member || voice?.active || (busy && !afterWrite) || loading || tab() === "invite") return;
     loading = true; const current = revision, view = tab();
     if (!content.childElementCount) status.textContent = "Loading your family’s update…";
     try {
@@ -313,6 +346,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   async function navigate() {
     if (!member) return;
     if (busy || client.pending) { history.replaceState(null, "", `#${activeView}`); status.textContent = "Finish or retry the current change before switching views."; return; }
+    voice?.cancel(); voice = null;
     revision += 1; loading = false; content.replaceChildren(); lastRender = "";
     const view = tab();
     activeView = view;
@@ -335,7 +369,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       () => { if (kind === "care plan") clearPlanDraft(); });
   });
   window.addEventListener("hashchange", () => void navigate());
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) voice?.cancel(); else void refresh(); });
+  window.addEventListener("pagehide", () => voice?.cancel());
   return { reset, async open() {
     reset(); const current = revision;
     try {

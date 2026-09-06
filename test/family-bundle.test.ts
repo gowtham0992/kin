@@ -12,7 +12,7 @@ it("serves the packaged family workspace through the actual Lambda handler witho
   const resources = Template.fromStack(stack).findResources("AWS::Lambda::Function", { Properties: { FunctionName: "kin-mcp-api" } });
   const key = Object.values(resources)[0]!.Properties.Code.S3Key as string;
   const directory = path.join(app.synth().directory, `asset.${key.replace(/\.zip$/, "")}`);
-  const files = ["browser-auth.js", "care-client.js", "invite-client.js", "invite.css", "invite.html", "invite.js", "styles.css", "workspace-client.js", "workspace.css", "workspace.js"];
+  const files = ["browser-auth.js", "care-client.js", "invite-client.js", "invite.css", "invite.html", "invite.js", "styles.css", "voice-input.js", "workspace-client.js", "workspace.css", "workspace.js"];
   expect((await readdir(path.join(directory, "family"))).sort()).toEqual(files);
   const environment = {
     KIN_PUBLIC_API_ENABLED: "true", KIN_SERVE_SIMULATOR: "false", KIN_FAMILY_WORKSPACE_ENABLED: "true",

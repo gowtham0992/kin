@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error Browser-native module is tested directly.
-import { createVoiceInput } from "../simulator/voice-input.js";
+import { createVoiceInput, appendVoiceDraft } from "../simulator/voice-input.js";
 
 class Recognition {
   static instances: Recognition[] = [];
@@ -19,6 +19,11 @@ function setup(RecognitionType: unknown = Recognition) {
 }
 afterEach(() => { Recognition.instances = []; vi.useRealTimers(); });
 describe("voice draft lifecycle", () => {
+  it("appends recognition without losing typed text and rejects an oversized combined draft", () => {
+    expect(appendVoiceDraft(" Not yet: ", " Drink a glass of water ")).toBe("Not yet: Drink a glass of water");
+    expect(appendVoiceDraft("x".repeat(798), "y")).toHaveLength(800);
+    expect(() => appendVoiceDraft("x".repeat(799), "y")).toThrow("too long");
+  });
   it("starts only on request and delivers a final transcript once after end", () => {
     const { voice, onTranscript } = setup();
     expect(Recognition.instances).toHaveLength(0);

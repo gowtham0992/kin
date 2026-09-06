@@ -1,3 +1,9 @@
+export function appendVoiceDraft(draft, transcript) {
+  const result = [draft.trim(), transcript.trim()].filter(Boolean).join(" ");
+  if (result.length > 800) throw new RangeError("The combined request is too long. Shorten your draft before trying voice input again.");
+  return result;
+}
+
 // Recognition is injected so lifecycle races can be tested without a microphone.
 export function createVoiceInput({ Recognition, onState, onTranscript, onError,
   schedule = setTimeout, unschedule = clearTimeout }) {
