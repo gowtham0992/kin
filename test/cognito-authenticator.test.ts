@@ -1,6 +1,7 @@
 import {
   GetUserCommand,
   InitiateAuthCommand,
+  RespondToAuthChallengeCommand,
   type GetUserCommandOutput,
   type InitiateAuthCommandOutput,
 } from "@aws-sdk/client-cognito-identity-provider";
@@ -9,9 +10,31 @@ import {
   CognitoAccountAuthenticator,
   InvalidCredentialsError,
   UnsupportedSignInChallengeError,
+  NewPasswordRejectedError,
 } from "../src/cognito-authenticator.js";
 
 describe("Cognito account authentication", () => {
+  it("does not answer incomplete challenges or accept an invalid replacement password", async () => {
+    const send = vi.fn(async () => ({ ChallengeName: "NEW_PASSWORD_REQUIRED" as const, $metadata: {} }));
+    const auth = new CognitoAccountAuthenticator({ clientId: "test", client: { send } });
+    await expect(auth.authenticate("owner@example.com", "Temporary-123!", "short")).rejects.toBeInstanceOf(NewPasswordRejectedError);
+    expect(send).not.toHaveBeenCalled();
+    await expect(auth.authenticate("owner@example.com", "Temporary-123!", "Permanent-123!")).rejects.toBeInstanceOf(UnsupportedSignInChallengeError);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it("completes an initial password challenge using only Cognito's session and verified identity", async () => {
+    const send = vi.fn(async (command: unknown) => {
+      if (command instanceof InitiateAuthCommand) return { ChallengeName: "NEW_PASSWORD_REQUIRED" as const, Session: "provider-session", ChallengeParameters: { USER_ID_FOR_SRP: "canonical-user", requiredAttributes: "[]" }, $metadata: {} };
+      if (command instanceof RespondToAuthChallengeCommand) return { AuthenticationResult: { AccessToken: "new-access" }, $metadata: {} };
+      return { Username: "canonical-user", UserAttributes: [{ Name: "sub", Value: "verified-sub" }], $metadata: {} };
+    });
+    const auth = new CognitoAccountAuthenticator({ clientId: "test-client", client: { send } });
+    await expect(auth.authenticate("test@example.com", "Temporary-123!", "Permanent-123!"))
+      .resolves.toEqual({ accountId: "verified-sub", username: "canonical-user" });
+    expect((send.mock.calls[1]![0] as RespondToAuthChallengeCommand).input).toMatchObject({
+      Session: "provider-session", ChallengeName: "NEW_PASSWORD_REQUIRED", ChallengeResponses: { USERNAME: "canonical-user", NEW_PASSWORD: "Permanent-123!" },
+    });
+  });
   it("returns Cognito's stable subject after a successful password flow", async () => {
     const send = vi.fn(async (command: GetUserCommand | InitiateAuthCommand) => {
       if (command instanceof InitiateAuthCommand) {

@@ -2,7 +2,7 @@ import express, { type Request, type Response } from "express";
 import type Provider from "oidc-provider";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { InvalidCredentialsError } from "../src/cognito-authenticator.js";
+import { InvalidCredentialsError, NewPasswordRequiredError } from "../src/cognito-authenticator.js";
 import { createOAuthInteractionRouter } from "../src/oauth-interactions.js";
 import { familyConsentVersion, type FamilyEnrollment, type Invitation } from "../src/invitations.js";
 
@@ -70,6 +70,26 @@ function csrfFrom(html: string) {
 }
 
 describe("OAuth account-linking interaction", () => {
+  it("renders password setup without retaining secrets and rejects mismatched or forged submissions", async () => {
+    const { app, authenticate, interactionFinished } = fixture();
+    authenticate.mockRejectedValueOnce(new NewPasswordRequiredError());
+    const initial = await request(app).get(`/interaction/${uid}`);
+    const csrf = csrfFrom(initial.text);
+    const setup = await request(app).post(`/interaction/${uid}/login`).type("form")
+      .send({ csrf, username: "owner@example.com", password: "Temporary-123!" }).expect(200);
+    expect(setup.text).toContain("Make this account yours");
+    expect(setup.text).toContain('name="newPassword"');
+    expect(setup.text).not.toContain("Temporary-123!");
+    const body = { csrf, username: "owner@example.com", password: "Temporary-123!", newPassword: "Permanent-123!", confirmPassword: "Different-123!" };
+    const rejected = await request(app).post(`/interaction/${uid}/login`).type("form").send(body).expect(400);
+    expect(rejected.text).not.toContain(body.newPassword);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    await request(app).post(`/interaction/${uid}/login`).type("form").send({ ...body, csrf: "forged", confirmPassword: body.newPassword }).expect(400);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    await request(app).post(`/interaction/${uid}/login`).type("form").send({ ...body, confirmPassword: body.newPassword }).expect(303);
+    expect(authenticate).toHaveBeenLastCalledWith(body.username, body.password, body.newPassword);
+    expect(interactionFinished).toHaveBeenCalledTimes(1);
+  });
   it("reviews a role before explicit acceptance and rejects changed review proofs", async () => {
     const invitation: Invitation = { circleId: "family-a", circleName: "Evelyn <family>", memberId: "maya", name: "Maya", role: "viewer", targetKey: "ACCESS#" + "a".repeat(64), expiresAt: 9999999999, status: "pending" };
     const enrollment = { review: vi.fn(async () => invitation), accept: vi.fn(async () => {}) };

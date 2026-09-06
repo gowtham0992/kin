@@ -5,12 +5,14 @@ import { alexaScopes } from "./auth.js";
 import { familyConsentVersion, invitationFingerprint, InvitationUnavailableError, type FamilyEnrollment, type Invitation } from "./invitations.js";
 import {
   InvalidCredentialsError,
+  NewPasswordRequiredError,
+  NewPasswordRejectedError,
   UnsupportedSignInChallengeError,
   type AuthenticatedAccount,
 } from "./cognito-authenticator.js";
 
 export interface AccountAuthenticator {
-  authenticate(username: string, password: string): Promise<AuthenticatedAccount>;
+  authenticate(username: string, password: string, newPassword?: string): Promise<AuthenticatedAccount>;
 }
 
 export interface OAuthInteractionRouterInput {
@@ -68,7 +70,9 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
     const username = scalarBody(request.body?.username);
     const password = scalarBody(request.body?.password);
     try {
-      const account = await input.authenticator.authenticate(username, password);
+      const newPassword = scalarBody(request.body?.newPassword);
+      if (request.body?.newPassword !== undefined && (!newPassword || newPassword !== scalarBody(request.body?.confirmPassword))) throw new NewPasswordRejectedError();
+      const account = newPassword ? await input.authenticator.authenticate(username, password, newPassword) : await input.authenticator.authenticate(username, password);
       await input.provider.interactionFinished(
         request,
         response,
@@ -76,6 +80,13 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
         { mergeWithLastSubmission: false },
       );
     } catch (error) {
+      if (error instanceof NewPasswordRequiredError || error instanceof NewPasswordRejectedError) {
+        response.locals.passwordSetup = true;
+        renderPrompt(response, details, csrfToken(input.csrfSecret, details.uid),
+          error instanceof NewPasswordRejectedError ? "Passwords must match and meet the requirements below. Re-enter your temporary password and try again." : undefined,
+          error instanceof NewPasswordRejectedError ? 400 : 200, username);
+        return;
+      }
       if (error instanceof InvalidCredentialsError) {
         renderPrompt(
           response,
@@ -243,10 +254,12 @@ function renderPrompt(
     error,
     username,
     enrollment,
+    passwordSetup: response.locals.passwordSetup === true,
   }));
 }
 
 function page(input: {
+  passwordSetup: boolean;
   browser: boolean;
   uid: string;
   prompt: "login" | "consent";
@@ -260,18 +273,19 @@ function page(input: {
   const csrf = escapeHtml(input.csrf);
   const signIn = input.prompt === "login";
   const reviewed = !signIn ? input.enrollment?.invitation : undefined;
-  const title = signIn ? "Bring your care circle together" : reviewed ? "A place in the circle" : input.browser ? "Open your family workspace" : "Connect Kin to Alexa+";
+  const title = signIn ? input.passwordSetup ? "Make this account yours" : "Bring your care circle together" : reviewed ? "A place in the circle" : input.browser ? "Open your family workspace" : "Connect Kin to Alexa+";
   const eyebrow = signIn ? "Family sign in" : reviewed ? "Your choice to join" : "Account connection";
   const body = signIn
-    ? "Use the private family account your Kin organizer invited."
+    ? input.passwordSetup ? "Use the temporary password from your email once more. Then set your own." : "Use the private family account your Kin organizer invited."
     : input.browser ? "This browser can use Kin within your existing family permissions. Signing in alone does not grant membership or organizer access."
       : reviewed ? "Check who you are joining and what you can do. Accepting also connects Kin to Alexa+, within your role's permissions."
         : "Alexa+ can use Kin within your family role's permissions. Connecting alone does not grant family membership.";
-  const primary = signIn ? "Continue securely" : reviewed ? "Join circle and connect" : input.browser ? "Open workspace" : "Allow and connect";
+  const primary = signIn ? input.passwordSetup ? "Set password and continue" : "Continue securely" : reviewed ? "Join circle and connect" : input.browser ? "Open workspace" : "Allow and connect";
   const action = signIn ? "login" : "consent";
   const fields = signIn ? `
     <label>Email<input name="username" type="email" inputmode="email" autocomplete="username" value="${escapeHtml(input.username)}" maxlength="320" required autofocus></label>
-    <label>Password<input name="password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required></label>` : `
+    <label>${input.passwordSetup ? "Temporary password from email" : "Password"}<input name="password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required></label>
+    ${input.passwordSetup ? `<p class="promise">Use 12–256 characters with uppercase and lowercase letters, a number, and a symbol. No spaces. Choose something different from the temporary password.</p><label>New password<input name="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label><label>Confirm new password<input name="confirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>` : ""}` : `
     ${reviewed ? "" : `<div class="permission"><span aria-hidden="true">✓</span><div><strong>${input.browser ? "Your family permissions" : "Care tasks"}</strong><p>${input.browser ? "Read care activity and use the actions your family role permits. Only designated organizers can invite." : "Read the shared plan. Record voice confirmations only if your role permits it."}</p></div></div>`}
     <p class="promise">${input.browser ? "Closing this workspace does not remove your family membership or sign you out of the account provider." : "Kin never gives Alexa+ your password. Disconnecting Alexa does not remove your family membership."}</p>
     ${reviewed ? `<section class="invitation"><div class="eyebrow">Your invitation</div><h2>${escapeHtml(reviewed.circleName)}</h2><p>You are joining as <strong>${escapeHtml(reviewed.name)}</strong>.</p><p>${escapeHtml(roleDescription(reviewed.role))}</p><input type="hidden" name="invitation" value="${escapeHtml(input.enrollment?.code ?? "")}"><input type="hidden" name="invitationProof" value="${escapeHtml(input.enrollment?.proof ?? "")}"><label class="consent"><input type="checkbox" name="familyConsent" value="${familyConsentVersion}" required><span>I agree to join this shared care circle with these permissions. My recorded care activity will be visible to other circle members.</span></label></section>`
