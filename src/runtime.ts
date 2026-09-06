@@ -74,6 +74,10 @@ export function createConfiguredApp(
     circleId, directory: createDynamoMembershipDirectory({ tableName, circleId, region: environment.AWS_REGION }),
   } : undefined;
   const browserEnabled = environment.KIN_BROWSER_AUTH_ENABLED === "true";
+  const familyEnabled = environment.KIN_FAMILY_WORKSPACE_ENABLED === "true";
+  if (familyEnabled && !browserEnabled) {
+    throw new Error("Family workspace requires browser sign-in");
+  }
   if (browserEnabled && (!oauthValues.every(Boolean) || !canonicalMcpUri || !familyAccess)) {
     throw new Error("Browser sign-in requires OAuth, a literal canonical URI, and a care table");
   }
@@ -100,6 +104,7 @@ export function createConfiguredApp(
           }),
           familyAccess,
           browserAuth,
+          serveFamilyWorkspace: familyEnabled,
           invitationIssuer: issuingEnabled ? createDynamoInvitationIssuer({
             tableName: tableName!, familyAccess: familyAccess!, circleName: circleName!, issuer: oauthIssuer,
             accounts: createCognitoInvitableAccounts({ userPoolId: userPoolId!, region: environment.AWS_REGION }),

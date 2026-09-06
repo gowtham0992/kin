@@ -37,6 +37,7 @@ export interface HttpAppOptions {
   canonicalMcpUri?: string | (() => Promise<string>);
   authorizationServer?: string;
   serveSimulator?: boolean;
+  serveFamilyWorkspace?: boolean;
 }
 
 export function createHttpApp(
@@ -44,16 +45,38 @@ export function createHttpApp(
   weeklyBrief: WeeklyBriefService = new WeeklyBriefService(store),
   options: HttpAppOptions = {},
 ) {
+  const familyEnabled = options.serveFamilyWorkspace === true;
+  if (familyEnabled && (!options.accessAuthorizer || !options.familyAccess || !options.browserAuth)) {
+    throw new Error("Family workspace requires authentication, membership checks, and browser sign-in");
+  }
+  if (familyEnabled && options.serveSimulator !== false) {
+    throw new Error("Family workspace cannot serve the simulator");
+  }
   const app = express();
   app.disable("x-powered-by");
   app.get("/family-auth-config", (_request, response) => {
     response.set("cache-control", "no-store");
-    if (!options.browserAuth || options.serveSimulator === false) { response.status(404).json({ error: "not_enabled" }); return; }
+    if (!options.browserAuth || !familyEnabled) { response.status(404).json({ error: "not_enabled" }); return; }
     response.json(options.browserAuth);
   });
   app.use(express.json({ limit: "128kb" }));
   if (options.serveSimulator !== false) {
     app.use(express.static(simulatorDirectory, { extensions: ["html"] }));
+  }
+  if (familyEnabled) {
+    const headers = {
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    };
+    app.get("/", (_request, response) => { response.set(headers).redirect("/invite.html"); });
+    // Never derive a filesystem path from the request or expose the demo directory.
+    for (const asset of ["invite.html", "invite.js", "invite.css", "invite-client.js", "browser-auth.js", "styles.css"]) {
+      app.get(`/${asset}`, (_request, response) => {
+        response.sendFile(asset, { root: simulatorDirectory, dotfiles: "deny", headers, lastModified: false, etag: false });
+      });
+    }
   }
 
   if (options.canonicalMcpUri || options.authorizationServer) {
@@ -81,7 +104,7 @@ export function createHttpApp(
     response.json({ status: "ok", service: "kin", version: "0.1.0" });
   });
 
-  if (options.serveSimulator === false) {
+  if (options.serveSimulator === false && !familyEnabled) {
     app.use("/api", (_request, response) => {
       response.status(404).json({ error: "Not found" });
     });
