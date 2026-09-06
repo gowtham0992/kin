@@ -1,5 +1,6 @@
 import Provider, { errors } from "oidc-provider";
 import { alexaScopes } from "./auth.js";
+import { browserAuthConfig } from "./browser-auth-config.js";
 
 interface OAuthClientDefinition {
   clientId: string;
@@ -18,6 +19,7 @@ export interface KinOAuthProviderInput {
   adapter: new (model: string) => object;
   serviceClient: OAuthClientDefinition;
   userClient?: AlexaUserOAuthClient;
+  browserClient?: { clientId: string; redirectUri: string };
   findAccount?: (accountId: string) => Promise<object | undefined>;
 }
 
@@ -50,6 +52,13 @@ export function createKinOAuthProvider(input: KinOAuthProviderInput): Provider {
       redirect_uris: input.userClient.redirectUris.map((uri) => secureUrl(uri, "Alexa redirect URI")),
       token_endpoint_auth_method: "client_secret_basic",
     });
+  }
+
+  if (input.browserClient) {
+    const browser = browserAuthConfig({ ...input.browserClient, issuer, resource: resourceUri });
+    if ([serviceClientId, userClientId].includes(browser.clientId)) throw new Error("Browser client must have a separate identity");
+    clients.push({ client_id: browser.clientId, grant_types: ["authorization_code"], response_types: ["code"],
+      redirect_uris: [browser.redirectUri], token_endpoint_auth_method: "none" });
   }
 
   const provider = new Provider(issuer, {

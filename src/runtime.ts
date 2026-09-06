@@ -1,4 +1,5 @@
 import { createJwtAccessAuthorizer } from "./auth.js";
+import { browserAuthConfig } from "./browser-auth-config.js";
 import { createDynamoMembershipDirectory } from "./membership.js";
 import { createCognitoInvitableAccounts, createDynamoInvitationIssuer } from "./invitation-issuer.js";
 import { createDemoStore } from "./domain.js";
@@ -72,6 +73,14 @@ export function createConfiguredApp(
   const familyAccess = tableName ? {
     circleId, directory: createDynamoMembershipDirectory({ tableName, circleId, region: environment.AWS_REGION }),
   } : undefined;
+  const browserEnabled = environment.KIN_BROWSER_AUTH_ENABLED === "true";
+  if (browserEnabled && (!oauthValues.every(Boolean) || !canonicalMcpUri || !familyAccess)) {
+    throw new Error("Browser sign-in requires OAuth, a literal canonical URI, and a care table");
+  }
+  const browserAuth = browserEnabled ? browserAuthConfig({
+    clientId: environment.KIN_BROWSER_CLIENT_ID ?? "", issuer: oauthIssuer!,
+    redirectUri: environment.KIN_BROWSER_REDIRECT_URI ?? "", resource: canonicalMcpUri!,
+  }) : undefined;
   const issuingEnabled = environment.KIN_INVITATION_ISSUING_ENABLED === "true";
   const userPoolId = environment.KIN_COGNITO_USER_POOL_ID?.trim();
   const circleName = environment.KIN_CIRCLE_NAME?.trim();
@@ -90,6 +99,7 @@ export function createConfiguredApp(
             jwksUri: oauthJwksUri,
           }),
           familyAccess,
+          browserAuth,
           invitationIssuer: issuingEnabled ? createDynamoInvitationIssuer({
             tableName: tableName!, familyAccess: familyAccess!, circleName: circleName!, issuer: oauthIssuer,
             accounts: createCognitoInvitableAccounts({ userPoolId: userPoolId!, region: environment.AWS_REGION }),

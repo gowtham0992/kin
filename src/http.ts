@@ -15,6 +15,7 @@ import { WeeklyBriefService } from "./weekly-brief.js";
 import { confirmWithReceipt } from "./confirmation.js";
 import { FamilyAccessDeniedError, mcpCarePermission, requireMembership, type FamilyAccess, type Membership } from "./membership.js";
 import { InvitationIssueError, issueInvitationBody, type InvitationIssuer } from "./invitation-issuer.js";
+import type { BrowserAuthConfig } from "./browser-auth-config.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -32,6 +33,7 @@ export interface HttpAppOptions {
   accessAuthorizer?: AccessAuthorizer;
   familyAccess?: FamilyAccess;
   invitationIssuer?: InvitationIssuer;
+  browserAuth?: BrowserAuthConfig;
   canonicalMcpUri?: string | (() => Promise<string>);
   authorizationServer?: string;
   serveSimulator?: boolean;
@@ -44,6 +46,11 @@ export function createHttpApp(
 ) {
   const app = express();
   app.disable("x-powered-by");
+  app.get("/family-auth-config", (_request, response) => {
+    response.set("cache-control", "no-store");
+    if (!options.browserAuth || options.serveSimulator === false) { response.status(404).json({ error: "not_enabled" }); return; }
+    response.json(options.browserAuth);
+  });
   app.use(express.json({ limit: "128kb" }));
   if (options.serveSimulator !== false) {
     app.use(express.static(simulatorDirectory, { extensions: ["html"] }));

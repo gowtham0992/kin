@@ -46,6 +46,10 @@ export async function createConfiguredOAuthApp(
       region: environment.AWS_REGION,
     }),
     serviceClient: secrets.serviceClient,
+    ...(environment.KIN_BROWSER_AUTH_ENABLED === "true" ? { browserClient: {
+      clientId: required(environment.KIN_BROWSER_CLIENT_ID, "KIN_BROWSER_CLIENT_ID"),
+      redirectUri: required(environment.KIN_BROWSER_REDIRECT_URI, "KIN_BROWSER_REDIRECT_URI"),
+    } } : {}),
     ...(redirectUris.length === 0 ? {} : {
       userClient: { ...secrets.userClient, redirectUris },
     }),
@@ -64,6 +68,7 @@ export async function createConfiguredOAuthApp(
     }),
     resourceUri,
     csrfSecret: secrets.csrfSecret,
+    browserClientId: environment.KIN_BROWSER_AUTH_ENABLED === "true" ? environment.KIN_BROWSER_CLIENT_ID?.trim() : undefined,
     enrollment: dependencies.enrollment ?? (environment.KIN_FAMILY_ENROLLMENT_ENABLED === "true"
       ? createDynamoFamilyEnrollment({
           tableName: required(environment.KIN_DYNAMODB_TABLE, "KIN_DYNAMODB_TABLE"),

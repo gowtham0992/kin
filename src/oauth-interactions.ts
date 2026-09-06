@@ -19,6 +19,7 @@ export interface OAuthInteractionRouterInput {
   resourceUri: string;
   csrfSecret: string;
   enrollment?: FamilyEnrollment;
+  browserClientId?: string;
 }
 
 const maxFormBytes = "8kb";
@@ -29,6 +30,7 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
   const router = Router();
 
   router.use((request, response, next) => {
+    response.locals.browserClientId = input.browserClientId;
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Pragma", "no-cache");
     response.setHeader("Referrer-Policy", "no-referrer");
@@ -233,6 +235,7 @@ function renderPrompt(
     `default-src 'none'; style-src 'nonce-${nonce}'; img-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
   );
   response.status(status).type("html").send(page({
+    browser: !!response.locals.browserClientId && details.params.client_id === response.locals.browserClientId,
     uid: details.uid,
     prompt: details.prompt.name as "login" | "consent",
     nonce,
@@ -244,6 +247,7 @@ function renderPrompt(
 }
 
 function page(input: {
+  browser: boolean;
   uid: string;
   prompt: "login" | "consent";
   nonce: string;
@@ -256,19 +260,20 @@ function page(input: {
   const csrf = escapeHtml(input.csrf);
   const signIn = input.prompt === "login";
   const reviewed = !signIn ? input.enrollment?.invitation : undefined;
-  const title = signIn ? "Bring your care circle together" : reviewed ? "A place in the circle" : "Connect Kin to Alexa+";
+  const title = signIn ? "Bring your care circle together" : reviewed ? "A place in the circle" : input.browser ? "Open your family workspace" : "Connect Kin to Alexa+";
   const eyebrow = signIn ? "Family sign in" : reviewed ? "Your choice to join" : "Account connection";
   const body = signIn
     ? "Use the private family account your Kin organizer invited."
-    : reviewed ? "Check who you are joining and what you can do. Accepting also connects Kin to Alexa+, within your role's permissions."
-      : "Alexa+ can use Kin within your family role's permissions. Connecting alone does not grant family membership.";
-  const primary = signIn ? "Continue securely" : reviewed ? "Join circle and connect" : "Allow and connect";
+    : input.browser ? "This browser can use Kin within your existing family permissions. Signing in alone does not grant membership or organizer access."
+      : reviewed ? "Check who you are joining and what you can do. Accepting also connects Kin to Alexa+, within your role's permissions."
+        : "Alexa+ can use Kin within your family role's permissions. Connecting alone does not grant family membership.";
+  const primary = signIn ? "Continue securely" : reviewed ? "Join circle and connect" : input.browser ? "Open workspace" : "Allow and connect";
   const action = signIn ? "login" : "consent";
   const fields = signIn ? `
     <label>Email<input name="username" type="email" inputmode="email" autocomplete="username" value="${escapeHtml(input.username)}" maxlength="320" required autofocus></label>
     <label>Password<input name="password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required></label>` : `
-    ${reviewed ? "" : `<div class="permission"><span aria-hidden="true">✓</span><div><strong>Care tasks</strong><p>Read the shared plan. Record voice confirmations only if your role permits it.</p></div></div>`}
-    <p class="promise">Kin never gives Alexa+ your password. Disconnecting Alexa does not remove your family membership.</p>
+    ${reviewed ? "" : `<div class="permission"><span aria-hidden="true">✓</span><div><strong>${input.browser ? "Your family permissions" : "Care tasks"}</strong><p>${input.browser ? "Read care activity and use the actions your family role permits. Only designated organizers can invite." : "Read the shared plan. Record voice confirmations only if your role permits it."}</p></div></div>`}
+    <p class="promise">${input.browser ? "Closing this workspace does not remove your family membership or sign you out of the account provider." : "Kin never gives Alexa+ your password. Disconnecting Alexa does not remove your family membership."}</p>
     ${reviewed ? `<section class="invitation"><div class="eyebrow">Your invitation</div><h2>${escapeHtml(reviewed.circleName)}</h2><p>You are joining as <strong>${escapeHtml(reviewed.name)}</strong>.</p><p>${escapeHtml(roleDescription(reviewed.role))}</p><input type="hidden" name="invitation" value="${escapeHtml(input.enrollment?.code ?? "")}"><input type="hidden" name="invitationProof" value="${escapeHtml(input.enrollment?.proof ?? "")}"><label class="consent"><input type="checkbox" name="familyConsent" value="${familyConsentVersion}" required><span>I agree to join this shared care circle with these permissions. My recorded care activity will be visible to other circle members.</span></label></section>`
       : input.enrollment ? `<section class="invitation"><label>Have a family invitation?<input name="invitation" autocomplete="off" spellcheck="false" maxlength="43" placeholder="Paste your invitation code"></label><button class="cancel" type="submit" formaction="/interaction/${uid}/invitation" formnovalidate>Review invitation</button><p class="promise">New here? Review your invitation before connecting. Already a member? Leave the code empty.</p></section>` : ""}`;
   const error = input.error ? `<div class="error" role="alert">${escapeHtml(input.error)}</div>` : "";

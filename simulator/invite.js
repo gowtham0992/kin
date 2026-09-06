@@ -1,6 +1,8 @@
 import { createInvitationClient, invitationError } from "./invite-client.js";
+import { createBrowserAuth } from "./browser-auth.js";
 
-const client = createInvitationClient();
+let auth = null;
+const client = createInvitationClient({ request: (...args) => auth ? auth.request(...args) : fetch(...args) });
 const $ = id => document.getElementById(id);
 const form = $("invite-form");
 const status = $("invite-status");
@@ -15,6 +17,8 @@ let busy = false;
 let receipt = null;
 
 async function load() {
+  $("browser-disconnect").hidden = !auth?.connected;
+  $("browser-signin").hidden = !auth || auth.connected;
   form.hidden = true;
   $("invite-reload").hidden = true;
   status.textContent = "Checking organizer access…";
@@ -26,12 +30,13 @@ async function load() {
     form.hidden = !data.members.length;
     $("invite-reload").hidden = !!data.members.length;
   } catch (error) {
-    status.textContent = invitationError(error.status);
+    status.textContent = error.status === 401 && auth ? "Sign in to open your family workspace." : invitationError(error.status);
+    $("browser-signin").hidden = !auth || auth.connected;
     $("invite-reload").hidden = false;
   }
 }
 
-$("invite-reload").addEventListener("click", () => void load());
+$("invite-reload").addEventListener("click", () => void (auth ? load() : initialize()));
 $("invite-role").addEventListener("change", () => { $("role-note").textContent = roleNotes[$("invite-role").value]; });
 form.addEventListener("input", () => { $("invite-confirm").checked = false; });
 // The checkbox's own input should remain checked; only identity/permission edits reset consent.
@@ -53,9 +58,10 @@ form.addEventListener("submit", async event => {
     result.hidden = false;
     result.focus();
   } catch (error) {
-    status.textContent = invitationError(error.status, true);
+    status.textContent = error.status === 401 && auth ? "Your workspace session ended. Sign in again before creating another invitation." : invitationError(error.status, true);
     $("invite-confirm").checked = false;
     if ([401, 403, 404].includes(error.status)) { form.hidden = true; $("invite-reload").hidden = false; }
+    if (error.status === 401 && auth) { $("browser-signin").hidden = false; $("browser-disconnect").hidden = true; }
   } finally {
     busy = false;
     fields.disabled = false;
@@ -78,6 +84,34 @@ function clearReceipt() {
   $("role-note").textContent = roleNotes.viewer;
 }
 $("invite-clear").addEventListener("click", () => { clearReceipt(); void load().then(() => { if (!form.hidden) $("invite-member").focus(); }); });
-window.addEventListener("pagehide", clearReceipt);
+window.addEventListener("pagehide", () => { clearReceipt(); auth?.suspend(); });
 window.addEventListener("pageshow", event => { if (event.persisted) void load(); });
-void load();
+$("browser-signin").addEventListener("click", async () => {
+  $("browser-signin").disabled = true;
+  try { window.location.assign(await auth.start()); }
+  catch { status.textContent = "Kin could not start sign-in. Check that this browser allows session storage and try again."; $("browser-signin").disabled = false; }
+});
+$("browser-disconnect").addEventListener("click", () => {
+  auth?.disconnect(); clearReceipt(); form.hidden = true;
+  $("browser-disconnect").hidden = true; $("browser-signin").hidden = false;
+  status.textContent = "Workspace session closed. This does not sign you out of the account provider or remove family access.";
+});
+async function initialize() {
+  const callbackUrl = window.location.href;
+  if (window.location.search) window.history.replaceState(null, "", "/invite.html");
+  try {
+    const response = await fetch("/family-auth-config", { cache: "no-store", signal: AbortSignal.timeout(8000) });
+    if (response.ok) {
+      auth = createBrowserAuth({ config: await response.json(), origin: window.location.origin, storage: window.sessionStorage });
+      await auth.complete(callbackUrl);
+      $("browser-disconnect").hidden = !auth.connected;
+    } else if (response.status !== 404) throw new Error("Unavailable");
+    await load();
+  } catch {
+    form.hidden = true;
+    status.textContent = "Kin could not complete sign-in. Start again to open the workspace.";
+    $("browser-signin").hidden = !auth;
+    $("invite-reload").hidden = false;
+  }
+}
+void initialize();
