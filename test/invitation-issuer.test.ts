@@ -30,6 +30,7 @@ describe("organizer invitation issuing", () => {
     "rejects callers without active organizer authority: %j", async record => {
       const { app, accounts, send } = fixture(record);
       await request(app).post("/api/invitations").set("authorization", "Bearer user").send(body).expect(403);
+      await request(app).get("/api/invitations/options").set("authorization", "Bearer user").expect(403);
       expect(accounts.resolve).not.toHaveBeenCalled();
       expect(send).not.toHaveBeenCalled();
     },
@@ -37,8 +38,28 @@ describe("organizer invitation issuing", () => {
   it("requires authentication and rejects caller-chosen identities or names", async () => {
     const { app, send } = fixture();
     await request(app).post("/api/invitations").send(body).expect(401);
+    await request(app).get("/api/invitations/options").expect(401);
     await request(app).post("/api/invitations").set("authorization", "Bearer user").send({ ...body, name: "Impersonated", accountId: "forged" }).expect(400);
     expect(send).not.toHaveBeenCalled();
+  });
+  it("returns only roster identity choices to an organizer, without implying account access", async () => {
+    const { app } = fixture();
+    const response = await request(app).get("/api/invitations/options").set("authorization", "Bearer user").expect(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.body.members.length).toBeGreaterThan(0);
+    for (const choice of response.body.members) {
+      expect(Object.keys(choice).sort()).toEqual(["id", "name", "relationship"]);
+      expect(choice.id).not.toBe("maya");
+    }
+  });
+  it.each(["/api/invitations/options/", "/api/INVITATIONS/OPTIONS"])("enforces organizer permission on Express route variants: %s", async path => {
+    const { app } = fixture({ ...member, canInvite: false });
+    await request(app).get(path).set("authorization", "Bearer user").expect(403);
+  });
+  it("does not expose organizer options in an unauthenticated demo or when the family API is disabled", async () => {
+    const { invitationIssuer } = fixture();
+    await request(createHttpApp(createDemoStore(), undefined, { invitationIssuer })).get("/api/invitations/options").expect(401);
+    await request(createHttpApp(createDemoStore(), undefined, { invitationIssuer, serveSimulator: false })).get("/api/invitations/options").expect(404);
   });
   it("issues a code without granting membership and freezes account/roster/organizer checks in one transaction", async () => {
     const { app, send } = fixture();

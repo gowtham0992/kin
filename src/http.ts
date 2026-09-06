@@ -84,7 +84,8 @@ export function createHttpApp(
     if (!options.accessAuthorizer) { next(); return; }
     try {
       const principal = await options.accessAuthorizer.authorize(request.get("authorization"), [alexaScopes.tools]);
-      const permission = request.method === "GET" ? "read"
+      const permission = request.method === "GET" && request.path === "/invitations/options" ? "invite"
+        : request.method === "GET" ? "read"
         : request.method === "POST" && request.path === "/invitations" ? "invite"
         : request.method === "POST" && /^\/tasks\/[^/]+\/confirm$/.test(request.path) ? "confirm"
         : request.method === "PUT" && request.path === "/circle/duty" ? "manage_duty" : null;
@@ -92,6 +93,19 @@ export function createHttpApp(
       response.locals.member = await requireMembership(options.familyAccess, principal, permission);
       response.locals.principal = principal;
       next();
+    } catch (error) { next(error); }
+  });
+
+  app.get("/api/invitations/options", async (_request, response, next) => {
+    response.set("cache-control", "no-store");
+    if (!options.invitationIssuer) { response.status(404).json({ error: "Not found" }); return; }
+    if (!options.accessAuthorizer || !response.locals.principal) { response.status(401).json({ error: "invalid_token" }); return; }
+    try {
+      const organizer = await requireMembership(options.familyAccess, response.locals.principal, "invite");
+      const circle = await store.circle();
+      response.json({ members: circle.members
+        .filter(member => member.id !== organizer.memberId)
+        .map(({ id, name, relationship }) => ({ id, name, relationship })) });
     } catch (error) { next(error); }
   });
 

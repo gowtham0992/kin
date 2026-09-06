@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <title>Invite family — Kin</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/invite.css" />
+    <script type="module" src="/invite.js"></script>
+  </head>
+  <body>
+    <header class="site-header"><a class="brand" href="/" aria-label="Kin home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>kin</span></a><a class="back-link" href="/">Back to the care demo</a></header>
+    <main class="invite-page">
+      <section class="invite-intro"><p class="kicker">Your family circle</p><h1>Care is personal.<br /><em>So is access.</em></h1><p>Invite someone you trust, with just the permissions they need.</p></section>
+      <div class="invite-layout">
+        <section class="invite-panel" aria-labelledby="invite-title">
+          <p class="kicker">01 / Invite a family member</p><h2 id="invite-title">Make room for someone.</h2>
+          <p id="invite-status" role="status">Checking organizer access…</p>
+          <button id="invite-reload" class="secondary" type="button" hidden>Check again</button>
+          <form id="invite-form" hidden>
+            <fieldset id="invite-fields">
+              <label for="invite-member">Family member</label><select id="invite-member" name="memberId" required><option value="">Choose from your roster</option></select>
+              <p class="field-note">Roster names do not mean someone already has account access.</p>
+              <label for="invite-email">Their verified account email</label><input id="invite-email" name="email" type="email" maxlength="320" autocomplete="off" required placeholder="name@example.com" aria-describedby="email-note" />
+              <p id="email-note" class="field-note">They need an existing Kin account with setup completed. This does not create an account or send an email.</p>
+              <label for="invite-role">What can they do?</label>
+              <select id="invite-role" name="role" aria-describedby="role-note"><option value="viewer">View only</option><option value="care_recipient">View and check in</option><option value="caregiver">Help manage care</option></select>
+              <p id="role-note" class="permission-note">See the care plan, family roster, and weekly brief. Cannot confirm tasks or change duty assignments.</p>
+              <label class="consent-line"><input id="invite-confirm" type="checkbox" required /><span>I checked the member and email. I understand that a new code replaces any earlier pending code for this member.</span></label>
+              <button id="invite-submit" class="primary" type="submit">Create invitation code</button>
+            </fieldset>
+          </form>
+          <section id="invite-result" tabindex="-1" hidden aria-labelledby="result-title">
+            <p class="kicker">02 / Share privately</p><h2 id="result-title">Ready for their yes.</h2>
+            <p id="invite-summary"></p><p>Share this code directly with the intended person. They review the permissions and accept it when linking Alexa. No access has been granted yet.</p>
+            <label for="invite-code">Invitation code</label><textarea id="invite-code" readonly rows="2" spellcheck="false" autocomplete="off"></textarea>
+            <p id="invite-expiry" class="field-note"></p>
+            <div class="invite-actions"><button id="invite-copy" class="primary" type="button">Copy code</button><button id="invite-clear" class="secondary" type="button">Clear from this screen</button></div>
+            <p id="copy-status" role="status"></p><p class="field-note">Keep it somewhere private before leaving. Kin does not save the readable code. Clearing this screen does not revoke it.</p>
+          </section>
+        </section>
+        <aside class="invite-aside"><p class="kicker">A thoughtful handoff</p><h2>One invitation.<br />Their decision.</h2><ol><li><strong>You choose the person.</strong><p>The code is tied to their verified account, not whoever happens to receive it.</p></li><li><strong>They choose to join.</strong><p>Creating a code does not grant access. Joining requires their explicit acceptance.</p></li><li><strong>Care stays in the circle.</strong><p>No invitation grants organizer privileges. Disconnecting Alexa does not remove family membership.</p></li></ol><p class="aside-note">This screen creates invitations. It does not show current membership or revoke access.</p></aside>
+      </div>
+    </main>
+  </body>
+</html>
