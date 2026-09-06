@@ -23,10 +23,12 @@ import { routineChangeBody, RoutineConflict } from "./care-plan.js";
 import { shiftCalendarDate } from "./calendar.js";
 import { conversationBody, proposeConversation, type IntentGenerator } from "./demo-conversation.js";
 import { createConversationFocus } from "./conversation-focus.js";
+import { taskReviewSchema, TaskReviewConflict } from "./task-review.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
 const confirmationBody = z.object({
+  expected: taskReviewSchema.optional(),
   response: z.enum(["done", "not_yet", "skipped"]),
   actor: z.string().trim().min(1).max(80),
   requestId: z.string().min(8).max(100),
@@ -157,12 +159,23 @@ export function createHttpApp(
         : request.method === "POST" && /^\/routines\/care-[a-f0-9]{40}\/change$/.test(request.path) ? "manage_plan"
         : request.method === "POST" && /^\/escalations\/[^/]+\/acknowledge$/.test(request.path) ? "manage_duty"
         : request.method === "POST" && /^\/tasks\/[^/]+\/confirm$/.test(request.path) ? "confirm"
+        : request.method === "POST" && request.path === "/conversation" ? "confirm"
         : request.method === "PUT" && request.path === "/circle/duty" ? "manage_duty" : null;
       if (!permission) throw new FamilyAccessDeniedError();
       response.locals.member = await requireMembership(options.familyAccess, principal, permission);
       response.locals.principal = principal;
       next();
     } catch (error) { next(error); }
+  });
+
+  // Authenticated explicit-command interpretation only. Never forwards family text to a model.
+  app.post("/api/conversation", async (request, response, next) => {
+    response.set("cache-control", "no-store");
+    if (!options.accessAuthorizer || !response.locals.member) { response.status(401).json({ error: "invalid_token" }); return; }
+    const body = z.object({ message: z.string().trim().min(1).max(800) }).strict().safeParse(request.body);
+    if (!body.success) { response.status(400).json({ error: "invalid_message" }); return; }
+    try { response.json(await proposeConversation(body.data.message, await store.today())); }
+    catch (error) { next(error); }
   });
 
   app.post("/api/escalations/:id/acknowledge", async (request, response, next) => {
@@ -349,6 +362,9 @@ export function createHttpApp(
       const result = await confirmWithReceipt(store, { taskId: taskId.data, ...body.data }, member);
       response.set("cache-control", "no-store").status(result.replayed ? 200 : 201).json(result);
     } catch (error) {
+      if (error instanceof TaskReviewConflict) {
+        response.status(409).json({ error: "review_conflict" }); return;
+      }
       if (error instanceof TaskNotFoundError) {
         response.status(404).json({ error: "Care task not found" });
         return;

@@ -19,6 +19,31 @@ function setup() {
 }
 
 describe("separate family workspace", () => {
+  it("protects request interpretation and never uses the demo model for family text", async () => {
+    const fixture = setup(); const generate = vi.fn(); fixture.options.demoIntentGenerator = generate;
+    const app = fixture.app();
+    await request(app).post("/api/conversation").send({ message: "Show today" }).expect(401);
+    const proposal = await request(app).post("/api/conversation").set("authorization", "Bearer test").send({ message: "Done: Drink a glass of water" }).expect(200);
+    expect(proposal.body).toMatchObject({ action: "confirm", expected: { state: "scheduled", confirmedBy: null } });
+    expect(generate).not.toHaveBeenCalled();
+    const before = await request(app).get("/api/today").set("authorization", "Bearer test");
+    expect(before.body.summary.completed).toBe(0);
+    await request(app).post("/api/conversation").set("authorization", "Bearer test").send({ message: "x".repeat(801) }).expect(400);
+    fixture.find.mockResolvedValue({ circleId: "family-a", memberId: "theo", name: "Theo", role: "viewer", status: "active" });
+    await request(app).post("/api/conversation").set("authorization", "Bearer test").send({ message: "Show today" }).expect(403);
+    fixture.find.mockResolvedValue(null);
+    await request(app).post("/api/conversation").set("authorization", "Bearer test").send({ message: "Show today" }).expect(403);
+  });
+  it("saves a reviewed family request with server attribution and rejects a competing stale review", async () => {
+    const app = setup().app();
+    const proposal = await request(app).post("/api/conversation").set("authorization", "Bearer test").send({ message: "Done: Drink a glass of water" });
+    const body = { response: "done", actor: "Forged name", requestId: "family-review-1", expected: proposal.body.expected };
+    const saved = await request(app).post("/api/tasks/morning-water/confirm").set("authorization", "Bearer test").send(body).expect(201);
+    expect(saved.body.confirmation.actor).toBe("Maya");
+    await request(app).post("/api/tasks/morning-water/confirm").set("authorization", "Bearer test").send(body).expect(200);
+    const stale = await request(app).post("/api/tasks/morning-water/confirm").set("authorization", "Bearer test").send({ ...body, requestId: "family-review-2", response: "not_yet" }).expect(409);
+    expect(stale.body.error).toBe("review_conflict");
+  });
   it("returns only the caller's display identity and effective permissions", async () => {
     const fixture = setup(); const app = fixture.app();
     await request(app).get("/api/session").expect(401);

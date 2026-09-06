@@ -17,7 +17,7 @@ export function createWorkspaceClient({ request, newRequestId }) {
     const revision = generation;
     const response = await request(url, { cache: "no-store", signal: AbortSignal.timeout(8000), ...options });
     if (revision !== generation) throw Object.assign(new Error("Session changed"), { stale: true });
-    if (!response.ok) throw Object.assign(new Error("Request failed"), { status: response.status, definitiveRejection: [400, 401, 403, 404, 422].includes(response.status) });
+    if (!response.ok) throw Object.assign(new Error("Request failed"), { status: response.status, definitiveRejection: [400, 401, 403, 404, 422].includes(response.status) || (response.status === 409 && /\/confirm$/.test(url)) });
     const data = await response.json();
     if (revision !== generation) throw Object.assign(new Error("Session changed"), { stale: true });
     return data;
@@ -49,6 +49,7 @@ export function createWorkspaceClient({ request, newRequestId }) {
   return {
     session: () => json("/api/session"),
     today: () => json("/api/today"),
+    interpret: message => json("/api/conversation", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message }) }),
     plan: () => json("/api/plan"),
     schedule(input) {
       if (pendingPlan && (pendingPlan.title !== input.title || pendingPlan.dueAt !== input.dueAt || pendingPlan.timeZone !== input.timeZone || JSON.stringify(pendingPlan.dueAts) !== JSON.stringify(input.dueAts))) return Promise.reject(new Error("Resolve the pending task first"));

@@ -9,6 +9,12 @@
 #workspace-content { line-height: 1.6; }
 #workspace-content h2 { font-size: clamp(32px, 5vw, 48px); margin-bottom: 16px; max-width: 700px; }
 .care-count { font-size: 22px; color: var(--sage); }
+.care-conversation { display: grid; gap: 12px; max-width: 680px; margin: 24px 0; }
+.care-conversation label { font-weight: 700; }
+.care-conversation input { width: 100%; box-sizing: border-box; min-width: 0; min-height: 48px; padding: 12px; border: 1px solid var(--muted); border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; }
+.care-conversation input:focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
+.care-conversation button { justify-self: start; }
+.care-conversation .care-note { margin: 0; }
 .care-note, #workspace-status { color: var(--muted); font-size: 14px; line-height: 1.6; }
 .care-plan { list-style: none; margin: 32px 0; padding: 0; border-top: 1px solid var(--line); }
 .care-plan li { padding: 24px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 24px; }

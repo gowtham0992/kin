@@ -8,16 +8,17 @@ const time = value => new Date(value).toLocaleTimeString(undefined, { hour: "num
 export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite }) {
   const client = createWorkspaceClient({ request });
   const planDraft = createPlanDraft(), disabledBeforeSave = new WeakMap();
+  let conversationDraft = "";
   let member = null, revision = 0, busy = false, loading = false, timer = null, lastRender = "", activeView = "today";
   const content = $("workspace-content"), status = $("workspace-status");
-  const tab = () => ["today", "plan", "circle", "week", "invite", "access"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "today";
+  const tab = () => ["today", "ask", "plan", "circle", "week", "invite", "access"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "today";
   function clearPlanDraft() {
     planDraft.clear();
     for (const [id, value] of [["plan-title", ""], ["plan-due", ""], ["plan-repeat", "1"]]) { if ($(id)) $(id).value = value; }
     $("plan-due")?.dispatchEvent(new Event("change"));
   }
   function reset() {
-    revision += 1; client.reset(); planDraft.clear(); member = null; busy = false; loading = false;
+    revision += 1; client.reset(); planDraft.clear(); conversationDraft = ""; member = null; busy = false; loading = false;
     clearTimeout(timer); content.replaceChildren(); $("workspace").hidden = true;
     $("workspace-nav").hidden = true; $("workspace-identity").textContent = "";
     $("workspace-retry-write").hidden = true;
@@ -55,7 +56,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       if (![401, 403].includes(error.status)) status.textContent = client.pending
         ? `Kin has not acknowledged this ${client.pendingKind}. Retry the same request below; do not submit a different one yet.`
         : "The change was not acknowledged. Refresh to check the current state before trying again.";
-      if (error.status === 409 && !client.pending) status.textContent = "The routine changed while you were reviewing it. Refresh, then review the remaining check-ins again.";
+      if (error.status === 409 && !client.pending) status.textContent = "The plan changed while you were reviewing it. Refresh, then review the current check-ins again.";
     } finally {
       if (current === revision) {
         busy = false;
@@ -64,6 +65,51 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         $("workspace-retry-write").textContent = `Retry the same ${client.pendingKind}`;
       }
     }
+  }
+  function renderConversation(data) {
+    const heading = node("div");
+    heading.append(node("p", "One clear request", "kicker"), node("h2", "Tell Kin how it went."));
+    if (!member.permissions.confirm) {
+      content.replaceChildren(heading, node("p", "Your membership allows viewing the plan, but not recording check-ins.")); return;
+    }
+    const form = node("form", null, "care-conversation"), label = node("label", "Your request"), input = node("input");
+    input.id = "care-request"; label.htmlFor = input.id; input.required = true; input.maxLength = 800; input.value = conversationDraft;
+    input.autocomplete = "off";
+    const hint = node("p", "Explicit commands only: Show today, Weekly brief, or Done: followed by the exact task title. Use Not yet: or Skip: for other responses. No message is sent to a language model.", "care-note");
+    hint.id = "care-request-hint"; input.setAttribute("aria-describedby", hint.id);
+    const submit = node("button", "Review request", "primary"); submit.type = "submit";
+    const reply = node("p", "Nothing changes until you review and confirm.", "care-note"); reply.setAttribute("role", "status");
+    const review = node("div", null, "care-alerts"); review.hidden = true;
+    input.addEventListener("input", () => { conversationDraft = input.value; review.hidden = true; });
+    form.append(label, input, hint, submit);
+    const examples = node("div", null, "care-actions");
+    for (const task of data.tasks.filter(task => task.state === "scheduled").slice(0, 8)) {
+      examples.append(button(task.title, () => { input.value = `Done: ${task.title}`; conversationDraft = input.value; review.hidden = true; input.focus(); }));
+    }
+    form.addEventListener("submit", async event => {
+      event.preventDefault(); if (busy || client.pending || !form.reportValidity()) return;
+      const current = ++revision; busy = true; loading = false; lockControls(true); review.hidden = true;
+      reply.textContent = "Checking your request…";
+      try {
+        const result = await client.interpret(input.value);
+        if (current !== revision) return;
+        if (result.action === "confirm") {
+          review.replaceChildren(node("h3", "Review this check-in"), node("p", `${result.task.title} · ${time(result.task.dueAt)}`),
+            node("p", `Record as ${result.response.replaceAll("_", " ")} by ${member.name}?`));
+          const actions = node("div", null, "care-actions");
+          actions.append(button("Confirm this check-in", () => void mutate(() => client.confirm({ taskId: result.task.id, response: result.response, actor: member.name, expected: result.expected }), "Check-in recorded.", () => { conversationDraft = ""; }), false),
+            button("Leave unchanged", () => { review.hidden = true; reply.textContent = "Left unchanged."; input.focus(); }));
+          review.append(actions); review.hidden = false; reply.textContent = "Please review. Nothing has been saved.";
+        } else if (result.action === "today" || result.action === "brief") {
+          location.hash = result.action === "today" ? "today" : "week";
+        } else reply.textContent = "Name one task and its response using the examples above. Kin cannot assess health or handle emergencies. Nothing changed.";
+      } catch (error) {
+        if (current !== revision) return;
+        failure(error); reply.textContent = "Could not review this request. Your draft is still here; try again. Nothing was sent to save.";
+      } finally { if (current === revision) { busy = false; lockControls(false); } }
+    });
+    content.replaceChildren(heading, form, reply, review, node("h3", "Start with today’s plan"), examples,
+      node("p", data.tasks.length ? "Choose a title to draft a request. Check-ins record what a family member reports; they are not proof of safety." : "No check-ins are scheduled today. A caregiver can add one in Plan.", "care-note"));
   }
   function renderToday(data) {
     const header = node("div", null, "care-summary");
@@ -249,12 +295,13 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       const data = await (view === "plan" ? client.plan() : view === "access" ? client.access() : view === "week" ? client.brief() : view === "circle" ? client.circle() : client.today());
       if (current !== revision || view !== tab()) return;
       member = identity;
+      $("workspace-ask-link").hidden = !member.permissions.confirm;
       if (!member.permissions.manageDuty) planDraft.clear();
       $("workspace-invite-link").hidden = !member.permissions.invite;
       $("workspace-access-link").hidden = !member.permissions.invite;
       const serialized = JSON.stringify({ view, data, member });
       if (serialized !== lastRender || afterWrite) {
-        (view === "plan" ? renderPlan : view === "access" ? renderAccess : view === "week" ? renderBrief : view === "circle" ? renderCircle : renderToday)(data);
+        (view === "ask" ? renderConversation : view === "plan" ? renderPlan : view === "access" ? renderAccess : view === "week" ? renderBrief : view === "circle" ? renderCircle : renderToday)(data);
         lastRender = serialized;
       }
       status.textContent = `Checked at ${time(new Date())}${view === "today" ? " · updates every 5 seconds" : ""}.`;

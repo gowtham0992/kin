@@ -3,6 +3,12 @@ const { createWorkspaceClient, createPlanDraft } = await import(new URL("../simu
 const ok = (data: unknown) => ({ ok: true, json: async () => data });
 
 describe("authenticated workspace requests", () => {
+  it("clears a definitively rejected reviewed check-in so the user can review again", async () => {
+    const request = vi.fn(async () => ({ ok: false, status: 409 }));
+    const client = createWorkspaceClient({ request, newRequestId: () => "review-request-1" });
+    await expect(client.confirm({ taskId: "water", response: "done", actor: "Maya", expected: { state: "scheduled" } })).rejects.toMatchObject({ status: 409, definitiveRejection: true });
+    expect(client.pending).toBeNull();
+  });
   it("keeps scheduling drafts separate from render copies and clears every field on reset", () => {
     const draft = createPlanDraft();
     draft.update({ title: "Call together", due: "2026-09-08T12:00", repeat: "7", password: "must-not-be-retained" });
