@@ -9,7 +9,7 @@ import {
   requiredScopesForMcpRequest,
   type AccessAuthorizer,
 } from "./auth.js";
-import { TaskNotFoundError, type CareRepository } from "./domain.js";
+import { TaskNotFoundError, EscalationNotFoundError, type CareRepository } from "./domain.js";
 import { createMcpServer } from "./mcp.js";
 import { WeeklyBriefService } from "./weekly-brief.js";
 import { confirmWithReceipt } from "./confirmation.js";
@@ -17,6 +17,9 @@ import { FamilyAccessDeniedError, mcpCarePermission, requireMembership, type Fam
 import { InvitationIssueError, issueInvitationBody, type InvitationIssuer } from "./invitation-issuer.js";
 import type { BrowserAuthConfig } from "./browser-auth-config.js";
 import { familyAssets } from "./family-assets.js";
+import { AccessChangeConflict, revokeAccessBody, type AccessManagement } from "./access-management.js";
+import { PlanConflict, scheduleTaskBody, scheduledTaskId } from "./care-plan.js";
+import { shiftCalendarDate } from "./calendar.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -34,12 +37,13 @@ export interface HttpAppOptions {
   accessAuthorizer?: AccessAuthorizer;
   familyAccess?: FamilyAccess;
   invitationIssuer?: InvitationIssuer;
-  browserAuth?: BrowserAuthConfig;
+  browserAuth?: BrowserAuthConfig | (() => Promise<BrowserAuthConfig>);
   canonicalMcpUri?: string | (() => Promise<string>);
   authorizationServer?: string;
   serveSimulator?: boolean;
   serveFamilyWorkspace?: boolean;
   familyAssetDirectory?: string;
+  accessManagement?: AccessManagement;
 }
 
 export function createHttpApp(
@@ -56,10 +60,11 @@ export function createHttpApp(
   }
   const app = express();
   app.disable("x-powered-by");
-  app.get("/family-auth-config", (_request, response) => {
+  app.get("/family-auth-config", async (_request, response, next) => {
     response.set("cache-control", "no-store");
     if (!options.browserAuth || !familyEnabled) { response.status(404).json({ error: "not_enabled" }); return; }
-    response.json(options.browserAuth);
+    try { response.json(typeof options.browserAuth === "function" ? await options.browserAuth() : options.browserAuth); }
+    catch (error) { next(error); }
   });
   app.use(express.json({ limit: "128kb" }));
   if (options.serveSimulator !== false) {
@@ -119,6 +124,9 @@ export function createHttpApp(
       const permission = request.method === "GET" && request.path === "/invitations/options" ? "invite"
         : request.method === "GET" ? "read"
         : request.method === "POST" && request.path === "/invitations" ? "invite"
+        : request.method === "POST" && request.path === "/access/revoke" ? "invite"
+        : request.method === "POST" && request.path === "/tasks" ? "manage_plan"
+        : request.method === "POST" && /^\/escalations\/[^/]+\/acknowledge$/.test(request.path) ? "manage_duty"
         : request.method === "POST" && /^\/tasks\/[^/]+\/confirm$/.test(request.path) ? "confirm"
         : request.method === "PUT" && request.path === "/circle/duty" ? "manage_duty" : null;
       if (!permission) throw new FamilyAccessDeniedError();
@@ -126,6 +134,78 @@ export function createHttpApp(
       response.locals.principal = principal;
       next();
     } catch (error) { next(error); }
+  });
+
+  app.post("/api/escalations/:id/acknowledge", async (request, response, next) => {
+    const parsed = z.object({ confirm: z.literal(true) }).strict().safeParse(request.body);
+    const id = z.string().min(1).max(200).safeParse(request.params.id);
+    if (!parsed.success || !id.success) { response.status(400).json({ error: "invalid_acknowledgment" }); return; }
+    const member = response.locals.member as Membership | undefined;
+    if (!member || member.role !== "caregiver") { response.status(403).json({ error: "family_access_denied" }); return; }
+    try {
+      response.set("cache-control", "no-store").json(await store.acknowledgeEscalation({ id: id.data, memberId: member.memberId, name: member.name }));
+    } catch (error) {
+      if (error instanceof EscalationNotFoundError) { response.status(404).json({ error: "escalation_not_found" }); return; }
+      next(error);
+    }
+  });
+
+  app.get("/api/plan", async (_request, response, next) => {
+    try {
+      const { date } = await store.today();
+      const plan = await store.activityBetween({ startDate: date, endDate: shiftCalendarDate(date, 30) });
+      response.set("cache-control", "no-store").json({ startDate: plan.startDate, endDate: plan.endDate, tasks: plan.tasks });
+    } catch (error) { next(error); }
+  });
+
+  app.post("/api/tasks", async (request, response, next) => {
+    const parsed = scheduleTaskBody.safeParse(request.body);
+    if (!parsed.success) { response.status(400).json({ error: "invalid_care_task" }); return; }
+    const member = response.locals.member as Membership | undefined;
+    if (!member || member.role !== "caregiver") { response.status(403).json({ error: "family_access_denied" }); return; }
+    try {
+      const task = await store.scheduleTask({ id: scheduledTaskId(member.memberId, parsed.data.requestId), title: parsed.data.title, dueAt: parsed.data.dueAt });
+      response.set("cache-control", "no-store").json({ task, requestId: parsed.data.requestId });
+    } catch (error) {
+      if (error instanceof RangeError) { response.status(400).json({ error: "Schedule a check-in in the next 30 days" }); return; }
+      if (error instanceof PlanConflict) { response.status(409).json({ error: "scheduling_request_conflict" }); return; }
+      next(error);
+    }
+  });
+
+  app.get("/api/access", async (_request, response, next) => {
+    response.set("cache-control", "no-store");
+    if (!options.accessManagement) { response.status(404).json({ error: "not_enabled" }); return; }
+    if (!response.locals.principal) { response.status(401).json({ error: "invalid_token" }); return; }
+    try {
+      await requireMembership(options.familyAccess, response.locals.principal, "invite");
+      response.json({ members: await options.accessManagement.list(response.locals.principal) });
+    } catch (error) { next(error); }
+  });
+  app.post("/api/access/revoke", async (request, response, next) => {
+    response.set("cache-control", "no-store");
+    if (!options.accessManagement) { response.status(404).json({ error: "not_enabled" }); return; }
+    if (!response.locals.principal) { response.status(401).json({ error: "invalid_token" }); return; }
+    const parsed = revokeAccessBody.safeParse(request.body);
+    if (!parsed.success) { response.status(400).json({ error: "invalid_access_change" }); return; }
+    try {
+      await requireMembership(options.familyAccess, response.locals.principal, "invite");
+      await options.accessManagement.revoke(response.locals.principal, parsed.data.memberId);
+      response.json({ memberId: parsed.data.memberId, status: "revoked" });
+    } catch (error) {
+      if (error instanceof AccessChangeConflict) { response.status(409).json({ error: "access_change_unavailable" }); return; }
+      next(error);
+    }
+  });
+
+  app.get("/api/session", (_request, response) => {
+    response.set("cache-control", "no-store");
+    const member = response.locals.member as Membership | undefined;
+    if (!member) { response.status(401).json({ error: "invalid_token" }); return; }
+    response.json({ name: member.name, memberId: member.memberId, role: member.role, permissions: {
+      confirm: member.role !== "viewer", manageDuty: member.role === "caregiver",
+      invite: member.role === "caregiver" && member.canInvite === true,
+    } });
   });
 
   app.get("/api/invitations/options", async (_request, response, next) => {

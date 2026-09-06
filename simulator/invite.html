@@ -5,22 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <title>Invite family — Kin</title>
+    <title>Your family workspace — Kin</title>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/invite.css" />
+    <link rel="stylesheet" href="/workspace.css" />
     <script type="module" src="/invite.js"></script>
   </head>
   <body>
     <header class="site-header"><a class="brand" href="/" aria-label="Kin home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>kin</span></a><a class="back-link" href="/">Kin home</a></header>
     <main class="invite-page">
-      <section class="invite-intro"><p class="kicker">Your family circle</p><h1>Care is personal.<br /><em>So is access.</em></h1><p>Invite someone you trust, with just the permissions they need.</p></section>
-      <div class="invite-layout">
+      <section class="invite-intro"><p class="kicker">Your family circle</p><h1>A little closer. <br /><em>Even from here.</em></h1><p>A shared plan, a thoughtful handoff, and one place to catch up.</p></section>
+      <div class="workspace-session"><p id="workspace-identity"></p><button id="browser-signin" class="primary" type="button" hidden>Sign in to Kin</button><button id="browser-disconnect" class="secondary" type="button" hidden>Close this workspace session</button></div>
+      <p id="invite-status" role="status">Checking access…</p>
+      <button id="invite-reload" class="secondary" type="button" hidden>Check again</button>
+      <nav id="workspace-nav" class="workspace-nav" aria-label="Family workspace" hidden><a href="#today">Today</a><a href="#plan">Plan</a><a href="#circle">Circle</a><a href="#week">Week</a><a id="workspace-invite-link" href="#invite" hidden>Invite family</a><a id="workspace-access-link" href="#access" hidden>Access</a></nav>
+      <section id="workspace" hidden aria-label="Shared family care"><p id="workspace-status" role="status"></p><div class="care-actions"><button id="workspace-refresh" class="secondary" type="button">Refresh</button><button id="workspace-retry-write" class="primary" type="button" hidden>Retry the same check-in</button></div><div id="workspace-content"></div></section>
+      <div id="invitation-area" class="invite-layout" hidden>
         <section class="invite-panel" aria-labelledby="invite-title">
           <p class="kicker">01 / Invite a family member</p><h2 id="invite-title">Make room for someone.</h2>
-          <p id="invite-status" role="status">Checking organizer access…</p>
-          <button id="browser-signin" class="primary" type="button" hidden>Sign in to Kin</button>
-          <button id="browser-disconnect" class="secondary" type="button" hidden>Close this workspace session</button>
-          <button id="invite-reload" class="secondary" type="button" hidden>Check again</button>
           <form id="invite-form" hidden>
             <fieldset id="invite-fields">
               <label for="invite-member">Family member</label><select id="invite-member" name="memberId" required><option value="">Choose from your roster</option></select>
@@ -43,7 +45,7 @@
             <p id="copy-status" role="status"></p><p class="field-note">Keep it somewhere private before leaving. Kin does not save the readable code. Clearing this screen does not revoke it.</p>
           </section>
         </section>
-        <aside class="invite-aside"><p class="kicker">A thoughtful handoff</p><h2>One invitation.<br />Their decision.</h2><ol><li><strong>You choose the person.</strong><p>The code is tied to their verified account, not whoever happens to receive it.</p></li><li><strong>They choose to join.</strong><p>Creating a code does not grant access. Joining requires their explicit acceptance.</p></li><li><strong>Care stays in the circle.</strong><p>No invitation grants organizer privileges. Disconnecting Alexa does not remove family membership.</p></li></ol><p class="aside-note">This screen creates invitations. It does not show current membership or revoke access.</p></aside>
+        <aside class="invite-aside"><p class="kicker">A thoughtful handoff</p><h2>One invitation.<br />Their decision.</h2><ol><li><strong>You choose the person.</strong><p>The code is tied to their verified account, not whoever happens to receive it.</p></li><li><strong>They choose to join.</strong><p>Creating a code does not grant access. Joining requires their explicit acceptance.</p></li><li><strong>Care stays in the circle.</strong><p>No invitation grants organizer privileges. Disconnecting Alexa does not remove family membership.</p></li></ol><p class="aside-note">Use Access to review account memberships or revoke a non-organizer’s access.</p></aside>
       </div>
     </main>
   </body>

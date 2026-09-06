@@ -12,7 +12,7 @@ it("serves the packaged family workspace through the actual Lambda handler witho
   const resources = Template.fromStack(stack).findResources("AWS::Lambda::Function", { Properties: { FunctionName: "kin-mcp-api" } });
   const key = Object.values(resources)[0]!.Properties.Code.S3Key as string;
   const directory = path.join(app.synth().directory, `asset.${key.replace(/\.zip$/, "")}`);
-  const files = ["browser-auth.js", "invite-client.js", "invite.css", "invite.html", "invite.js", "styles.css"];
+  const files = ["browser-auth.js", "care-client.js", "invite-client.js", "invite.css", "invite.html", "invite.js", "styles.css", "workspace-client.js", "workspace.css", "workspace.js"];
   expect((await readdir(path.join(directory, "family"))).sort()).toEqual(files);
   const environment = {
     KIN_PUBLIC_API_ENABLED: "true", KIN_SERVE_SIMULATOR: "false", KIN_FAMILY_WORKSPACE_ENABLED: "true",
@@ -35,7 +35,7 @@ it("serves the packaged family workspace through the actual Lambda handler witho
       expect(body).toBe(await readFile(path.join(directory, "family", file), "utf8"));
       expect(body).toBe(await readFile(new URL(`../simulator/${file}`, import.meta.url), "utf8"));
     }
-    for (const route of ["/index.html", "/app.js", "/care-client.js", "/%2e%2e%2findex.mjs"]) {
+    for (const route of ["/index.html", "/app.js", "/%2e%2e%2findex.mjs"]) {
       expect((await handler(event(route), {}, () => {})).statusCode).toBe(404);
     }
     expect((await handler(event("/api/today"), {}, () => {})).statusCode).toBe(401);

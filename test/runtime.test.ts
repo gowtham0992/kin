@@ -1,8 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createConfiguredApp } from "../src/runtime.js";
+const parameter = vi.hoisted(() => vi.fn(async () => "https://kin.example/mcp"));
+vi.mock("../src/parameter.js", () => ({ createStringParameterProvider: () => parameter }));
 
 describe("Kin runtime configuration", () => {
+  it("supports the deployed parameter-backed resource and rejects a mismatched browser resource", async () => {
+    const environment = { KIN_BROWSER_AUTH_ENABLED: "true", KIN_BROWSER_CLIENT_ID: "kin-family-browser",
+      KIN_BROWSER_REDIRECT_URI: "https://kin.example/invite.html", KIN_OAUTH_ISSUER: "https://kin.example",
+      KIN_OAUTH_JWKS_URI: "https://kin.example/jwks", KIN_MCP_RESOURCE_PARAMETER: "/kin/test-resource",
+      KIN_DYNAMODB_TABLE: "synthetic-test", KIN_FAMILY_WORKSPACE_ENABLED: "true" };
+    const app = createConfiguredApp(environment);
+    const response = await request(app).get("/family-auth-config").expect(200);
+    expect(response.body.resource).toBe("https://kin.example/mcp");
+    parameter.mockResolvedValueOnce("https://foreign.example/mcp");
+    await request(app).get("/family-auth-config").expect(500, { error: "Internal server error" });
+  });
   it("keeps browser sign-in disabled by default and refuses incomplete configuration", async () => {
     await request(createConfiguredApp({})).get("/family-auth-config").expect(404);
     expect(() => createConfiguredApp({ KIN_BROWSER_AUTH_ENABLED: "true" })).toThrow("Browser sign-in requires");

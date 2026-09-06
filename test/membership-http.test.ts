@@ -21,6 +21,20 @@ function setup(record: unknown = member) {
 }
 
 describe("family authorization at the HTTP boundary", () => {
+  it("requires caregiver authority for acknowledgment and takes the name from membership", async () => {
+    const { app, store, find } = setup();
+    const task = (await store.today()).tasks[0]!;
+    const { record } = await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
+    const url = `/api/escalations/${encodeURIComponent(record.id)}/acknowledge`;
+    await request(app).post(url).send({ confirm: true }).expect(401);
+    find.mockResolvedValue({ ...member, role: "viewer" });
+    await request(app).post(url).set("authorization", "Bearer user").send({ confirm: true }).expect(403);
+    find.mockResolvedValue(member);
+    await request(app).post(url).set("authorization", "Bearer user").send({ confirm: true, name: "Forged" }).expect(400);
+    const response = await request(app).post(url).set("authorization", "Bearer user").send({ confirm: true }).expect(200);
+    expect(response.body.acknowledgedBy).toBe("Maya");
+    expect(response.body.status).toBe("blocked");
+  });
   it.each([null, { ...member, circleId: "family-b" }, { ...member, status: "revoked" }, { ...member, role: "admin" }])(
     "denies missing, foreign, revoked, or malformed membership: %j", async record => {
       const { app, store } = setup(record);

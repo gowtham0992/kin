@@ -72,6 +72,16 @@ export class KinApiStack extends Stack {
       description: "Deployment safety switch. Promote to true only after disabled-state verification.",
     });
     const canonicalResourceParameterName = "/kin/mcp/canonical-uri";
+    const familyWorkspaceEnabled = new CfnParameter(this, "FamilyWorkspaceEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Enable authenticated browser care workspace and account access management. Keep false until the family account is provisioned and verified.",
+    });
+    const familyEnrollmentEnabled = new CfnParameter(this, "FamilyEnrollmentEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"], description: "Enable explicit invitation acceptance during account linking.",
+    });
+    const invitationIssuingEnabled = new CfnParameter(this, "InvitationIssuingEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"], description: "Enable organizer-only invitation creation for existing confirmed accounts.",
+    });
     const careStateTable = Table.fromTableName(this, "CareState", "kin-care-state");
 
     const apiLogGroup = new LogGroup(this, "ApiAccessLogs", {
@@ -194,6 +204,12 @@ export class KinApiStack extends Stack {
         KIN_MCP_RESOURCE_PARAMETER: canonicalResourceParameterName,
         KIN_PUBLIC_API_ENABLED: publicApiEnabledParameter.valueAsString,
         KIN_SERVE_SIMULATOR: "false",
+        KIN_FAMILY_WORKSPACE_ENABLED: familyWorkspaceEnabled.valueAsString,
+        KIN_BROWSER_AUTH_ENABLED: familyWorkspaceEnabled.valueAsString,
+        KIN_BROWSER_CLIENT_ID: "kin-family-browser",
+        KIN_INVITATION_ISSUING_ENABLED: invitationIssuingEnabled.valueAsString,
+        KIN_COGNITO_USER_POOL_ID: userPool.userPoolId,
+        KIN_CIRCLE_NAME: "Kin family circle",
         KIN_WIDGET_PATH: "/var/task/widget/today.html",
         NODE_OPTIONS: "--enable-source-maps",
       },
@@ -215,6 +231,11 @@ export class KinApiStack extends Stack {
         },
       },
     });
+    apiFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ["cognito-idp:AdminGetUser"],
+      resources: [userPool.userPoolArn],
+    }));
     apiFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
       actions: [
@@ -269,6 +290,12 @@ export class KinApiStack extends Stack {
         KIN_OAUTH_SECRET_ID: oauthSecret.secretArn,
         KIN_ALEXA_REDIRECT_URIS: alexaRedirectUrisParameter.valueAsString,
         KIN_PUBLIC_API_ENABLED: publicApiEnabledParameter.valueAsString,
+        KIN_BROWSER_AUTH_ENABLED: familyWorkspaceEnabled.valueAsString,
+        KIN_BROWSER_CLIENT_ID: "kin-family-browser",
+        KIN_BROWSER_REDIRECT_URI: `${httpApi.apiEndpoint}/invite.html`,
+        KIN_FAMILY_ENROLLMENT_ENABLED: familyEnrollmentEnabled.valueAsString,
+        KIN_DYNAMODB_TABLE: careStateTable.tableName,
+        KIN_CIRCLE_ID: "demo-family",
         NODE_OPTIONS: "--enable-source-maps",
       },
       bundling: {
@@ -285,6 +312,9 @@ export class KinApiStack extends Stack {
     });
     oauthFunction.node.addDependency(secretProvisioning);
     oauthSecret.grantRead(oauthFunction);
+    oauthFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW, actions: ["dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:TransactWriteItems"], resources: [careStateTable.tableArn],
+    }));
     oauthFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
       actions: [
@@ -335,6 +365,7 @@ export class KinApiStack extends Stack {
     apiFunction.addEnvironment("KIN_OAUTH_ISSUER", httpApi.apiEndpoint);
     apiFunction.addEnvironment("KIN_OAUTH_JWKS_URI", `${httpApi.apiEndpoint}/jwks`);
     apiFunction.addEnvironment("KIN_OAUTH_AUTHORIZATION_SERVER", httpApi.apiEndpoint);
+    apiFunction.addEnvironment("KIN_BROWSER_REDIRECT_URI", `${httpApi.apiEndpoint}/invite.html`);
     const canonicalResourceParameter = new StringParameter(
       this,
       "CanonicalResourceParameter",

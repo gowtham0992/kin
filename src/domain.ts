@@ -6,6 +6,7 @@ import type {
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
 import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
+import { scheduledTask, sameScheduledTask, type ScheduleTaskInput } from "./care-plan.js";
 
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
@@ -73,6 +74,8 @@ export interface CareActivityWindow {
 }
 
 export interface CareRepository {
+  acknowledgeEscalation(input: { id: string; memberId: string; name: string }): Promise<EscalationSummary>;
+  scheduleTask(input: ScheduleTaskInput): Promise<CareTask>;
   today(): Promise<TodaySnapshot>;
   escalationSnapshot(asOf: Date): Promise<TodaySnapshot>;
   activityBetween(input: { startDate: string; endDate: string }): Promise<CareActivityWindow>;
@@ -114,6 +117,7 @@ export class TaskNotFoundError extends Error {
     this.name = "TaskNotFoundError";
   }
 }
+export class EscalationNotFoundError extends Error { constructor() { super("Escalation not found"); } }
 
 export class InMemoryCareStore implements CareRepository {
   readonly #tasks = new Map<string, CareTask>();
@@ -146,6 +150,21 @@ export class InMemoryCareStore implements CareRepository {
       this.#dutyByDate.set(calendarDate(new Date(onDuty.startsAt), this.#timeZone), structuredClone(onDuty));
     }
     for (const task of tasks) this.#tasks.set(task.id, structuredClone(task));
+  }
+
+  async acknowledgeEscalation(input: { id: string; memberId: string; name: string }): Promise<EscalationSummary> {
+    const record = this.#escalations.get(input.id);
+    if (!record) throw new EscalationNotFoundError();
+    record.acknowledgment ??= { memberId: input.memberId, name: input.name, at: this.#now().toISOString() };
+    return toEscalationSummary(record);
+  }
+
+  async scheduleTask(input: ScheduleTaskInput): Promise<CareTask> {
+    const existing = this.#tasks.get(input.id);
+    if (existing) return structuredClone(sameScheduledTask(existing, input));
+    const task = scheduledTask(input, this.#now());
+    this.#tasks.set(task.id, task);
+    return structuredClone(task);
   }
 
   async today(): Promise<TodaySnapshot> {

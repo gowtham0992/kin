@@ -38,6 +38,22 @@ class FakeDynamoSender {
 }
 
 describe("DynamoCareRepository", () => {
+  it("records the first acknowledgment without changing task or delivery state", async () => {
+    const record = { id: "missed-water", taskId: storedTask.id, dueAt: storedTask.dueAt,
+      status: "queued", recipientMemberId: "maya", recipientMemberName: "Maya",
+      acknowledgment: { memberId: "theo", name: "Theo", at: "2026-09-02T15:30:00.000Z" } };
+    const client = new FakeDynamoSender([{ Items: [storedTask] }, { Items: [] }, { Items: [record] }, { Attributes: record }]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    const receipt = await repository.acknowledgeEscalation({ id: record.id, memberId: "maya", name: "Maya" });
+    expect(receipt).toMatchObject({ status: "queued", acknowledgedBy: "Theo", acknowledgedAt: record.acknowledgment.at });
+    expect(client.commands[3]).toBeInstanceOf(UpdateCommand);
+    expect(client.commands[3]?.input).toMatchObject({
+      Key: { PK: "CIRCLE#family-1", SK: `ESCALATION#${storedTask.dueAt}#${storedTask.id}` },
+      ConditionExpression: "attribute_exists(PK) AND id = :id",
+      UpdateExpression: "SET acknowledgment = if_not_exists(acknowledgment, :ack)",
+      ReturnValues: "ALL_NEW",
+    });
+  });
   it("keeps invitation and account metadata out of the public roster", async () => {
     const member = { id: "maya", name: "Maya", relationship: "daughter", canReceiveAlerts: true };
     const client = new FakeDynamoSender([{ Items: [{ ...member,

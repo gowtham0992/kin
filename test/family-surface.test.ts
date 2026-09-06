@@ -19,6 +19,16 @@ function setup() {
 }
 
 describe("separate family workspace", () => {
+  it("returns only the caller's display identity and effective permissions", async () => {
+    const fixture = setup(); const app = fixture.app();
+    await request(app).get("/api/session").expect(401);
+    const response = await request(app).get("/api/session").set("authorization", "Bearer test").expect(200);
+    expect(response.body).toEqual({ name: "Maya", memberId: "maya", role: "caregiver", permissions: { confirm: true, manageDuty: true, invite: false } });
+    expect(response.headers["cache-control"]).toBe("no-store");
+    fixture.find.mockResolvedValue({ circleId: "family-a", memberId: "theo", name: "Theo", role: "viewer", status: "active", canInvite: true });
+    const viewer = await request(app).get("/api/session").set("authorization", "Bearer test").expect(200);
+    expect(viewer.body.permissions).toEqual({ confirm: false, manageDuty: false, invite: false });
+  });
   it("serves only the family asset allowlist with private-page protections", async () => {
     const app = setup().app();
     await request(app).get("/").expect(302).expect("location", "/invite.html");
@@ -29,7 +39,7 @@ describe("separate family workspace", () => {
       expect(response.headers["x-content-type-options"]).toBe("nosniff");
       expect(response.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
     }
-    for (const path of ["/index.html", "/app.js", "/care-client.js", "/package.json", "/%2e%2e%2fpackage.json", "/.env"]) {
+    for (const path of ["/index.html", "/app.js", "/package.json", "/%2e%2e%2fpackage.json", "/.env"]) {
       await request(app).get(path).expect(404);
     }
     await request(app).get("/family-auth-config").expect(200, config);

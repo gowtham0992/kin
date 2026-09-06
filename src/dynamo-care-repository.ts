@@ -9,6 +9,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import {
   TaskNotFoundError,
+  EscalationNotFoundError,
   type CareActivityWindow,
   type CircleMember,
   type CircleSnapshot,
@@ -27,6 +28,7 @@ import type {
 } from "./escalation.js";
 import { toEscalationSummary } from "./escalation.js";
 import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
+import { scheduledTask, sameScheduledTask, type ScheduleTaskInput } from "./care-plan.js";
 
 interface DynamoSender {
   send(
@@ -103,6 +105,40 @@ export class DynamoCareRepository implements CareRepository {
     this.#circleId = input.circleId;
     this.#now = input.now ?? (() => new Date());
     this.#timeZone = validateTimeZone(input.timeZone ?? "UTC");
+  }
+
+  async acknowledgeEscalation(input: { id: string; memberId: string; name: string }): Promise<EscalationSummary> {
+    const record = (await this.today()).escalations.find(event => event.id === input.id);
+    if (!record) throw new EscalationNotFoundError();
+    try {
+      const result = await this.#client.send(new UpdateCommand({ TableName: this.#tableName,
+        Key: { PK: this.#partitionKey(), SK: escalationSortKey(record) },
+        ConditionExpression: "attribute_exists(PK) AND id = :id",
+        UpdateExpression: "SET acknowledgment = if_not_exists(acknowledgment, :ack)",
+        ExpressionAttributeValues: { ":id": input.id, ":ack": { memberId: input.memberId, name: input.name, at: this.#now().toISOString() } },
+        ReturnValues: "ALL_NEW",
+      })) as { Attributes?: StoredEscalation };
+      if (!result.Attributes) throw new Error("Acknowledgment returned no record");
+      return toEscalationSummary(result.Attributes);
+    } catch (error) { if (isConditionCheckFailure(error)) throw new EscalationNotFoundError(); throw error; }
+  }
+
+  async scheduleTask(input: ScheduleTaskInput): Promise<CareTask> {
+    const key = { PK: this.#partitionKey(), SK: `PLAN_REQUEST#${input.id}` };
+    const read = async () => (await this.#client.send(new GetCommand({ TableName: this.#tableName, Key: key, ConsistentRead: true })) as { Item?: { task?: CareTask } }).Item?.task;
+    const existing = await read();
+    if (existing) return sameScheduledTask(existing, input);
+    const task = scheduledTask(input, this.#now());
+    try {
+      await this.#client.send(new TransactWriteCommand({ TransactItems: [
+        { Put: { TableName: this.#tableName, Item: { ...task, PK: this.#partitionKey(), SK: taskSortKey(task), entityType: "CareTask" }, ConditionExpression: "attribute_not_exists(PK)" } },
+        { Put: { TableName: this.#tableName, Item: { ...key, task, entityType: "PlanRequest" }, ConditionExpression: "attribute_not_exists(PK)" } },
+      ] }));
+    } catch (error) {
+      if (isConditionalFailure(error)) { const replay = await read(); if (replay) return sameScheduledTask(replay, input); }
+      throw error;
+    }
+    return task;
   }
 
   async today(): Promise<TodaySnapshot> {
@@ -242,6 +278,9 @@ export class DynamoCareRepository implements CareRepository {
         ConsistentRead: true,
       })),
     ]);
+if ((taskResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey || (escalationResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey) {
+      throw new Error("Activity window is too large to return completely");
+    }
     const tasks = ((taskResult as { Items?: StoredTask[] }).Items ?? [])
       .map(({ PK: _pk, SK: _sk, entityType: _entityType, ...task }) => task)
       .filter((task) => {

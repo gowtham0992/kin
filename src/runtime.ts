@@ -1,4 +1,5 @@
 import { createJwtAccessAuthorizer } from "./auth.js";
+import { createDynamoAccessManagement } from "./access-management.js";
 import { browserAuthConfig } from "./browser-auth-config.js";
 import { createDynamoMembershipDirectory } from "./membership.js";
 import { createCognitoInvitableAccounts, createDynamoInvitationIssuer } from "./invitation-issuer.js";
@@ -79,12 +80,12 @@ export function createConfiguredApp(
   if (familyEnabled && !browserEnabled) {
     throw new Error("Family workspace requires browser sign-in");
   }
-  if (browserEnabled && (!oauthValues.every(Boolean) || !canonicalMcpUri || !familyAccess)) {
-    throw new Error("Browser sign-in requires OAuth, a literal canonical URI, and a care table");
+  if (browserEnabled && (!oauthValues.every(Boolean) || !familyAccess)) {
+    throw new Error("Browser sign-in requires OAuth and a care table");
   }
   const browserAuth = browserEnabled ? browserAuthConfig({
     clientId: environment.KIN_BROWSER_CLIENT_ID ?? "", issuer: oauthIssuer!,
-    redirectUri: environment.KIN_BROWSER_REDIRECT_URI ?? "", resource: canonicalMcpUri!,
+    redirectUri: environment.KIN_BROWSER_REDIRECT_URI ?? "", resource: canonicalMcpUri ?? `${oauthIssuer}/mcp`,
   }) : undefined;
   const issuingEnabled = environment.KIN_INVITATION_ISSUING_ENABLED === "true";
   const userPoolId = environment.KIN_COGNITO_USER_POOL_ID?.trim();
@@ -104,9 +105,13 @@ export function createConfiguredApp(
             jwksUri: oauthJwksUri,
           }),
           familyAccess,
-          browserAuth,
+          browserAuth: browserAuth && typeof canonicalMcpResource === "function" ? async () => {
+            if (await canonicalMcpResource() !== browserAuth.resource) throw new Error("Browser resource does not match canonical MCP resource");
+            return browserAuth;
+          } : browserAuth,
           serveFamilyWorkspace: familyEnabled,
           familyAssetDirectory: options.familyAssetDirectory,
+          accessManagement: familyEnabled ? createDynamoAccessManagement({ tableName: tableName!, familyAccess: familyAccess!, region: environment.AWS_REGION }) : undefined,
           invitationIssuer: issuingEnabled ? createDynamoInvitationIssuer({
             tableName: tableName!, familyAccess: familyAccess!, circleName: circleName!, issuer: oauthIssuer,
             accounts: createCognitoInvitableAccounts({ userPoolId: userPoolId!, region: environment.AWS_REGION }),

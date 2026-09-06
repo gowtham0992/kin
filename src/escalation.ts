@@ -19,6 +19,7 @@ export interface BlockedEscalation {
 export type EscalationStatus = "blocked" | "queued" | "sending" | "sent" | "failed";
 
 export interface EscalationRecord {
+  acknowledgment?: { memberId: string; name: string; at: string };
   id: string;
   taskId: string;
   taskTitle: string;
@@ -43,10 +44,11 @@ export type EscalationSummary = Pick<
   | "updatedAt"
   | "recipientMemberName"
   | "status"
->;
+> & { acknowledgedBy?: string; acknowledgedAt?: string };
 
 export function toEscalationSummary(record: EscalationRecord): EscalationSummary {
   return {
+    ...(record.acknowledgment ? { acknowledgedBy: record.acknowledgment.name, acknowledgedAt: record.acknowledgment.at } : {}),
     id: record.id,
     taskId: record.taskId,
     dueAt: record.dueAt,

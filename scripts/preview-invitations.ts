@@ -6,16 +6,27 @@ import { createDemoStore } from "../src/domain.js";
 const mode = process.argv[2] ?? "success";
 const port = Number(process.argv[3] ?? 3014);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid preview port");
-if (!["success", "denied", "empty", "conflict", "uncertain"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["success", "denied", "empty", "conflict", "uncertain", "viewer", "offline", "alerts"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
 const store = createDemoStore();
+if (mode === "alerts") {
+  const task = (await store.today()).tasks[0]!;
+  await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
+}
+if (mode === "offline") store.today = async () => { throw new Error("Synthetic offline fixture"); };
 if (mode === "empty") store.circle = async () => ({ startDate: "2026-09-05", endDate: "2026-09-11", members: [], assignments: [] });
+let targetStatus = "active";
 app.use(createHttpApp(store, undefined, {
   accessAuthorizer: { async authorize() { return { subject: "synthetic-organizer", scopes: new Set(["mcp:tools"]), claims: { iss: "https://example.invalid" } }; } },
   familyAccess: { circleId: "synthetic", directory: { async find() { return {
-    circleId: "synthetic", memberId: "maya", name: "Maya", role: "caregiver", status: "active", canInvite: mode !== "denied",
+    circleId: "synthetic", memberId: "maya", name: "Maya", role: mode === "viewer" ? "viewer" : "caregiver", status: "active", canInvite: mode !== "denied" && mode !== "viewer",
   }; } } },
+  accessManagement: {
+    async list() { return [{ memberId: "maya", name: "Maya", role: "caregiver", status: "active", organizer: true, canRevoke: false },
+      { memberId: "theo", name: "Theo", role: "viewer", status: targetStatus, organizer: false, canRevoke: targetStatus === "active" }]; },
+    async revoke() { targetStatus = "revoked"; },
+  },
   invitationIssuer: { async issue(_principal, input) {
     if (mode === "conflict") {
       const { InvitationIssueError } = await import("../src/invitation-issuer.js");

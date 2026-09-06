@@ -13,7 +13,7 @@ const membershipSchema = z.object({
   canInvite: z.boolean().optional(),
 });
 export type Membership = z.infer<typeof membershipSchema>;
-export type CarePermission = "read" | "confirm" | "manage_duty" | "invite";
+export type CarePermission = "read" | "confirm" | "manage_duty" | "manage_plan" | "invite";
 export interface MembershipDirectory {
   find(principal: AccessPrincipal): Promise<unknown>;
 }
@@ -34,7 +34,7 @@ export async function requireMembership(
   const member = parsed.data;
   if (permission === "invite" && (member.role !== "caregiver" || member.canInvite !== true)) throw new FamilyAccessDeniedError();
   if ((permission === "confirm" && member.role === "viewer") ||
-      (permission === "manage_duty" && member.role !== "caregiver")) throw new FamilyAccessDeniedError();
+      (["manage_duty", "manage_plan"].includes(permission) && member.role !== "caregiver")) throw new FamilyAccessDeniedError();
   return member;
 }
 

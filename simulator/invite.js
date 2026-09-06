@@ -1,5 +1,6 @@
 import { createInvitationClient, invitationError } from "./invite-client.js";
 import { createBrowserAuth } from "./browser-auth.js";
+import { createWorkspace } from "./workspace.js";
 
 let auth = null;
 const client = createInvitationClient({ request: (...args) => auth ? auth.request(...args) : fetch(...args) });
@@ -15,8 +16,19 @@ const roleNotes = {
 };
 let busy = false;
 let receipt = null;
+const workspace = createWorkspace({
+  request: (...args) => auth ? auth.request(...args) : fetch(...args),
+  onInvite: load,
+  onLeaveInvite: clearReceipt,
+  onAccessLost(code) {
+    clearReceipt(); $("invitation-area").hidden = true;
+    status.textContent = code === 403 ? "Your account does not have active family access. Ask your organizer to review your membership." : code === 401 ? "Your workspace session ended. Sign in to reconnect." : "Kin could not load the workspace. Check your connection and try again.";
+    $("browser-signin").hidden = !auth; $("invite-reload").hidden = false;
+  },
+});
 
 async function load() {
+  $("invitation-area").hidden = false;
   $("browser-disconnect").hidden = !auth?.connected;
   $("browser-signin").hidden = !auth || auth.connected;
   form.hidden = true;
@@ -30,13 +42,14 @@ async function load() {
     form.hidden = !data.members.length;
     $("invite-reload").hidden = !!data.members.length;
   } catch (error) {
+    if (error.stale) return;
     status.textContent = error.status === 401 && auth ? "Sign in to open your family workspace." : invitationError(error.status);
     $("browser-signin").hidden = !auth || auth.connected;
     $("invite-reload").hidden = false;
   }
 }
 
-$("invite-reload").addEventListener("click", () => void (auth ? load() : initialize()));
+$("invite-reload").addEventListener("click", () => void (auth?.connected ? workspace.open() : initialize()));
 $("invite-role").addEventListener("change", () => { $("role-note").textContent = roleNotes[$("invite-role").value]; });
 form.addEventListener("input", () => { $("invite-confirm").checked = false; });
 // The checkbox's own input should remain checked; only identity/permission edits reset consent.
@@ -58,6 +71,7 @@ form.addEventListener("submit", async event => {
     result.hidden = false;
     result.focus();
   } catch (error) {
+    if (error.stale) return;
     status.textContent = error.status === 401 && auth ? "Your workspace session ended. Sign in again before creating another invitation." : invitationError(error.status, true);
     $("invite-confirm").checked = false;
     if ([401, 403, 404].includes(error.status)) { form.hidden = true; $("invite-reload").hidden = false; }
@@ -74,6 +88,7 @@ $("invite-copy").addEventListener("click", async () => {
   catch { $("copy-status").textContent = "Copy was blocked. Select the code above and copy it manually."; $("invite-code").focus(); $("invite-code").select(); }
 });
 function clearReceipt() {
+  client.reset();
   receipt = null;
   $("invite-code").value = "";
   $("invite-summary").textContent = "";
@@ -84,15 +99,15 @@ function clearReceipt() {
   $("role-note").textContent = roleNotes.viewer;
 }
 $("invite-clear").addEventListener("click", () => { clearReceipt(); void load().then(() => { if (!form.hidden) $("invite-member").focus(); }); });
-window.addEventListener("pagehide", () => { clearReceipt(); auth?.suspend(); });
-window.addEventListener("pageshow", event => { if (event.persisted) void load(); });
+window.addEventListener("pagehide", () => { workspace.reset(); clearReceipt(); auth?.suspend(); });
+window.addEventListener("pageshow", event => { if (event.persisted) void initialize(); });
 $("browser-signin").addEventListener("click", async () => {
   $("browser-signin").disabled = true;
   try { window.location.assign(await auth.start()); }
   catch { status.textContent = "Kin could not start sign-in. Check that this browser allows session storage and try again."; $("browser-signin").disabled = false; }
 });
 $("browser-disconnect").addEventListener("click", () => {
-  auth?.disconnect(); clearReceipt(); form.hidden = true;
+  auth?.disconnect(); workspace.reset(); clearReceipt(); form.hidden = true; $("invitation-area").hidden = true;
   $("browser-disconnect").hidden = true; $("browser-signin").hidden = false;
   status.textContent = "Workspace session closed. This does not sign you out of the account provider or remove family access.";
 });
@@ -106,7 +121,15 @@ async function initialize() {
       await auth.complete(callbackUrl);
       $("browser-disconnect").hidden = !auth.connected;
     } else if (response.status !== 404) throw new Error("Unavailable");
-    await load();
+    if (auth) {
+      $("browser-signin").hidden = auth.connected;
+      $("invitation-area").hidden = true;
+      status.textContent = auth.connected ? "" : "Sign in to see your family’s care plan. Care activity is shared only with your circle.";
+      if (auth.connected) await workspace.open();
+    } else {
+      await workspace.open();
+      if ($("workspace-nav").hidden) await load();
+    }
   } catch {
     form.hidden = true;
     status.textContent = "Kin could not complete sign-in. Start again to open the workspace.";

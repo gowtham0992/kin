@@ -150,6 +150,9 @@ describe("Kin AWS infrastructure", () => {
     const template = Template.fromStack(new KinApiStack(app, "ApiTest", {}));
 
     template.hasParameter("AlexaRedirectUris", { Type: "String", Default: "" });
+    for (const parameter of ["FamilyWorkspaceEnabled", "FamilyEnrollmentEnabled", "InvitationIssuingEnabled"]) {
+      template.hasParameter(parameter, { Type: "String", Default: "false", AllowedValues: ["true", "false"] });
+    }
     template.hasParameter("PublicApiEnabled", {
       Type: "String",
       Default: "false",
@@ -170,6 +173,11 @@ describe("Kin AWS infrastructure", () => {
           KIN_CIRCLE_ID: "demo-family",
           KIN_BEDROCK_TIMEOUT_MS: "300",
           KIN_SERVE_SIMULATOR: "false",
+          KIN_FAMILY_WORKSPACE_ENABLED: { Ref: "FamilyWorkspaceEnabled" },
+          KIN_BROWSER_AUTH_ENABLED: { Ref: "FamilyWorkspaceEnabled" },
+          KIN_BROWSER_CLIENT_ID: "kin-family-browser",
+          KIN_BROWSER_REDIRECT_URI: Match.anyValue(),
+          KIN_INVITATION_ISSUING_ENABLED: { Ref: "InvitationIssuingEnabled" },
           KIN_MCP_RESOURCE_PARAMETER: "/kin/mcp/canonical-uri",
           KIN_PUBLIC_API_ENABLED: Match.anyValue(),
           KIN_OAUTH_ISSUER: Match.anyValue(),

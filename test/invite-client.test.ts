@@ -4,6 +4,16 @@ const input = { memberId: "theo", email: "theo@example.com", role: "viewer" };
 const receipt = { code: "a".repeat(43), expiresAt: 1788700000, memberId: "theo", role: "viewer" };
 
 describe("invitation screen request safety", () => {
+  it("does not restore a readable code after leaving the invitation view", async () => {
+    let resolve!: (value: unknown) => void;
+    const data = new Promise(done => { resolve = done; });
+    const json = vi.fn(() => data);
+    const client = createInvitationClient({ request: async () => ({ ok: true, json }) });
+    const pending = client.issue(input);
+    await vi.waitFor(() => expect(json).toHaveBeenCalled());
+    client.reset(); resolve(receipt);
+    await expect(pending).rejects.toMatchObject({ stale: true });
+  });
   it("coalesces repeated clicks and sends only the allowed fields without persisting a code", async () => {
     const request = vi.fn(async () => Response.json(receipt, { status: 201 }));
     const client = createInvitationClient({ request });

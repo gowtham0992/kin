@@ -7,6 +7,18 @@ import {
 } from "../src/escalation.js";
 
 describe("missed-task escalation planning", () => {
+  it("records the first caregiver acknowledgment without completing the task or changing delivery state", async () => {
+    const now = new Date("2026-09-02T16:00:00Z");
+    const store = createDemoStore(() => now);
+    const task = (await store.today()).tasks[0]!;
+    const { record } = await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
+    await store.acknowledgeEscalation({ id: record.id, memberId: "maya", name: "Maya" });
+    const retry = await store.acknowledgeEscalation({ id: record.id, memberId: "theo", name: "Theo" });
+    expect(retry).toMatchObject({ status: "blocked", acknowledgedBy: "Maya", acknowledgedAt: now.toISOString() });
+    expect((await store.today()).tasks[0]!.state).toBe("scheduled");
+    expect(retry).not.toHaveProperty("acknowledgment");
+    await expect(store.acknowledgeEscalation({ id: "unknown", memberId: "maya", name: "Maya" })).rejects.toThrow("not found");
+  });
   it("recovers a blocked alert when coverage is assigned and publishes only once", async () => {
     const now = new Date("2026-09-02T16:00:00Z");
     const tasks = (await createDemoStore(() => now).today()).tasks;
