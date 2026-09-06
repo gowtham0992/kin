@@ -250,6 +250,17 @@ describe("Kin AWS infrastructure", () => {
       SecretString: '{"schemaVersion":0,"state":"pending-provisioning"}',
     });
     const secrets = template.findResources("AWS::SecretsManager::Secret");
+    const oauthTableId = Object.keys(template.findResources("AWS::DynamoDB::Table", {
+      Properties: { TableName: "kin-oauth-state" },
+    }))[0]!;
+    const deleteStatements = Object.values(template.findResources("AWS::IAM::Policy"))
+      .flatMap(policy => policy.Properties.PolicyDocument.Statement)
+      .filter(statement => [statement.Action].flat().includes("dynamodb:DeleteItem"));
+    expect(deleteStatements).toEqual([{
+      Effect: "Allow", Action: "dynamodb:DeleteItem",
+      Resource: { "Fn::GetAtt": [oauthTableId, "Arn"] },
+      Condition: { "ForAnyValue:StringEquals": { "dynamodb:EnclosingOperation": ["TransactWriteItems"] } },
+    }]);
     expect(Object.values(secrets)[0]).toMatchObject({
       DeletionPolicy: "Retain",
       UpdateReplacePolicy: "Retain",
@@ -297,6 +308,6 @@ describe("Kin AWS infrastructure", () => {
     expect(policies).toContain("secretsmanager:GetSecretValue");
     expect(policies).toContain("secretsmanager:PutSecretValue");
     expect(policies).not.toContain("dynamodb:Scan");
-    expect(policies).not.toContain("dynamodb:DeleteItem");
+    // The sole DeleteItem grant is asserted above: OAuth state, transactions only.
   });
 });

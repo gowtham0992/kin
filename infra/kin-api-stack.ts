@@ -326,6 +326,12 @@ export class KinApiStack extends Stack {
       ],
       resources: [oauthStateTable.tableArn],
     }));
+    oauthFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ["dynamodb:DeleteItem"],
+      resources: [oauthStateTable.tableArn],
+      conditions: { "ForAnyValue:StringEquals": { "dynamodb:EnclosingOperation": ["TransactWriteItems"] } },
+    }));
     const oauthIntegration = new HttpLambdaIntegration("KinOAuthIntegration", oauthFunction, {
       scopePermissionToRoute: false,
     });
