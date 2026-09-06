@@ -492,6 +492,7 @@ const conversationInput = document.querySelector("#conversation-input");
 const conversationStatus = document.querySelector("#conversation-status");
 const conversationReview = document.querySelector("#conversation-review");
 let proposal = null, conversationBusy = false;
+let conversationContextToken;
 
 function lockConversation(locked) {
   document.querySelectorAll(".conversation button, .conversation input").forEach(element => { element.disabled = locked; });
@@ -540,9 +541,10 @@ conversationForm.addEventListener("submit", async event => {
   conversationStatus.textContent = "Checking your request…";
   try {
     const response = await fetch("/demo/conversation", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: conversationInput.value }), signal: AbortSignal.timeout(10000) });
+      body: JSON.stringify({ message: conversationInput.value, contextToken: conversationContextToken }), signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error("Interpretation unavailable");
     const result = await response.json();
+    conversationContextToken = result.contextToken;
     document.querySelector("#conversation-mode").textContent = result.mode === "bedrock"
       ? "Bedrock interpreted this request. Review its suggestion; it can be wrong."
       : "Limited-command mode · no language model used.";
@@ -550,7 +552,7 @@ conversationForm.addEventListener("submit", async event => {
       proposal = result;
       document.querySelector("#conversation-proposal").textContent = `Record “${result.task.title}” (${formatTime(result.task.dueAt)}) as ${result.response.replace("_", " ")} for Evelyn?`;
       conversationReview.hidden = false;
-      conversationStatus.textContent = "Please review. No change has been saved.";
+      conversationStatus.textContent = "Please review. No change has been saved. You can also ask a follow-up, such as ‘actually not yet’. Task context lasts five minutes.";
     } else if (result.action === "today") {
       const data = await mcp.today(); render(data);
       conversationStatus.textContent = `${data.summary.completed} of ${data.summary.total} check-ins are complete. ${data.tasks.map(task => `${task.title}: ${task.state}`).join(". ") || "No check-ins are scheduled."}`;
@@ -563,6 +565,7 @@ conversationForm.addEventListener("submit", async event => {
   } finally { conversationBusy = false; lockConversation(false); }
 });
 document.querySelector("#conversation-cancel").addEventListener("click", () => {
+  conversationContextToken = undefined;
   proposal = null; conversationReview.hidden = true;
   conversationStatus.textContent = "Left unchanged."; conversationInput.focus();
 });
@@ -577,9 +580,12 @@ document.querySelector("#conversation-confirm").addEventListener("click", async 
       proposal = null; conversationReview.hidden = true;
       conversationStatus.textContent = "That check-in changed since your request. Ask again to review the current plan."; return;
     }
-    const saved = await submitConfirmation(() => confirmationSender.confirm({ taskId: task.id, response: reviewed.response, actor: "Evelyn" }));
+    const saved = await submitConfirmation(() => confirmationSender.confirm({ taskId: task.id, response: reviewed.response, actor: "Evelyn", expected: reviewed.expected }));
     proposal = null; conversationReview.hidden = true;
-    conversationStatus.textContent = saved ? "Your check-in is saved to the shared family plan." : "The save was not acknowledged. Use the save message’s retry button before sending another check-in.";
+    conversationStatus.textContent = saved ? "Your check-in is saved to the shared family plan." : confirmationSender.pending
+      ? "The save was not acknowledged. Use the save message’s retry button before sending another check-in."
+      : "The task changed or the answer was rejected. Ask again to review the current plan.";
+    conversationContextToken = undefined;
     if (saved) conversationInput.value = "";
   } catch { conversationStatus.textContent = "Kin couldn’t check the current plan. Nothing was sent; try confirming again."; }
   finally { conversationBusy = false; lockConversation(false); }

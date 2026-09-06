@@ -16,6 +16,7 @@ import {
 import { WeeklyBriefService } from "./weekly-brief.js";
 import { confirmWithReceipt } from "./confirmation.js";
 import type { Membership } from "./membership.js";
+import { taskReviewSchema, TaskReviewConflict } from "./task-review.js";
 
 const widgetUri = "ui://kin/today.html";
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +81,7 @@ export function createMcpServer(
       description:
         "Records that a family care task is done, not done yet, or intentionally skipped.",
       inputSchema: {
+        expected: taskReviewSchema.optional().describe("Exact reviewed task state. A changed task is rejected atomically; retry keeps the original request ID."),
         taskId: z.string().min(1).max(100).describe("The care task identifier."),
         response: z.enum(confirmationResponses).describe("The person's response."),
         actor: z.string().min(1).max(80).describe("The person confirming the task."),
@@ -109,10 +111,14 @@ export function createMcpServer(
           },
         };
       } catch (error) {
+        if (error instanceof TaskReviewConflict) {
+          return { isError: true, content: [{ type: "text", text: error.message }], structuredContent: { code: "review_conflict" } };
+        }
         if (error instanceof TaskNotFoundError) {
           return {
             isError: true,
             content: [{ type: "text", text: "I couldn't find that care task." }],
+            structuredContent: { code: "task_not_found" },
           };
         }
         throw error;

@@ -8,6 +8,7 @@ import { toEscalationSummary } from "./escalation.js";
 import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
 import { scheduledTask, sameScheduledTask, routineTasks, sameRoutine, type ScheduleRoutineInput, type ScheduleTaskInput } from "./care-plan.js";
 import { editableRoutineTasks, changedRoutineTask, RoutineConflict, type RoutineChange } from "./care-plan.js";
+import { assertTaskReview, type TaskReview } from "./task-review.js";
 
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
@@ -88,6 +89,7 @@ export interface CareRepository {
   circle(): Promise<CircleSnapshot>;
   assignDuty(input: { date: string; memberId: string }): Promise<CircleSnapshot>;
   confirm(input: {
+    expected?: TaskReview;
     taskId: string;
     response: ConfirmationResponse;
     actor: string;
@@ -392,6 +394,7 @@ export class InMemoryCareStore implements CareRepository {
   }
 
   async confirm(input: {
+    expected?: TaskReview;
     taskId: string;
     response: ConfirmationResponse;
     actor: string;
@@ -410,6 +413,8 @@ export class InMemoryCareStore implements CareRepository {
 
     const task = this.#tasks.get(input.taskId);
     if (!task || task.state === "cancelled") throw new TaskNotFoundError(input.taskId);
+
+    assertTaskReview(task, input.expected);
 
     const recordedAt = this.#now().toISOString();
     const confirmation: Confirmation = {

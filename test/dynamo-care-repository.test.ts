@@ -159,6 +159,17 @@ describe("DynamoCareRepository", () => {
     });
   });
 
+  it("places all reviewed fields in the atomic task write condition", async () => {
+    const client = new FakeDynamoSender([{}, { Items: [storedTask] }, {}, {}, {}]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    await repository.confirm({ taskId: "morning-water", response: "done", actor: "Evelyn", requestId: "reviewed-turn-1",
+      expected: { title: storedTask.title, dueAt: storedTask.dueAt, state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null } });
+    expect(client.commands[4]?.input).toMatchObject({ TransactItems: [expect.anything(), { Put: {
+      ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND title = :title AND #state = :reviewState AND dueAt = :reviewDue AND lastResponse = :reviewResponse AND confirmedAt = :reviewAt AND confirmedBy = :reviewBy",
+      ExpressionAttributeValues: { ":title": storedTask.title, ":reviewState": "scheduled", ":reviewDue": storedTask.dueAt, ":reviewResponse": null, ":reviewAt": null, ":reviewBy": null },
+    } }] });
+  });
+
   it("replays an existing confirmation without writing again", async () => {
     const confirmation = {
       PK: "CIRCLE#family-1",

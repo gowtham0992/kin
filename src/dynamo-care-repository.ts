@@ -1,4 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { assertTaskReview, TaskReviewConflict, type TaskReview } from "./task-review.js";
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -413,6 +414,7 @@ if ((taskResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey || (escalati
   }
 
   async confirm(input: {
+    expected?: TaskReview;
     taskId: string;
     response: ConfirmationResponse;
     actor: string;
@@ -423,6 +425,8 @@ if ((taskResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey || (escalati
 
     const task = await this.#findTask(input.taskId);
     if (!task || task.state === "cancelled") throw new TaskNotFoundError(input.taskId);
+
+    assertTaskReview(task, input.expected);
 
     const recordedAt = this.#now().toISOString();
     const confirmation: Confirmation = {
@@ -471,9 +475,13 @@ if ((taskResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey || (escalati
                   SK: taskSortKey(updatedTask),
                   entityType: "CareTask",
                 } satisfies StoredTask,
-                ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND title = :title",
+                ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND title = :title"
+                  + (input.expected ? " AND #state = :reviewState AND dueAt = :reviewDue AND lastResponse = :reviewResponse AND confirmedAt = :reviewAt AND confirmedBy = :reviewBy" : ""),
                 ExpressionAttributeNames: { "#state": "state" },
-                ExpressionAttributeValues: { ":cancelled": "cancelled", ":title": task.title },
+                ExpressionAttributeValues: { ":cancelled": "cancelled", ":title": task.title,
+                  ...(input.expected ? { ":reviewState": input.expected.state, ":reviewDue": input.expected.dueAt,
+                    ":reviewResponse": input.expected.lastResponse, ":reviewAt": input.expected.confirmedAt,
+                    ":reviewBy": input.expected.confirmedBy } : {}) },
               },
             },
           ],
@@ -484,6 +492,7 @@ if ((taskResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey || (escalati
       if (!isConditionalFailure(error)) throw error;
       const racedConfirmation = await this.#getConfirmation(input.requestId);
       if (racedConfirmation) return this.#replayed(racedConfirmation);
+      if (input.expected) throw new TaskReviewConflict();
       throw new TaskNotFoundError(input.taskId);
     }
   }

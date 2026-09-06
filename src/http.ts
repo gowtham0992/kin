@@ -22,6 +22,7 @@ import { PlanConflict, scheduleTaskBody, scheduleRoutineBody, scheduledTaskId } 
 import { routineChangeBody, RoutineConflict } from "./care-plan.js";
 import { shiftCalendarDate } from "./calendar.js";
 import { conversationBody, proposeConversation, type IntentGenerator } from "./demo-conversation.js";
+import { createConversationFocus } from "./conversation-focus.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -79,13 +80,20 @@ export function createHttpApp(
   // Never register this unauthenticated, optional paid-model route on the family surface.
   if (options.serveSimulator !== false && !options.accessAuthorizer && !familyEnabled) {
     let interpreting = false;
+    const focus = createConversationFocus();
     app.post("/demo/conversation", async (request, response) => {
       response.set("cache-control", "no-store");
       const parsed = conversationBody.safeParse(request.body);
       if (!parsed.success) { response.status(400).json({ error: "invalid_message" }); return; }
       if (interpreting) { response.status(429).json({ error: "conversation_busy" }); return; }
       interpreting = true;
-      try { response.json(await proposeConversation(parsed.data.message, await store.today(), options.demoIntentGenerator)); }
+      try {
+        const snapshot = await store.today();
+        const focusedTaskId = focus.resolve(parsed.data.contextToken, snapshot);
+        const result = await proposeConversation(parsed.data.message, snapshot, options.demoIntentGenerator, focusedTaskId);
+        response.json({ ...result, ...(result.action === "confirm"
+          ? { contextToken: focus.remember(result.task.id, result.expected) } : {}) });
+      }
       catch { response.status(503).json({ error: "conversation_unavailable" }); }
       finally { interpreting = false; }
     });
