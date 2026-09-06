@@ -3,6 +3,17 @@ const { createWorkspaceClient } = await import(new URL("../simulator/workspace-c
 const ok = (data: unknown) => ({ ok: true, json: async () => data });
 
 describe("authenticated workspace requests", () => {
+  it("retries a routine change unchanged after a lost response and clears a stale-review conflict", async () => {
+    const request = vi.fn(async (_url: string, _options: { body: string }): Promise<{ ok: boolean; status?: number }> => { throw new Error("connection lost"); });
+    const client = createWorkspaceClient({ request, newRequestId: () => "change-request" });
+    const input = { routineId: "routine", action: "cancel", confirm: true, expected: [{ id: "task", title: "Call", dueAt: "2026-09-08T12:00:00.000Z" }] };
+    await expect(client.changeRoutine(input)).rejects.toThrow("connection lost");
+    request.mockImplementation(async () => ({ ok: false, status: 409 }));
+    await expect(client.retry()).rejects.toMatchObject({ status: 409 });
+    expect(request.mock.calls[0]![1].body).toBe(request.mock.calls[1]![1].body);
+    expect(JSON.parse(request.mock.calls[0]![1].body)).not.toHaveProperty("routineId");
+    expect(client.pending).toBeNull();
+  });
   it("retries the exact routine after a partial receipt and refuses changing its dates", async () => {
     const dueAts = ["2026-09-06T12:00:00.000Z", "2026-09-07T12:00:00.000Z"];
     const request = vi.fn(async (_url: string, options: { body: string }) => {

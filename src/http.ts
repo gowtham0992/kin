@@ -19,6 +19,7 @@ import type { BrowserAuthConfig } from "./browser-auth-config.js";
 import { familyAssets } from "./family-assets.js";
 import { AccessChangeConflict, revokeAccessBody, type AccessManagement } from "./access-management.js";
 import { PlanConflict, scheduleTaskBody, scheduleRoutineBody, scheduledTaskId } from "./care-plan.js";
+import { routineChangeBody, RoutineConflict } from "./care-plan.js";
 import { shiftCalendarDate } from "./calendar.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -126,6 +127,7 @@ export function createHttpApp(
         : request.method === "POST" && request.path === "/invitations" ? "invite"
         : request.method === "POST" && request.path === "/access/revoke" ? "invite"
         : request.method === "POST" && ["/tasks", "/routines"].includes(request.path) ? "manage_plan"
+        : request.method === "POST" && /^\/routines\/care-[a-f0-9]{40}\/change$/.test(request.path) ? "manage_plan"
         : request.method === "POST" && /^\/escalations\/[^/]+\/acknowledge$/.test(request.path) ? "manage_duty"
         : request.method === "POST" && /^\/tasks\/[^/]+\/confirm$/.test(request.path) ? "confirm"
         : request.method === "PUT" && request.path === "/circle/duty" ? "manage_duty" : null;
@@ -156,6 +158,21 @@ export function createHttpApp(
       const plan = await store.activityBetween({ startDate: date, endDate: shiftCalendarDate(date, 30) });
       response.set("cache-control", "no-store").json({ startDate: plan.startDate, endDate: plan.endDate, tasks: plan.tasks });
     } catch (error) { next(error); }
+  });
+
+  app.post("/api/routines/:routineId/change", async (request, response, next) => {
+    const parsed = routineChangeBody.safeParse(request.body);
+    if (!parsed.success || !/^care-[a-f0-9]{40}$/.test(String(request.params.routineId))) { response.status(400).json({ error: "invalid_routine_change" }); return; }
+    const member = response.locals.member as Membership | undefined;
+    if (!member || member.role !== "caregiver") { response.status(403).json({ error: "family_access_denied" }); return; }
+    try {
+      const result = await store.changeRoutine({ ...parsed.data, routineId: String(request.params.routineId),
+        requestId: scheduledTaskId(member.memberId, parsed.data.requestId), actor: member.name });
+      response.set("cache-control", "no-store").json({ ...result, requestId: parsed.data.requestId });
+    } catch (error) {
+      if (error instanceof RoutineConflict) { response.status(409).json({ error: "routine_changed_refresh_required" }); return; }
+      next(error);
+    }
   });
 
   app.post("/api/routines", async (request, response, next) => {

@@ -7,13 +7,17 @@ import type {
 import { toEscalationSummary } from "./escalation.js";
 import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
 import { scheduledTask, sameScheduledTask, routineTasks, sameRoutine, type ScheduleRoutineInput, type ScheduleTaskInput } from "./care-plan.js";
+import { editableRoutineTasks, changedRoutineTask, RoutineConflict, type RoutineChange } from "./care-plan.js";
 
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
 export type ConfirmationResponse = (typeof confirmationResponses)[number];
-export type TaskState = "scheduled" | "done" | "skipped";
+export type TaskState = "scheduled" | "done" | "skipped" | "cancelled";
 
 export interface CareTask {
+  routineId?: string;
+  changedAt?: string;
+  changedBy?: string;
   id: string;
   title: string;
   dueAt: string;
@@ -77,6 +81,7 @@ export interface CareRepository {
   acknowledgeEscalation(input: { id: string; memberId: string; name: string }): Promise<EscalationSummary>;
   scheduleTask(input: ScheduleTaskInput): Promise<CareTask>;
   scheduleRoutine(input: ScheduleRoutineInput): Promise<CareTask[]>;
+  changeRoutine(input: RoutineChange): Promise<{ requestId: string; changed: number }>;
   today(): Promise<TodaySnapshot>;
   escalationSnapshot(asOf: Date): Promise<TodaySnapshot>;
   activityBetween(input: { startDate: string; endDate: string }): Promise<CareActivityWindow>;
@@ -121,6 +126,7 @@ export class TaskNotFoundError extends Error {
 export class EscalationNotFoundError extends Error { constructor() { super("Escalation not found"); } }
 
 export class InMemoryCareStore implements CareRepository {
+  readonly #routineChanges = new Map<string, { input: RoutineChange; result: { requestId: string; changed: number } }>();
   readonly #routines = new Map<string, { input: ScheduleRoutineInput; tasks: CareTask[] }>();
   readonly #tasks = new Map<string, CareTask>();
   readonly #confirmationsByRequest = new Map<string, Confirmation>();
@@ -179,10 +185,21 @@ export class InMemoryCareStore implements CareRepository {
     return structuredClone(tasks);
   }
 
+  async changeRoutine(input: RoutineChange) {
+    const receipt = this.#routineChanges.get(input.requestId);
+    if (receipt) { if (JSON.stringify(receipt.input) !== JSON.stringify(input)) throw new RoutineConflict(); return structuredClone(receipt.result); }
+    const now = this.#now();
+    const tasks = editableRoutineTasks([...this.#tasks.values()], input, now);
+    for (const task of tasks) this.#tasks.set(task.id, changedRoutineTask(task, input, now.toISOString()));
+    const result = { requestId: input.requestId, changed: tasks.length };
+    this.#routineChanges.set(input.requestId, structuredClone({ input, result }));
+    return result;
+  }
+
   async today(): Promise<TodaySnapshot> {
     const date = calendarDate(this.#now(), this.#timeZone);
     const tasks = [...this.#tasks.values()]
-      .filter((task) => calendarDate(new Date(task.dueAt), this.#timeZone) === date)
+      .filter((task) => task.state !== "cancelled" && calendarDate(new Date(task.dueAt), this.#timeZone) === date)
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
       .map((task) => structuredClone(task));
 
@@ -392,7 +409,7 @@ export class InMemoryCareStore implements CareRepository {
     }
 
     const task = this.#tasks.get(input.taskId);
-    if (!task) throw new TaskNotFoundError(input.taskId);
+    if (!task || task.state === "cancelled") throw new TaskNotFoundError(input.taskId);
 
     const recordedAt = this.#now().toISOString();
     const confirmation: Confirmation = {
@@ -476,6 +493,7 @@ function snapshotFor(
   onDuty: DutyAssignment | null,
   escalations: EscalationSummary[],
 ): TodaySnapshot {
+  tasks = tasks.filter(task => task.state !== "cancelled");
   const completed = tasks.filter((task) => task.state === "done").length;
   const skipped = tasks.filter((task) => task.state === "skipped").length;
   return {

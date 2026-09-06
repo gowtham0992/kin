@@ -200,7 +200,7 @@ function sourceFrom(activity: CareActivityWindow): WeeklyBriefSource {
   return {
     period: { startDate: activity.startDate, endDate: activity.endDate },
     stats: {
-      scheduled: activity.tasks.length,
+      scheduled: activity.tasks.filter(task => task.state !== "cancelled").length,
       completed: activity.tasks.filter((task) => task.state === "done").length,
       skipped: activity.tasks.filter((task) => task.state === "skipped").length,
       stillOpen: activity.tasks.filter((task) => task.state === "scheduled").length,
@@ -211,7 +211,7 @@ function sourceFrom(activity: CareActivityWindow): WeeklyBriefSource {
 }
 
 function taskEvidence(task: CareTask): BriefEvidence {
-  const status = task.state === "done" ? "completed" : task.state === "skipped" ? "skipped" : "still open";
+  const status = task.state === "cancelled" ? "cancelled before it was due" : task.state === "done" ? "completed" : task.state === "skipped" ? "skipped" : "still open";
   return {
     id: `task:${task.id}:${task.dueAt}`,
     kind: "care_task",

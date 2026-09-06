@@ -29,6 +29,7 @@ import type {
 import { toEscalationSummary } from "./escalation.js";
 import { calendarDate, calendarDayBounds, shiftCalendarDate, validateTimeZone } from "./calendar.js";
 import { scheduledTask, sameScheduledTask, routineTasks, sameRoutine, type ScheduleRoutineInput, type ScheduleTaskInput } from "./care-plan.js";
+import { editableRoutineTasks, RoutineConflict, type RoutineChange } from "./care-plan.js";
 
 interface DynamoSender {
   send(
@@ -160,6 +161,42 @@ export class DynamoCareRepository implements CareRepository {
       throw error;
     }
     return tasks;
+  }
+
+  async changeRoutine(input: RoutineChange) {
+    const key = { PK: this.#partitionKey(), SK: `ROUTINE_CHANGE#${input.requestId}` };
+    const read = async () => (await this.#client.send(new GetCommand({ TableName: this.#tableName, Key: key, ConsistentRead: true })) as {
+      Item?: { input: RoutineChange; result: { requestId: string; changed: number } };
+    }).Item;
+    const replay = (receipt: NonNullable<Awaited<ReturnType<typeof read>>>) => {
+      if (JSON.stringify(receipt.input) !== JSON.stringify(input)) throw new RoutineConflict();
+      return receipt.result;
+    };
+    const existing = await read(); if (existing) return replay(existing);
+    const original = (await this.#client.send(new GetCommand({ TableName: this.#tableName,
+      Key: { PK: key.PK, SK: `ROUTINE_REQUEST#${input.routineId}` }, ConsistentRead: true })) as { Item?: { tasks: CareTask[] } }).Item;
+    if (!original || original.tasks.length > 14) throw new RoutineConflict();
+    const current = await Promise.all(original.tasks.map(async task => (await this.#client.send(new GetCommand({ TableName: this.#tableName,
+      Key: { PK: key.PK, SK: taskSortKey(task) }, ConsistentRead: true })) as { Item?: CareTask }).Item));
+    if (current.some(task => !task)) throw new RoutineConflict();
+    const now = this.#now(), tasks = editableRoutineTasks(current as CareTask[], input, now);
+    const result = { requestId: input.requestId, changed: tasks.length };
+    try {
+      await this.#client.send(new TransactWriteCommand({ TransactItems: [
+        ...tasks.map(task => ({ Update: { TableName: this.#tableName, Key: { PK: key.PK, SK: taskSortKey(task) },
+          ConditionExpression: "#state = :scheduled AND lastResponse = :untouched AND title = :oldTitle AND dueAt > :now AND routineId = :routine",
+          UpdateExpression: input.action === "cancel" ? "SET #state = :value, changedAt = :now, changedBy = :actor" : "SET title = :value, changedAt = :now, changedBy = :actor",
+          ExpressionAttributeNames: { "#state": "state" },
+          ExpressionAttributeValues: { ":scheduled": "scheduled", ":untouched": null, ":oldTitle": task.title, ":now": now.toISOString(), ":routine": input.routineId,
+            ":value": input.action === "cancel" ? "cancelled" : input.title!, ":actor": input.actor },
+        } })),
+        { Put: { TableName: this.#tableName, Item: { ...key, input, result, entityType: "RoutineChange" }, ConditionExpression: "attribute_not_exists(PK)" } },
+      ] }));
+    } catch (error) {
+      if (isConditionalFailure(error)) { const receipt = await read(); if (receipt) return replay(receipt); throw new RoutineConflict(); }
+      throw error;
+    }
+    return result;
   }
 
   async today(): Promise<TodaySnapshot> {
@@ -385,7 +422,7 @@ if ((taskResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey || (escalati
     if (existing) return this.#replayed(existing);
 
     const task = await this.#findTask(input.taskId);
-    if (!task) throw new TaskNotFoundError(input.taskId);
+    if (!task || task.state === "cancelled") throw new TaskNotFoundError(input.taskId);
 
     const recordedAt = this.#now().toISOString();
     const confirmation: Confirmation = {
@@ -434,7 +471,9 @@ if ((taskResult as { LastEvaluatedKey?: unknown }).LastEvaluatedKey || (escalati
                   SK: taskSortKey(updatedTask),
                   entityType: "CareTask",
                 } satisfies StoredTask,
-                ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
+                ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND title = :title",
+                ExpressionAttributeNames: { "#state": "state" },
+                ExpressionAttributeValues: { ":cancelled": "cancelled", ":title": task.title },
               },
             },
           ],
@@ -669,6 +708,7 @@ function snapshotFor(
   onDuty: DutyAssignment | null,
   escalations: EscalationSummary[],
 ): TodaySnapshot {
+  tasks = tasks.filter(task => task.state !== "cancelled");
   const completed = tasks.filter((task) => task.state === "done").length;
   const skipped = tasks.filter((task) => task.state === "skipped").length;
   return {

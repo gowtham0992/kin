@@ -150,7 +150,9 @@ describe("DynamoCareRepository", () => {
         },
         {
           Put: {
-            ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
+            ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND title = :title",
+            ExpressionAttributeNames: { "#state": "state" },
+            ExpressionAttributeValues: { ":cancelled": "cancelled" },
           },
         },
       ],

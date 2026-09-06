@@ -9,6 +9,36 @@ const now = () => new Date("2026-10-30T08:00:00Z");
 const input = { id: "routine-test", title: "Call together", timeZone: "America/Denver",
   dueAts: ["2026-10-31T15:00:00.000Z", "2026-11-01T16:00:00.000Z", "2026-11-02T16:00:00.000Z"] };
 describe("finite daily routines", () => {
+  it("renames and cancels only untouched future occurrences, preserving responses and retry receipts", async () => {
+    const store = new InMemoryCareStore([], now);
+    const tasks = await store.scheduleRoutine(input);
+    await store.confirm({ taskId: tasks[0]!.id, response: "done", actor: "Maya", requestId: "done-first" });
+    const expected = tasks.slice(1).map(({ id, title, dueAt }) => ({ id, title, dueAt }));
+    const change = { routineId: input.id, requestId: "rename-request", action: "rename" as const, title: "Evening call", actor: "Maya", expected, confirm: true as const };
+    expect(await store.changeRoutine(change)).toEqual({ requestId: "rename-request", changed: 2 });
+    expect(await store.changeRoutine(change)).toEqual({ requestId: "rename-request", changed: 2 });
+    await expect(store.changeRoutine({ ...change, requestId: "stale-change" })).rejects.toThrow("routine changed");
+    const updated = (await store.activityBetween({ startDate: "2026-10-30", endDate: "2026-11-03" })).tasks;
+    expect(updated[0]).toMatchObject({ title: input.title, state: "done", confirmedBy: "Maya" });
+    expect(updated.slice(1).map(task => task.title)).toEqual(["Evening call", "Evening call"]);
+    const cancel = { routineId: input.id, requestId: "cancel-request", action: "cancel" as const, actor: "Maya", confirm: true as const,
+      expected: updated.slice(1).map(({ id, title, dueAt }) => ({ id, title, dueAt })) };
+    await store.changeRoutine(cancel); await store.changeRoutine(cancel);
+    expect((await store.activityBetween({ startDate: "2026-10-30", endDate: "2026-11-03" })).tasks.map(task => task.state)).toEqual(["done", "cancelled", "cancelled"]);
+    await expect(store.confirm({ taskId: tasks[1]!.id, response: "done", actor: "Maya", requestId: "late-confirm" })).rejects.toThrow("not found");
+    expect((await store.escalationSnapshot(new Date("2026-11-02T18:00:00Z"))).tasks.some(task => task.state === "cancelled")).toBe(false);
+  });
+  it("rejects review snapshots that include a response or a newly due occurrence", async () => {
+    let clock = now(); const store = new InMemoryCareStore([], () => clock);
+    const tasks = await store.scheduleRoutine(input);
+    const change = { routineId: input.id, requestId: "cancel-request", action: "cancel" as const, actor: "Maya", confirm: true as const,
+      expected: tasks.map(({ id, title, dueAt }) => ({ id, title, dueAt })) };
+    await store.confirm({ taskId: tasks[0]!.id, response: "not_yet", actor: "Maya", requestId: "not-yet" });
+    await expect(store.changeRoutine(change)).rejects.toThrow("routine changed");
+    clock = new Date("2026-11-01T16:00:00Z");
+    await expect(store.changeRoutine({ ...change, expected: change.expected.slice(1) })).rejects.toThrow("routine changed");
+    expect((await store.activityBetween({ startDate: "2026-10-30", endDate: "2026-11-03" })).tasks.every(task => task.state === "scheduled")).toBe(true);
+  });
   it("keeps local time across a daylight-saving change and creates separate task identities", () => {
     const tasks = routineTasks(input, now());
     expect(tasks.map(task => task.dueAt)).toEqual(input.dueAts);
@@ -67,5 +97,15 @@ describe("finite daily routines", () => {
     expect(replay.body).toEqual(first.body); expect(first.body.tasks).toHaveLength(3);
     await request(app).post("/api/routines").send({ ...body, title: "Different" }).expect(409);
     expect((await request(app).get("/api/plan").expect(200)).body.tasks).toHaveLength(3);
+    const routineId = first.body.tasks[0].routineId;
+    const change = { action: "cancel", expected: first.body.tasks.map(({ id, title, dueAt }: { id: string; title: string; dueAt: string }) => ({ id, title, dueAt })), requestId: "cancel-request", confirm: true };
+    await request(app).post(`/api/routines/${routineId}/change`).send({ ...change, confirm: false }).expect(400);
+    find.mockResolvedValue({ circleId: "test", memberId: "maya", name: "Maya", role: "viewer", status: "active" });
+    await request(app).post(`/api/routines/${routineId}/change`).send(change).expect(403);
+    find.mockResolvedValue({ circleId: "test", memberId: "maya", name: "Maya", role: "caregiver", status: "active" });
+    const cancelled = await request(app).post(`/api/routines/${routineId}/change`).send(change).expect(200);
+    expect(cancelled.body).toEqual({ requestId: "cancel-request", changed: 3 });
+    expect((await request(app).post(`/api/routines/${routineId}/change`).send(change).expect(200)).body).toEqual(cancelled.body);
+    await request(app).post(`/api/routines/${routineId}/change`).send({ ...change, requestId: "stale-request" }).expect(409);
   });
 });

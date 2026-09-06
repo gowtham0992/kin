@@ -38,6 +38,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       if (![401, 403].includes(error.status)) status.textContent = client.pending
         ? `Kin has not acknowledged this ${client.pendingKind}. Retry the same request below; do not submit a different one yet.`
         : "The change was not acknowledged. Refresh to check the current state before trying again.";
+      if (error.status === 409 && !client.pending) status.textContent = "The routine changed while you were reviewing it. Refresh, then review the remaining check-ins again.";
     } finally {
       if (current === revision) {
         busy = false;
@@ -137,7 +138,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       }
       due.addEventListener("change", updatePreview); repeat.addEventListener("change", updatePreview); updatePreview();
       const submit = node("button", "Save care plan", "primary"); submit.type = "submit";
-      const note = node("p", "Keep every check-in within the next 30 days. Review the dates before saving: routines cannot yet be edited or removed together. Missed check-ins may notify the caregiver on duty.", "care-note");
+      const note = node("p", "Keep every check-in within the next 30 days. You can rename or cancel future, untouched check-ins below. Time changes require a new routine. Missed check-ins may notify the caregiver on duty.", "care-note");
       form.append(titleLabel, title, dueLabel, due, repeatLabel, repeat, preview, note, submit);
       form.addEventListener("submit", event => {
         event.preventDefault(); if (!form.reportValidity()) return;
@@ -154,7 +155,34 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const list = node("ul", null, "care-plan");
     for (const task of data.tasks) { const row = node("li"), copy = node("div"); copy.append(node("h3", task.title), node("p", `${new Date(task.dueAt).toLocaleString()} · ${task.state}`, "care-note")); row.append(copy); list.append(row); }
     if (!data.tasks.length) list.append(node("li", "Your plan is empty. Start with one small, agreed-upon check-in."));
-    content.replaceChildren(heading, form, list);
+    const routines = node("section", null, "care-routines");
+    if (member.permissions.manageDuty) {
+      const groups = new Map();
+      for (const task of data.tasks) {
+        if (!task.routineId || task.state !== "scheduled" || task.lastResponse !== null || new Date(task.dueAt) <= new Date()) continue;
+        if (!groups.has(task.routineId)) groups.set(task.routineId, []);
+        groups.get(task.routineId).push(task);
+      }
+      if (groups.size) routines.append(node("h3", "Manage daily routines"), node("p", "Only future check-ins with no response can change. Completed, skipped, due, and ‘not yet’ check-ins stay in the history. This does not retract notifications already queued or sent.", "care-note"));
+      for (const [routineId, tasks] of groups) {
+        const details = node("details"), summary = node("summary", `${tasks[0].title} · ${tasks.length} future check-ins`);
+        const edit = node("form", null, "invite-panel"), label = node("label", "Check-in wording");
+        const title = node("input"); title.id = `routine-${routineId}`; title.value = tasks[0].title; title.maxLength = 120; title.required = true; label.htmlFor = title.id;
+        const actionLabel = node("label", "Change"); const action = node("select"); action.id = `action-${routineId}`; actionLabel.htmlFor = action.id;
+        action.add(new Option("Rename future check-ins", "rename")); action.add(new Option("Cancel future check-ins", "cancel"));
+        action.addEventListener("change", () => { title.disabled = action.value === "cancel"; title.required = action.value === "rename"; consent.checked = false; });
+        const confirmation = node("label", null, "consent-line"), consent = node("input"); consent.type = "checkbox"; consent.required = true;
+        confirmation.append(consent, node("span", `I reviewed this change to ${tasks.length} future check-ins. Cancellation keeps a record; it cannot be undone here.`));
+        const save = node("button", "Apply reviewed change", "secondary"); save.type = "submit";
+        edit.append(node("p", `${new Date(tasks[0].dueAt).toLocaleString()} through ${new Date(tasks.at(-1).dueAt).toLocaleString()}`, "care-note"), label, title, actionLabel, action, confirmation, save);
+        edit.addEventListener("submit", event => { event.preventDefault(); if (!edit.reportValidity()) return;
+          void mutate(() => client.changeRoutine({ routineId, action: action.value, ...(action.value === "rename" ? { title: title.value.trim() } : {}),
+            expected: tasks.map(({ id, title, dueAt }) => ({ id, title, dueAt })), confirm: true }), "Routine updated.");
+        });
+        details.append(summary, edit); routines.append(details);
+      }
+    }
+    content.replaceChildren(heading, form, routines, list);
   }
   function renderBrief(data) {
     const heading = node("div"); heading.append(node("p", `${date(data.period.startDate)} – ${date(data.period.endDate)}`, "kicker"), node("h2", data.headline), node("p", data.overview));
