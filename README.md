@@ -41,6 +41,9 @@ default off; compatible-reader/writer rollback baselines are required. The
 repository remains private. Release inputs and test evidence are recorded in
 [final local verification](docs/final-local-verification-20260913.md); a local
 source-copy check is distinguished from committed-revision and live acceptance.
+The private implementation revision `cecfe25` also passes offline installation,
+build and all 2,237 tests from an actual fresh GitHub clone. That is source
+reproducibility, not verification of the still-pending live release.
 
 ## Try one complete family-care story
 
