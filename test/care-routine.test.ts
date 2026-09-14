@@ -68,9 +68,9 @@ describe("finite daily routines", () => {
   it("saves all occurrences and the receipt in one conditional transaction, recovering a concurrent replay", async () => {
     let receipt: unknown;
     const send = vi.fn(async (command: unknown) => {
-      if (command instanceof GetCommand) return { Item: receipt };
+      if (command instanceof GetCommand) return { Item: command.input.Key?.SK === `ROUTINE_REQUEST#${input.id}` ? receipt : undefined };
       if (command instanceof TransactWriteCommand) {
-        receipt = command.input.TransactItems!.at(-1)!.Put!.Item;
+        receipt = command.input.TransactItems!.find(item => item.Put?.Item?.entityType === "RoutineRequest")!.Put!.Item;
         throw Object.assign(new Error("concurrent"), { name: "TransactionCanceledException" });
       }
       throw new Error("Unexpected command");
@@ -78,9 +78,11 @@ describe("finite daily routines", () => {
     const store = new DynamoCareRepository({ client: { send }, tableName: "test", circleId: "test", now });
     expect(await store.scheduleRoutine(input)).toHaveLength(3);
     const tx = send.mock.calls.find(([command]) => command instanceof TransactWriteCommand)![0] as TransactWriteCommand;
-    expect(tx.input.TransactItems).toHaveLength(4);
+    expect(tx.input.TransactItems).toHaveLength(5);
     expect(tx.input.TransactItems!.every(item => item.Put?.ConditionExpression === "attribute_not_exists(PK)")).toBe(true);
     expect(tx.input.TransactItems!.slice(0, 3).map(item => item.Put!.Item!.dueAt)).toEqual(input.dueAts);
+    expect(tx.input.TransactItems![3]!.Put!.Item).toMatchObject({ SK: `ROUTINE_REQUEST#${input.id}`, entityType: "RoutineRequest", input });
+    expect(tx.input.TransactItems![4]!.Put!.Item).toEqual({ PK: "CIRCLE#test", SK: "PLAN_CONTROL", entityType: "PlanControl", version: 1 });
   });
   it("requires caregiver membership, rejects extra fields, and returns a matching replay receipt", async () => {
     const store = new InMemoryCareStore([], now);

@@ -30,7 +30,8 @@ export function invitationKey(circleId: string, code: string) {
   return { PK: `CIRCLE#${circleId}`, SK: `INVITE#${createHash("sha256").update(code).digest("hex")}` };
 }
 
-// Administrative preparation only: this creates no access grant and performs no write.
+// Administrative draft only: the issuer must atomically bind it to the roster before it can be accepted.
+// This helper creates no access grant and performs no write.
 export function prepareInvitation(input: {
   circleId: string; circleName: string; issuer: string; accountId: string;
   memberId: string; name: string; role: Membership["role"];
@@ -59,7 +60,8 @@ export function createDynamoFamilyEnrollment(input: {
     if (!accountId || !parsed.success || parsed.data.circleId !== input.circleId ||
         parsed.data.targetKey !== membershipKey(input.circleId, input.issuer, accountId).SK ||
         parsed.data.status === "revoked" ||
-        (parsed.data.status === "pending" && parsed.data.expiresAt <= Math.floor(now().getTime() / 1000))) {
+        (parsed.data.status === "pending" && (parsed.data.rosterBound !== true ||
+          parsed.data.expiresAt <= Math.floor(now().getTime() / 1000)))) {
       throw new InvitationUnavailableError();
     }
     if (parsed.data.status === "accepted") {
@@ -69,7 +71,7 @@ export function createDynamoFamilyEnrollment(input: {
         throw new InvitationUnavailableError();
       }
     }
-    if (parsed.data.rosterBound && parsed.data.status === "pending") {
+    if (parsed.data.status === "pending") {
       const roster = await get({ PK: `CIRCLE#${input.circleId}`, SK: `MEMBER#${parsed.data.memberId}` }) as Record<string, unknown> | undefined;
       if (roster?.accountKey !== parsed.data.targetKey || roster.pendingInvitation !== invitationKey(input.circleId, code).SK) throw new InvitationUnavailableError();
     }
@@ -86,18 +88,18 @@ export function createDynamoFamilyEnrollment(input: {
       const accessKey = membershipKey(input.circleId, input.issuer, accountId);
       try {
         await client.send(new TransactWriteCommand({ TransactItems: [
-          ...(invitation.rosterBound ? [{ ConditionCheck: {
+          { ConditionCheck: {
             TableName: input.tableName, Key: { PK: `CIRCLE#${input.circleId}`, SK: `MEMBER#${invitation.memberId}` },
             ConditionExpression: "accountKey = :target AND pendingInvitation = :invitation",
             ExpressionAttributeValues: { ":target": accessKey.SK, ":invitation": invitationKey(input.circleId, code).SK },
-          } }] : []),
+          } },
           { Update: {
             TableName: input.tableName, Key: invitationKey(input.circleId, code),
             UpdateExpression: "SET #status = :accepted, acceptedAt = :acceptedAt, consentVersion = :consent",
-            ConditionExpression: "#status = :pending AND expiresAt > :now AND targetKey = :target AND #role = :role AND memberId = :member AND #name = :name AND circleName = :circleName",
+            ConditionExpression: "#status = :pending AND rosterBound = :bound AND expiresAt > :now AND targetKey = :target AND #role = :role AND memberId = :member AND #name = :name AND circleName = :circleName",
             ExpressionAttributeNames: { "#status": "status", "#role": "role", "#name": "name" },
             ExpressionAttributeValues: {
-              ":accepted": "accepted", ":pending": "pending", ":acceptedAt": acceptedAt,
+              ":accepted": "accepted", ":pending": "pending", ":bound": true, ":acceptedAt": acceptedAt,
               ":consent": consent, ":now": Math.floor(now().getTime() / 1000), ":target": accessKey.SK,
               ":role": invitation.role, ":member": invitation.memberId, ":name": invitation.name, ":circleName": invitation.circleName,
             },

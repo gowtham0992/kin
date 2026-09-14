@@ -41,4 +41,17 @@ describe("OAuth secret loading", () => {
     await expect(loadOAuthSecrets({ secretId: "secret", client: { send: incomplete } }))
       .rejects.toThrow("does not match schema");
   });
+
+  it("accepts a separate optional Echo client without changing schema version one", async () => {
+    const withEcho = { ...validSecret, echoClient: { clientId: "kin-classic-echo-client", clientSecret: "f".repeat(32) } };
+    const send = async (): Promise<GetSecretValueCommandOutput> => ({ SecretString: JSON.stringify(withEcho), $metadata: {} });
+    await expect(loadOAuthSecrets({ secretId: "synthetic-secret", client: { send } })).resolves.toEqual(withEcho);
+  });
+
+  it("rejects incomplete optional Echo credentials without disclosing them", async () => {
+    const send = async (): Promise<GetSecretValueCommandOutput> => ({
+      SecretString: JSON.stringify({ ...validSecret, echoClient: { clientId: "kin-classic-echo-client", clientSecret: "short-echo-secret" } }), $metadata: {},
+    });
+    await expect(loadOAuthSecrets({ secretId: "synthetic-secret", client: { send } })).rejects.toThrow("OAuth secret does not match schema version 1");
+  });
 });

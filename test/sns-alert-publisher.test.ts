@@ -34,11 +34,12 @@ describe("SnsAlertPublisher", () => {
 
     expect(result).toEqual({ messageId: "message-1" });
     expect(commands[0]?.input).toMatchObject({
-      Message: "A scheduled Kin check-in was missed. Open Kin to see the shared family update.",
+      Message: "A Kin check-in needs family follow-up. Open Kin to see the shared family update.",
       MessageAttributes: {
         onDutyMemberId: { StringValue: "theo" },
       },
     });
     expect(commands[0]?.input.Message).not.toContain("Drink a glass of water");
+    expect(commands[0]?.input.Message).not.toContain("missed");
   });
 });

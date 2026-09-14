@@ -100,16 +100,21 @@ describe("Kin HTTP surface", () => {
   });
 
   it("serves an evidence-linked weekly brief without caching family state", async () => {
-    const response = await request(createHttpApp(createDemoStore(fixedNow)))
-      .get("/api/weekly-brief");
-
-    expect(response.status).toBe(200);
-    expect(response.headers["cache-control"]).toBe("no-store");
-    expect(response.body).toMatchObject({
-      generatedBy: "deterministic",
-      stats: { scheduled: 2, completed: 0 },
-    });
-    expect(response.body.safetyNotice).toContain("not medical advice");
+    // The service clock must stay inside the fixture's activity window too.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-02T23:00:00.000Z"));
+    try {
+      const response = await request(createHttpApp(createDemoStore(fixedNow)))
+        .get("/api/weekly-brief");
+      expect(response.status).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.body).toMatchObject({
+        generatedBy: "deterministic",
+        period: { endDate: "2026-09-02" },
+        stats: { scheduled: 2, completed: 0 },
+      });
+      expect(response.body.safetyNotice).toContain("not medical advice");
+    } finally { vi.useRealTimers(); }
   });
 
   it("does not expose escalation delivery internals in the public snapshot", async () => {
@@ -141,6 +146,8 @@ describe("Kin HTTP surface", () => {
       dueAt: event.dueAt,
       updatedAt: now.toISOString(),
       recipientMemberName: "Theo",
+      recipientMemberId: "theo",
+      sentAt: now.toISOString(),
       status: "sent",
     });
     expect(JSON.stringify(response.body)).not.toContain("private-provider-id");
@@ -200,11 +207,11 @@ describe("Kin HTTP surface", () => {
     });
   });
 
-  it("requires service scope for MCP discovery without advertising a challenge", async () => {
+  it("requires a verified token for MCP discovery without advertising an Alexa challenge", async () => {
     const authorizer: AccessAuthorizer = {
       async authorize(header, scopes) {
         expect(header).toBeUndefined();
-        expect(scopes).toEqual([alexaScopes.service]);
+        expect(scopes).toEqual([]);
         throw new AccessDeniedError(401, "invalid_token");
       },
     };

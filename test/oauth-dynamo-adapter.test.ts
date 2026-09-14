@@ -121,6 +121,8 @@ describe("Dynamo OAuth adapter", () => {
     expect(consume).toBeInstanceOf(UpdateCommand);
     if (!(consume instanceof UpdateCommand)) throw new Error("Expected update");
     expect(consume.input.ExpressionAttributeValues?.[":consumed"]).toBe(1_788_487_200);
+    expect(consume.input.ConditionExpression).toBe("attribute_exists(PK) AND attribute_not_exists(#payload.#consumed) AND (attribute_not_exists(#expiresAt) OR #expiresAt > :consumed)");
+    expect(consume.input.ExpressionAttributeNames).toEqual({ "#payload": "payload", "#consumed": "consumed", "#expiresAt": "expiresAt" });
     const transactions = send.mock.calls
       .map(([command]) => command)
       .filter((command) => command instanceof TransactWriteCommand);

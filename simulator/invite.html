@@ -6,20 +6,29 @@
     <meta name="referrer" content="no-referrer" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <title>Your family workspace — Kin</title>
+    <meta name="theme-color" content="#20352e" />
+    <link rel="manifest" href="/kin.webmanifest" />
+    <link rel="icon" href="/kin-icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/invite.css" />
     <link rel="stylesheet" href="/workspace.css" />
+    <link rel="stylesheet" href="/conversation.css" />
     <script type="module" src="/invite.js"></script>
+    <script type="module" src="/install.js"></script>
   </head>
-  <body>
-    <header class="site-header"><a class="brand" href="/" aria-label="Kin home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>kin</span></a><a class="back-link" href="/">Kin home</a></header>
-    <main class="invite-page">
-      <section class="invite-intro"><p class="kicker">Your family circle</p><h1>A little closer. <br /><em>Even from here.</em></h1><p>A shared plan, a thoughtful handoff, and one place to catch up.</p></section>
-      <div class="workspace-session"><p id="workspace-identity"></p><button id="browser-signin" class="primary" type="button" hidden>Sign in to Kin</button><button id="browser-disconnect" class="secondary" type="button" hidden>Close this workspace session</button></div>
+  <body class="workspace-page">
+    <a id="workspace-skip" class="workspace-skip" href="#workspace-main">Skip to content</a>
+    <header class="site-header"><a class="brand" href="/" aria-label="Kin home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>kin</span></a><a class="back-link" href="/">Switch experience <span aria-hidden="true">↗</span></a></header>
+    <main id="workspace-main" class="invite-page" tabindex="-1">
+      <section class="invite-intro"><p class="kicker">Your family circle</p><h1>A familiar place. <br /><em>Your people, here.</em></h1><p>Sign in to check in, share the day, or catch up on your family’s plan.</p><p class="workspace-simulation-note">The browser conversation is a simulated Alexa+ experience backed by real MCP. A separate classic Alexa development skill connects linked test Echo devices.</p></section>
+      <div class="workspace-session"><p id="workspace-identity"></p><button id="browser-signin" class="primary" type="button" hidden>Sign in to Kin</button><details class="workspace-account"><summary>Your session</summary><button id="browser-disconnect" class="secondary" type="button" hidden>Close this workspace session</button><p>Closes this browser session. Your circle membership stays the same.</p></details></div>
       <p id="invite-status" role="status">Checking access…</p>
       <button id="invite-reload" class="secondary" type="button" hidden>Check again</button>
-      <nav id="workspace-nav" class="workspace-nav" aria-label="Family workspace" hidden><a href="#today">Today</a><a id="workspace-ask-link" href="#ask" hidden>Ask Kin</a><a href="#plan">Plan</a><a href="#circle">Circle</a><a href="#week">Week</a><a id="workspace-invite-link" href="#invite" hidden>Invite family</a><a id="workspace-access-link" href="#access" hidden>Access</a></nav>
-      <section id="workspace" hidden aria-label="Shared family care"><p id="workspace-status" role="status"></p><div class="care-actions"><button id="workspace-refresh" class="secondary" type="button">Refresh</button><button id="workspace-retry-write" class="primary" type="button" hidden>Retry the same check-in</button></div><div id="workspace-content"></div></section>
+      <div id="workspace-navigation" class="workspace-navigation" hidden>
+        <nav id="workspace-nav" class="workspace-nav" aria-label="Family workspace" hidden><a href="#today">Today</a><a href="#plan">Plan</a><a href="#turns">Turns</a><a href="#week">Week</a></nav>
+        <nav id="workspace-secondary" class="workspace-secondary" aria-label="Other workspace actions" hidden><a id="workspace-ask-link" href="#ask" hidden>Ask Kin</a><details id="workspace-management" class="workspace-management" hidden><summary>Manage circle</summary><div><a id="workspace-invite-link" href="#invite" hidden>Invite family</a><a id="workspace-access-link" href="#access" hidden>Access</a></div></details></nav>
+      </div>
+      <section id="workspace" hidden aria-label="Shared family care"><div class="workspace-updates"><p id="workspace-status" role="status"></p><div class="care-actions"><button id="workspace-refresh" class="secondary" type="button">Refresh</button><button id="workspace-retry-write" class="primary" type="button" hidden>Retry the same check-in</button></div></div><div id="workspace-content" tabindex="-1"></div></section>
       <div id="invitation-area" class="invite-layout" hidden>
         <section class="invite-panel" aria-labelledby="invite-title">
           <p class="kicker">01 / Invite a family member</p><h2 id="invite-title">Make room for someone.</h2>
@@ -38,15 +47,17 @@
           </form>
           <section id="invite-result" tabindex="-1" hidden aria-labelledby="result-title">
             <p class="kicker">02 / Share privately</p><h2 id="result-title">Ready for their yes.</h2>
-            <p id="invite-summary"></p><p>Share this code directly with the intended person. They review the permissions and accept it when linking Alexa. No access has been granted yet.</p>
+            <p id="invite-summary"></p><p>Share this code and the Kin workspace address directly with the intended person. They sign in to Kin, choose Review invitation, and review their permissions before accepting. No access has been granted yet.</p>
             <label for="invite-code">Invitation code</label><textarea id="invite-code" readonly rows="2" spellcheck="false" autocomplete="off"></textarea>
             <p id="invite-expiry" class="field-note"></p>
             <div class="invite-actions"><button id="invite-copy" class="primary" type="button">Copy code</button><button id="invite-clear" class="secondary" type="button">Clear from this screen</button></div>
             <p id="copy-status" role="status"></p><p class="field-note">Keep it somewhere private before leaving. Kin does not save the readable code. Clearing this screen does not revoke it.</p>
           </section>
         </section>
-        <aside class="invite-aside"><p class="kicker">A thoughtful handoff</p><h2>One invitation.<br />Their decision.</h2><ol><li><strong>You choose the person.</strong><p>The code is tied to their verified account, not whoever happens to receive it.</p></li><li><strong>They choose to join.</strong><p>Creating a code does not grant access. Joining requires their explicit acceptance.</p></li><li><strong>Care stays in the circle.</strong><p>No invitation grants organizer privileges. Disconnecting Alexa does not remove family membership.</p></li></ol><p class="aside-note">Use Access to review account memberships or revoke a non-organizer’s access.</p></aside>
+        <aside class="invite-aside"><p class="kicker">A thoughtful handoff</p><h2>One invitation.<br />Their decision.</h2><ol><li><strong>You choose the person.</strong><p>The code is tied to their verified account, not whoever happens to receive it.</p></li><li><strong>They choose to join.</strong><p>Creating a code does not grant access. Joining requires their explicit acceptance.</p></li><li><strong>Care stays in the circle.</strong><p>No invitation grants organizer privileges. Closing a workspace session does not remove family membership.</p></li></ol><p class="aside-note">Use Access to review account memberships or revoke a non-organizer’s access.</p></aside>
       </div>
+      <section id="workspace-push" class="kin-trust-link" hidden aria-label="Notification settings"></section>
+      <footer class="kin-trust-link"><a href="/how-kin-works.html" target="_blank" rel="noopener noreferrer">How Kin works <span class="care-note">(opens in a new tab)</span></a><details><summary>Keep Kin on your home screen</summary><p>On iPhone, open Kin in Safari, choose Share, then Add to Home Screen. On Android, use your browser’s Install app or Add to Home screen option.</p><button id="install-kin" type="button" class="secondary" hidden>Install Kin</button><p id="install-status" role="status">Your plan needs a connection. Installation does not turn on notifications.</p></details></footer>
     </main>
   </body>
 </html>

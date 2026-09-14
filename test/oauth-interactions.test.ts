@@ -1,16 +1,18 @@
 import express, { type Request, type Response } from "express";
+import { GetCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import type Provider from "oidc-provider";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { InvalidCredentialsError, NewPasswordRequiredError } from "../src/cognito-authenticator.js";
 import { createOAuthInteractionRouter } from "../src/oauth-interactions.js";
-import { familyConsentVersion, type FamilyEnrollment, type Invitation } from "../src/invitations.js";
+import { createDynamoFamilyEnrollment, familyConsentVersion, invitationKey, type FamilyEnrollment, type Invitation } from "../src/invitations.js";
+import { membershipKey } from "../src/membership.js";
 
 const uid = "interaction-123";
 const resourceUri = "https://example.execute-api.us-east-1.amazonaws.com/mcp";
 const csrfSecret = "a-secure-interaction-secret-that-is-long-enough";
 
-function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrollment) {
+function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrollment, browser = false) {
   const details = {
     uid,
     prompt: {
@@ -21,7 +23,7 @@ function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrol
         } as Record<string, string[]>,
       } : {},
     },
-    params: { client_id: "alexa-user-client" },
+    params: { client_id: browser ? "kin-family-browser" : "alexa-user-client" },
     session: prompt === "consent" ? { accountId: "family-account" } : undefined,
   };
   const addResourceScope = vi.fn();
@@ -56,6 +58,7 @@ function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrol
     resourceUri,
     csrfSecret,
     enrollment,
+    browserClientId: "kin-family-browser",
   }));
   app.use((_error: unknown, _request: Request, response: Response, _next: unknown) => {
     response.status(500).send("Something went wrong");
@@ -69,7 +72,133 @@ function csrfFrom(html: string) {
   return match[1];
 }
 
+function storedEnrollment(rosterBound: boolean) {
+  const circleId = "family-a", issuer = new URL(resourceUri).origin, code = "b".repeat(43);
+  const now = () => new Date("2026-09-07T12:00:00Z");
+  const accessKey = membershipKey(circleId, issuer, "family-account");
+  const invitation: Invitation = { circleId, circleName: "Synthetic family", memberId: "maya", name: "Maya", role: "viewer",
+    targetKey: accessKey.SK, status: "pending", expiresAt: Math.floor(now().getTime() / 1000) + 3600,
+    ...(rosterBound ? { rosterBound: true } : {}) };
+  const inviteKey = invitationKey(circleId, code);
+  const rows = new Map<string, Record<string, unknown>>([
+    [inviteKey.SK, { ...inviteKey, ...invitation }],
+    ["MEMBER#maya", { PK: accessKey.PK, SK: "MEMBER#maya", entityType: "CircleMember", id: "maya", name: "Maya",
+      relationship: "daughter", canReceiveAlerts: false,
+      ...(rosterBound ? { accountKey: accessKey.SK, pendingInvitation: inviteKey.SK } : {}) }],
+  ]);
+  // Keep the real enrollment service and router; only the SDK transport is synthetic.
+  const send = vi.fn(async (command: GetCommand | TransactWriteCommand) => {
+    if (command instanceof GetCommand) return { Item: structuredClone(rows.get(String(command.input.Key?.SK))) };
+    const items = command.input.TransactItems ?? [];
+    for (const item of items) {
+      if (item.Put && rows.has(String(item.Put.Item?.SK))) throw Object.assign(new Error("Synthetic existing account"), { name: "TransactionCanceledException" });
+    }
+    for (const item of items) {
+      if (item.Put?.Item) rows.set(String(item.Put.Item.SK), structuredClone(item.Put.Item));
+      if (item.Update?.Key?.SK === inviteKey.SK) Object.assign(rows.get(inviteKey.SK)!, {
+        status: item.Update.ExpressionAttributeValues?.[":accepted"],
+        acceptedAt: item.Update.ExpressionAttributeValues?.[":acceptedAt"],
+        consentVersion: item.Update.ExpressionAttributeValues?.[":consent"],
+      });
+    }
+    return {};
+  });
+  const enrollment = createDynamoFamilyEnrollment({ tableName: "synthetic-care", circleId, issuer, now, client: { send } });
+  return { ...fixture("consent", enrollment), code, rows, accessKey, inviteKey, send };
+}
+
 describe("OAuth account-linking interaction", () => {
+  it("reviews a pasted invitation on Open workspace without granting access until separate consent", async () => {
+    const { app, code, rows, accessKey, save, interactionFinished } = storedEnrollment(true);
+    const initial = await request(app).get(`/interaction/${uid}`).expect(200);
+    const csrf = csrfFrom(initial.text);
+    const reviewed = await request(app).post(`/interaction/${uid}/consent`).type("form")
+      .send({ csrf, invitation: code }).expect(200);
+    expect(reviewed.text).toContain("A place in the circle");
+    expect(reviewed.text).toContain('name="familyConsent"');
+    expect(reviewed.text).toContain('name="invitationProof"');
+    expect(rows.has(accessKey.SK)).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+    expect(interactionFinished).not.toHaveBeenCalled();
+    const proof = reviewed.text.match(/name="invitationProof" value="([^"]+)"/)?.[1];
+    await request(app).post(`/interaction/${uid}/consent`).type("form")
+      .send({ csrf, invitation: code, invitationProof: proof, familyConsent: familyConsentVersion }).expect(303);
+    expect(rows.get(accessKey.SK)).toMatchObject({ status: "active", role: "viewer" });
+  });
+
+  it("names the browser workspace when reviewing a browser invitation, without claiming Alexa access", async () => {
+    const invitation: Invitation = { circleId: "family-a", circleName: "Evelyn's family", memberId: "maya", name: "Maya", role: "viewer", targetKey: "ACCESS#" + "a".repeat(64), expiresAt: 9999999999, status: "pending" };
+    const enrollment = { review: vi.fn(async () => invitation), accept: vi.fn(async () => {}) };
+    const { app, save } = fixture("consent", enrollment, true);
+    const initial = await request(app).get(`/interaction/${uid}`).expect(200);
+    expect(initial.text).toContain("Open your family workspace");
+    const reviewed = await request(app).post(`/interaction/${uid}/invitation`).type("form")
+      .send({ csrf: csrfFrom(initial.text), invitation: "a".repeat(43) }).expect(200);
+    expect(reviewed.text).toContain("Join circle and open workspace");
+    expect(reviewed.text).toContain("Check who you are joining and what you can do. Accepting opens this browser workspace within your family permissions.");
+    expect(reviewed.text).not.toMatch(/Alexa|voice confirmations/);
+    expect(reviewed.text).toContain('name="familyConsent"');
+    expect(enrollment.accept).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
+  });
+
+  it("gives neutral recovery instructions for invalid requests from the browser and Alexa clients", async () => {
+    for (const browser of [false, true]) {
+      const { app, authenticate } = fixture("login", undefined, browser);
+      const rejected = await request(app).post(`/interaction/${uid}/login`).type("form")
+        .send({ csrf: "forged", username: "owner@example.com", password: "irrelevant password" }).expect(400);
+      expect(rejected.text).toBe("This authorization request is no longer valid. Return to the app where you started and sign in again.");
+      expect(authenticate).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects pending unbound invitations through real enrollment without offering or granting membership", async () => {
+    const { app, code, send, rows, accessKey, inviteKey, save, interactionFinished } = storedEnrollment(false);
+    const initial = await request(app).get(`/interaction/${uid}`).expect(200);
+    const csrf = csrfFrom(initial.text);
+    const review = await request(app).post(`/interaction/${uid}/invitation`).type("form").send({ csrf, invitation: code }).expect(400);
+    expect(review.text).toContain("This invitation is unavailable");
+    expect(review.text).not.toContain('name="familyConsent"');
+    expect(review.text).not.toContain('name="invitationProof"');
+    expect(review.text).not.toContain("Join circle and connect");
+    const forged = await request(app).post(`/interaction/${uid}/consent`).type("form")
+      .send({ csrf, invitation: code, invitationProof: "f".repeat(64), familyConsent: familyConsentVersion }).expect(400);
+    expect(forged.text).toContain("This invitation is unavailable");
+    expect(send.mock.calls.some(([command]) => command instanceof TransactWriteCommand)).toBe(false);
+    expect(rows.has(accessKey.SK)).toBe(false); expect(rows.get(inviteKey.SK)?.status).toBe("pending");
+    expect(save).not.toHaveBeenCalled(); expect(interactionFinished).not.toHaveBeenCalled();
+  });
+
+  it("accepts a roster-bound invitation through real review, proof and consent before saving its OAuth grant", async () => {
+    const { app, code, send, rows, accessKey, inviteKey, save, interactionFinished } = storedEnrollment(true);
+    const initial = await request(app).get(`/interaction/${uid}`).expect(200);
+    const csrf = csrfFrom(initial.text);
+    const reviewed = await request(app).post(`/interaction/${uid}/invitation`).type("form").send({ csrf, invitation: code }).expect(200);
+    expect(reviewed.text).toContain("Join circle and connect");
+    expect(reviewed.text).toContain('name="familyConsent"');
+    expect(reviewed.text).toContain("You cannot confirm tasks");
+    const proof = reviewed.text.match(/name="invitationProof" value="([^"]+)"/)?.[1];
+    expect(proof).toMatch(/^[a-f0-9]{64}$/);
+    const form = { csrf, invitation: code, invitationProof: proof, familyConsent: familyConsentVersion };
+    await request(app).post(`/interaction/${uid}/consent`).type("form").send({ ...form, familyConsent: "" }).expect(400);
+    await request(app).post(`/interaction/${uid}/consent`).type("form").send({ ...form, invitationProof: "f".repeat(64) }).expect(400);
+    expect(rows.has(accessKey.SK)).toBe(false); expect(save).not.toHaveBeenCalled();
+    save.mockImplementation(async () => {
+      expect(rows.get(accessKey.SK)).toMatchObject({ memberId: "maya", name: "Maya", role: "viewer", status: "active",
+        acceptedInvitation: inviteKey.SK, consentVersion: familyConsentVersion });
+      return "grant-123";
+    });
+    await request(app).post(`/interaction/${uid}/consent`).type("form").send(form).expect(303).expect("Location", "/resume");
+    const transactions = send.mock.calls.map(([command]) => command).filter(command => command instanceof TransactWriteCommand);
+    expect(transactions).toHaveLength(1);
+    const items = transactions[0]!.input.TransactItems!;
+    expect(items).toHaveLength(3);
+    expect(items[0]?.ConditionCheck).toMatchObject({ Key: { PK: accessKey.PK, SK: "MEMBER#maya" } });
+    expect(items[2]?.Put).toMatchObject({ ConditionExpression: "attribute_not_exists(PK)", Item: { ...accessKey, memberId: "maya", role: "viewer" } });
+    expect(rows.get(accessKey.SK)).not.toHaveProperty("canInvite");
+    expect(rows.get(inviteKey.SK)?.status).toBe("accepted");
+    expect(save).toHaveBeenCalledOnce(); expect(interactionFinished).toHaveBeenCalledOnce();
+  });
+
   it("renders password setup without retaining secrets and rejects mismatched or forged submissions", async () => {
     const { app, authenticate, interactionFinished } = fixture();
     authenticate.mockRejectedValueOnce(new NewPasswordRequiredError());
@@ -147,7 +276,7 @@ describe("OAuth account-linking interaction", () => {
     expect(interactionFinished).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      { login: { accountId: "family-account" } },
+      { login: { accountId: "family-account", ts: expect.any(Number) } },
       { mergeWithLastSubmission: false },
     );
   });

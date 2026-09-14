@@ -8,6 +8,9 @@ export const taskReviewSchema = z.object({
   confirmedAt: z.string().datetime().nullable(), confirmedBy: z.string().nullable(),
 }).strict();
 export type TaskReview = z.infer<typeof taskReviewSchema>;
+export class TaskReviewRequired extends Error {
+  constructor() { super("Review the current task before confirming. The reviewed task state is required."); }
+}
 export class TaskReviewConflict extends Error {
   constructor() { super("The task changed after review. Review the current task before confirming."); }
 }

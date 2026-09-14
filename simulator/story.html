@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f2ede2" />
+    <title>Kin — A little care, shared</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/story.css" />
+    <script type="module" src="/story.js"></script>
+  </head>
+  <body class="story-page">
+    <header class="site-header">
+      <a class="brand" href="/story.html" aria-label="Kin story home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>kin</span></a>
+      <span class="story-badge">Simulated Alexa+ experience · real MCP</span>
+    </header>
+    <main id="story-root">
+      <section class="story-intro" aria-labelledby="story-heading">
+        <div><p class="kicker">One family. One shared plan.</p><h1 id="story-heading">Kin in the kitchen.</h1></div>
+        <p class="story-lede">Evelyn checks in. Theo catches up.<br /> A small reply brings the family a little closer.</p>
+      </section>
+      <p class="story-disclosure"><strong>Local demonstration.</strong> Synthetic people, clock and notifications. No live Alexa or SMS connection.</p>
+      <section id="story-unavailable" class="story-notice" role="status"><h2 id="story-unavailable-heading">Opening the local story…</h2><p id="story-unavailable-copy">Checking that this is the isolated demonstration server before reading any care data.</p><button id="story-reconnect" type="button" hidden>Try the local story again</button></section>
+      <div id="story-app" hidden>
+        <p id="story-status" class="story-status" role="status" aria-live="polite"></p>
+        <button id="story-retry" type="button" class="story-retry" hidden>Retry the same request</button>
+        <nav class="story-jump-nav" aria-label="Jump between story views"><a href="#parent-heading">Parent check-in</a><a href="#caregiver-heading">Family view</a></nav>
+        <div class="story-scenes">
+          <section class="story-parent" aria-labelledby="parent-heading">
+            <header class="story-scene-heading"><div><p class="kicker">Evelyn’s kitchen</p><h2 id="parent-heading" tabindex="-1">How did it go?</h2></div><span class="story-initial" aria-hidden="true">E</span></header>
+            <p class="story-parent-caption">One check-in. In your own time.</p>
+            <div id="story-parent-plan" class="story-parent-plan" aria-live="polite"><p>Reading today’s shared plan…</p></div>
+            <ol id="story-transcript" class="story-transcript" aria-label="Simulated conversation" aria-live="polite"></ol>
+            <form id="story-form" class="story-form">
+              <div class="story-voice">
+                <div class="story-input-actions"><button id="story-voice-start" type="button" aria-describedby="story-voice-disclosure story-voice-status" disabled><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg><span>Use voice input</span></button><button id="story-voice-stop" type="button" hidden>Stop listening</button><button id="story-voice-cancel" type="button" hidden>Cancel dictation</button></div>
+                <p id="story-voice-status" class="story-note" role="status" aria-live="polite"></p>
+                <p id="story-voice-disclosure" class="story-note">Your browser’s speech service may send audio to its provider. Kin receives only text when you review. The microphone starts only when you choose Use voice input.</p>
+              </div>
+              <div class="story-draft">
+                <label for="story-message">Or type your reply</label>
+                <textarea id="story-message" rows="2" maxlength="800" placeholder="I already had my water" aria-describedby="story-message-hint" disabled></textarea>
+                <div id="story-suggestions" class="story-suggestions" aria-label="Draft an example"><button type="button" data-prompt="Show today" disabled>Show today</button><button type="button" data-prompt="Not yet: Drink a glass of water" disabled>Not yet</button><button type="button" data-prompt="Done: Drink a glass of water" disabled>Done</button></div>
+                <p id="story-message-hint" class="story-note">These examples fill your draft. Review it first; confirm separately to save.</p>
+              </div>
+              <div id="story-model-options" class="story-model-options" hidden>
+                <label class="story-model-choice" for="story-model-consent"><input id="story-model-consent" type="checkbox" aria-describedby="story-model-disclosure story-model-budget" disabled /><span>Use Nova for this request</span></label>
+                <p id="story-model-disclosure" class="story-note">When checked, Review with Nova sends this draft and synthetic task titles to Amazon Bedrock for interpretation. This is optional, may use AWS credits, and cannot save a check-in. Use only synthetic details here.</p>
+                <p id="story-model-budget" class="story-note"></p>
+              </div>
+              <button id="story-submit" type="submit" class="story-primary" disabled>Review request</button>
+            </form>
+            <section id="story-review" class="story-review" aria-labelledby="story-review-heading" hidden><h3 id="story-review-heading">Review Evelyn’s reply</h3><p id="story-proposal"></p><p class="story-note">This records a reported response, not proof of safety.</p><div class="story-review-actions"><button id="story-confirm" type="button" class="story-primary" disabled>Confirm this check-in</button><button id="story-cancel" type="button" disabled>Leave unchanged</button></div></section>
+            <details class="story-input-help"><summary>How this conversation works</summary><p id="story-dialogue-mode" class="story-note">Simple check-in replies stay local. Checking which optional inputs this story server supports…</p><p class="story-note">Try “I already had my water,” or “I haven't had my water yet.” Kin will ask which check-in you mean if it is unclear. You review and confirm before anything is saved. Voice input is optional dictation, not a connection to Alexa. Nova interpretation, when available, needs a separate choice for each request.</p></details>
+          </section>
+          <section class="story-caregiver" aria-labelledby="caregiver-heading">
+            <header class="story-scene-heading"><div><p class="kicker">Across town · family view</p><h2 id="caregiver-heading" tabindex="-1">Theo’s turn.</h2></div><span class="story-initial" aria-hidden="true">T</span></header>
+            <p class="story-note">The same shared plan, checked every 5 seconds while this page is visible.</p>
+            <div class="story-family-status"><p id="story-family-sync" role="status">Waiting for the first family update…</p><button id="story-refresh" type="button" disabled>Refresh family view</button></div>
+            <p id="story-duty" class="story-duty"></p>
+            <ul id="story-care-plan" class="story-care-plan" aria-label="Today’s shared check-ins"></ul>
+            <section class="story-follow-ups" aria-labelledby="story-follow-ups-heading"><h3 id="story-follow-ups-heading">Family follow-up</h3><div id="story-alerts"></div><p class="story-note">A caregiver acknowledgment means the follow-up was seen. It does not complete Evelyn’s check-in or confirm her safety.</p></section>
+          </section>
+        </div>
+        <section class="story-controls" aria-label="Demonstration clock">
+          <div><p class="kicker">Explore a missed check-in</p><p id="story-clock" class="story-clock">—</p><p id="story-step" class="story-note"></p></div>
+          <div class="story-control-actions"><button id="story-advance" type="button" disabled>Advance demo clock to 9:31 AM</button><p class="story-note">One explicit time jump. Restart the local server for a fresh story.</p></div>
+        </section>
+        <section class="story-week" aria-labelledby="story-week-heading"><div class="story-week-intro"><p class="kicker">03 · Something useful to bring along</p><h2 id="story-week-heading">The week, in their words.</h2><p>Read a coordination brief grounded in six days of synthetic history and today’s recorded activity. It is not medical advice.</p><button id="story-brief" type="button" disabled>Read the weekly brief</button></div><div id="story-brief-result" class="story-brief-result" aria-live="polite"><p class="story-note">The brief is generated only when you ask. Its source facts will appear here.</p></div></section>
+        <details class="story-evidence"><summary>Behind the scenes · MCP evidence <span id="story-evidence-count">0 events</span></summary><p class="story-note">The parent reads and confirms through MCP. The family companion makes a separate REST read of the same local care store. Observed client events only: the latest 12 stay in this page’s memory; request content is not listed. Receipt IDs identify same-request retries; RPC IDs may repeat across connections. Local timings are not Alexa-device latency.</p><ol id="story-evidence-list"></ol></details>
+      </div>
+      <footer class="story-footer">Kin coordinates what a family reports. It is not emergency monitoring or a substitute for speaking with each other.</footer>
+    </main>
+  </body>
+</html>

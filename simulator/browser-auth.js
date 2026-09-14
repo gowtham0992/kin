@@ -1,6 +1,9 @@
 const pendingKey = "kin.browser-login";
 const fail = () => Object.assign(new Error("Sign-in could not be completed. Start again."), { status: 401 });
 const encode = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const workspaceViews = new Set(["ask", "today", "plan", "circle", "week", "invite", "access"]);
+// Store only a view name, never a destination URL or an arbitrary fragment.
+const entryView = value => typeof value === "string" && workspaceViews.has(value) ? value : "today";
 
 export function createBrowserAuth({ config, origin, storage, request = fetch, cryptoApi = crypto, now = Date.now }) {
   const base = new URL(origin);
@@ -9,24 +12,33 @@ export function createBrowserAuth({ config, origin, storage, request = fetch, cr
   let token = null;
   let expiresAt = 0;
   let generation = 0;
+  let returnView = null;
   return {
     get connected() { return !!token && now() < expiresAt; },
-    async start() {
+    get returnView() { return returnView; },
+    async start(view = "today") {
       token = null;
+      expiresAt = 0;
+      returnView = null;
       generation += 1;
+      const revision = generation;
+      storage.removeItem(pendingKey);
       const state = encode(cryptoApi.getRandomValues(new Uint8Array(32)));
       const verifier = encode(cryptoApi.getRandomValues(new Uint8Array(32)));
       const challenge = encode(new Uint8Array(await cryptoApi.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-      storage.setItem(pendingKey, JSON.stringify({ state, verifier, createdAt: now(), clientId: config.clientId }));
+      if (revision !== generation) throw fail();
+      storage.setItem(pendingKey, JSON.stringify({ state, verifier, createdAt: now(), clientId: config.clientId, returnView: entryView(view) }));
       const url = new URL("/auth", origin);
       url.search = new URLSearchParams({ client_id: config.clientId, redirect_uri: config.redirectUri,
         response_type: "code", scope: "mcp:tools mcp:resources", resource: config.resource,
-        state, code_challenge: challenge, code_challenge_method: "S256", prompt: "login" }).toString();
+        // Returning accounts still need connection review to enter a newly issued invitation.
+        state, code_challenge: challenge, code_challenge_method: "S256", prompt: "login consent" }).toString();
       return url.href;
     },
     async complete(urlInput) {
       const url = new URL(urlInput);
       if (!url.searchParams.has("code") && !url.searchParams.has("error")) return false;
+      returnView = null;
       const saved = storage.getItem(pendingKey);
       storage.removeItem(pendingKey);
       const pending = saved ? JSON.parse(saved) : null;
@@ -52,20 +64,22 @@ export function createBrowserAuth({ config, origin, storage, request = fetch, cr
           !String(result.scope ?? "").split(" ").includes("mcp:tools")) throw fail();
       token = result.access_token;
       expiresAt = now() + result.expires_in * 1000;
+      returnView = entryView(pending.returnView);
       return true;
     },
-    disconnect() { generation += 1; token = null; expiresAt = 0; storage.removeItem(pendingKey); },
-    suspend() { generation += 1; token = null; expiresAt = 0; },
+    disconnect() { generation += 1; token = null; expiresAt = 0; returnView = null; storage.removeItem(pendingKey); },
+    suspend() { generation += 1; token = null; expiresAt = 0; returnView = null; },
     async request(path, options = {}) {
       const target = new URL(path, origin);
-      if (target.origin !== base.origin || !target.pathname.startsWith("/api/") || target.username || target.password ||
+      const mcp = target.href === config.resource && ["POST", "DELETE"].includes(String(options.method ?? "GET").toUpperCase());
+      if (target.origin !== base.origin || (!target.pathname.startsWith("/api/") && !mcp) || target.username || target.password ||
           !token || now() >= expiresAt) throw fail();
       const headers = new Headers(options.headers);
       headers.set("authorization", `Bearer ${token}`);
       const revision = generation;
-      const response = await request(target.href, { ...options, headers, redirect: "error", credentials: "omit" });
+      const response = await request(target.href, { ...options, headers, redirect: "error", credentials: "omit", cache: "no-store" });
       if (revision !== generation) throw fail();
-      if (response.status === 401) { token = null; expiresAt = 0; }
+      if (response.status === 401) { token = null; expiresAt = 0; returnView = null; }
       return response;
     },
   };

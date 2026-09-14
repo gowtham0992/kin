@@ -69,6 +69,12 @@ function formatTime(iso) {
   return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 }
 
+function formatTimestamp(iso) {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+  }).format(new Date(iso));
+}
+
 function formatDate(date) {
   return new Intl.DateTimeFormat(undefined, {
     weekday: "long",
@@ -97,12 +103,12 @@ function setLoading() {
 }
 
 function createTaskItem(task, escalation) {
-  const displayState = escalation && task.state === "scheduled" ? "missed" : task.state;
+  const displayState = task.state;
   const item = document.createElement("li");
-  item.className = `task ${["scheduled", "done", "skipped", "missed"].includes(displayState) ? displayState : "scheduled"}`;
+  item.className = `task ${["scheduled", "done", "skipped"].includes(displayState) ? displayState : "scheduled"}`;
   const mark = document.createElement("span");
   mark.className = "task-mark";
-  mark.textContent = displayState === "done" ? "✓" : displayState === "skipped" ? "—" : displayState === "missed" ? "!" : "·";
+  mark.textContent = displayState === "done" ? "✓" : displayState === "skipped" ? "—" : escalation ? "!" : "·";
   const copy = document.createElement("div");
   copy.className = "task-copy";
   const title = document.createElement("strong");
@@ -112,7 +118,9 @@ function createTaskItem(task, escalation) {
   copy.append(title, time);
   const state = document.createElement("span");
   state.className = "task-state";
-  state.textContent = displayState;
+  state.textContent = displayState === "scheduled"
+    ? task.lastResponse === "not_yet" ? "Not yet" : escalation ? "Follow-up" : "Awaiting check-in"
+    : displayState;
   item.append(mark, copy, state);
   return item;
 }
@@ -127,8 +135,8 @@ function render(data) {
   if (!todayView.hidden) phoneKicker.textContent = formatDate(data.date);
   progressCount.textContent = `${completed} of ${total}`;
   progressBar.style.width = `${total ? Math.round((completed / total) * 100) : 0}%`;
-  const needsAttention = escalations.some((record) => ["sent", "blocked", "failed"].includes(record.status));
-  const attentionCount = escalations.filter(record => ["sent", "blocked", "failed"].includes(record.status) && data.tasks.some(task => task.id === record.taskId && task.state === "scheduled")).length;
+  const needsAttention = escalations.some((record) => ["sent", "blocked", "failed", "receipt_pending"].includes(record.status));
+  const attentionCount = escalations.filter(record => ["sent", "blocked", "failed", "receipt_pending"].includes(record.status) && data.tasks.some(task => task.id === record.taskId && task.state === "scheduled")).length;
   progressMessage.textContent = needsAttention && attentionCount
     ? `${attentionCount} check-in${attentionCount === 1 ? "" : "s"} need${attentionCount === 1 ? "s" : ""} family attention`
     : remaining
@@ -148,28 +156,26 @@ function render(data) {
     document.querySelector(".phone-status span:first-child").textContent = eventTime;
   }
 
-  const next = data.tasks.find(
-    (task) => task.state === "scheduled" && !escalationsByTask.has(task.id),
-  );
+  const next = data.tasks.find(task => task.state === "scheduled");
   const latestSent = escalations.find((record) => record.status === "sent");
   echoTask.replaceChildren();
   const icon = document.createElement("div");
   icon.className = "prompt-icon";
   icon.setAttribute("aria-hidden", "true");
-  icon.textContent = next ? "☼" : latestSent ? "↗" : "✓";
+  icon.textContent = next ? "☼" : latestSent ? "↗" : data.tasks.length ? "✓" : "·";
   const copy = document.createElement("div");
   const label = document.createElement("p");
   const title = document.createElement("strong");
   label.textContent = next
-    ? `Coming up · ${formatTime(next.dueAt)}`
+    ? `${next.lastResponse === "not_yet" ? "Reply: Not yet" : "Check-in"} · Due ${formatTime(next.dueAt)}`
     : latestSent
-      ? "Your family is in the loop"
-      : "All done";
+      ? "A family follow-up was submitted"
+      : data.tasks.length ? "All done" : "No check-ins scheduled";
   title.textContent = next
     ? next.title
     : latestSent
       ? `An alert was submitted for ${latestSent.recipientMemberName ?? "your caregiver"}.`
-      : "You’re all set for today, Evelyn.";
+      : data.tasks.length ? "You’re all set for today, Evelyn." : "Your family can add an agreed-upon check-in.";
   copy.append(label, title);
   echoTask.append(icon, copy);
   echoActions.hidden = !next;
@@ -177,8 +183,8 @@ function render(data) {
   document.querySelector("#voice-line").textContent = next
     ? "Example voice request: “Alexa, tell Kin I did it.” Use the buttons in this simulation."
     : latestSent
-      ? "Delivery and caregiver acknowledgment are not yet confirmed."
-      : "Kin has quietly updated your family.";
+      ? `Delivery is not confirmed. ${latestSent.acknowledgedBy ? `${latestSent.acknowledgedBy} acknowledged the follow-up.` : "No caregiver acknowledgment recorded."}`
+      : data.tasks.length ? "Kin has quietly updated your family." : "There are no check-ins in today’s shared plan.";
 }
 
 function setBriefLoading() {
@@ -390,33 +396,43 @@ function renderEscalation(escalations) {
   escalationCard.className = "escalation-card";
   if (!latest) {
     mark.textContent = "✓";
-    label.textContent = "Family coverage";
-    message.textContent = "No missed check-ins";
+    label.textContent = "Family follow-up";
+    message.textContent = "No follow-up alerts listed";
     return;
   }
 
+  const due = `Due ${formatTimestamp(latest.dueAt)}`;
+  const acknowledgment = latest.acknowledgedBy
+    ? `${latest.acknowledgedBy} acknowledged the follow-up.`
+    : "No caregiver acknowledgment recorded.";
   escalationCard.classList.add(`is-${latest.status}`);
   if (latest.status === "sent") {
     mark.textContent = "↗";
-    label.textContent = `Missed · ${formatTime(latest.dueAt)}`;
-    message.textContent = `Alert submitted for ${latest.recipientMemberName ?? "the on-duty caregiver"} · receipt unconfirmed`;
+    label.textContent = `Follow-up · ${due}`;
+    message.textContent = `Notification accepted by the messaging service for ${latest.recipientMemberName ?? "the on-duty caregiver"}; delivery unconfirmed. ${acknowledgment}`;
     return;
   }
   if (latest.status === "blocked") {
     mark.textContent = "!";
-    label.textContent = "Coverage needed";
-    message.textContent = "No caregiver was on duty";
+    label.textContent = `Coverage needed · ${due}`;
+    message.textContent = `No caregiver was on duty when this follow-up was recorded. ${acknowledgment}`;
+    return;
+  }
+  if (latest.status === "receipt_pending") {
+    mark.textContent = "!";
+    label.textContent = `Receipt review needed · ${due}`;
+    message.textContent = `The messaging service accepted the notification, but its receipt needs review. Kin will not automatically resend it; delivery is unconfirmed. ${acknowledgment}`;
     return;
   }
   if (latest.status === "failed") {
     mark.textContent = "↻";
-    label.textContent = "Delivery interrupted";
-    message.textContent = "Kin will retry the alert";
+    label.textContent = `Delivery interrupted · ${due}`;
+    message.textContent = `Notification not confirmed. Kin will retry the alert. ${acknowledgment}`;
     return;
   }
   mark.textContent = "···";
-  label.textContent = "Missed check-in";
-  message.textContent = "Alerting the on-duty caregiver";
+  label.textContent = `Family follow-up · ${due}`;
+  message.textContent = `Notification awaiting confirmation. ${acknowledgment}`;
 }
 
 function showError(message) {
@@ -446,7 +462,11 @@ async function loadToday() {
 async function confirmTask(responseValue) {
   const taskId = echoActions.dataset.taskId;
   if (!taskId || submitting || conversationBusy || voice.active || confirmationSender.pending) return;
-  await submitConfirmation(() => confirmationSender.confirm({ taskId, response: responseValue, actor: "Evelyn" }));
+  // Bind the button to the task actually displayed, never a newly fetched review.
+  const task = snapshot?.tasks.find(task => task.id === taskId && task.state === "scheduled");
+  if (!task) return;
+  const expected = Object.fromEntries(["title", "dueAt", "state", "lastResponse", "confirmedAt", "confirmedBy"].map(key => [key, task[key]]));
+  await submitConfirmation(() => confirmationSender.confirm({ taskId, response: responseValue, actor: "Evelyn", expected }));
 }
 
 async function submitConfirmation(send) {

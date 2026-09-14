@@ -5,6 +5,24 @@ import { createEscalationWorker } from "../src/escalation-worker.js";
 const now = new Date("2026-09-02T16:00:00.000Z");
 
 describe("scheduled escalation worker", () => {
+  it("honors a reply recorded while the worker is reading the snapshot", async () => {
+    let clock = new Date("2026-09-02T16:00:00.000Z");
+    const repository = createDemoStore(() => clock);
+    const readSnapshot = repository.escalationSnapshot.bind(repository);
+    vi.spyOn(repository, "escalationSnapshot").mockImplementation(async asOf => {
+      clock = new Date("2026-09-02T16:00:00.100Z");
+      await repository.confirm({ taskId: "morning-water", response: "not_yet", actor: "Evelyn", requestId: "reply-during-read" });
+      return readSnapshot(asOf);
+    });
+    const publish = vi.fn(async () => ({ messageId: "must-not-send" }));
+    const worker = createEscalationWorker({ repository, publisher: { publish }, graceMinutes: 30,
+      now: () => clock, log: () => undefined });
+    const result = await worker({ source: "kin.scheduler" }, "snapshot-race");
+    expect(result.counts).toEqual({});
+    expect(publish).not.toHaveBeenCalled();
+    expect(result.evaluatedAt).toBe("2026-09-02T16:00:00.100Z");
+  });
+
   it("runs the durable missed-task path and logs only aggregate outcomes", async () => {
     const repository = createDemoStore(() => now);
     const deliveries: string[] = [];
@@ -30,7 +48,8 @@ describe("scheduled escalation worker", () => {
       counts: { sent: 1 },
     });
     expect(deliveries).toHaveLength(1);
-    expect(logs).toEqual([{ event: "kin.escalation_sweep.completed", ...result }]);
+    expect(logs).toEqual([{ event: "kin.escalation_sweep.completed", ...result },
+      { event: "kin.escalation_delivery.health", evaluatedAt: now.toISOString(), failed: 0, blocked: 0, receiptPending: 0, stuck: 0 }]);
     expect(JSON.stringify(logs)).not.toContain("Drink a glass of water");
     expect(JSON.stringify(logs)).not.toContain("Theo");
   });
@@ -117,5 +136,28 @@ describe("scheduled escalation worker", () => {
 
     expect(result).toMatchObject({ evaluatedTasks: 1, counts: { sent: 1 } });
     expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors a persisted Not yet reply across midnight before publishing one follow-up", async () => {
+    let clock = new Date("2026-09-03T05:45:00.000Z");
+    const repository = new InMemoryCareStore([{
+      id: "late-reply", title: "A glass of water", dueAt: "2026-09-03T05:30:00.000Z",
+      state: "scheduled", lastResponse: null, confirmedBy: null, confirmedAt: null,
+    }], () => clock, { memberId: "theo", memberName: "Theo",
+      startsAt: "2026-09-03T05:00:00.000Z", endsAt: "2026-09-03T08:00:00.000Z" }, "America/Denver");
+    await repository.confirm({ taskId: "late-reply", response: "not_yet", actor: "Evelyn", requestId: "late-reply-request" });
+    const publish = vi.fn(async () => ({ messageId: "late-reply-message" }));
+    const worker = createEscalationWorker({ repository, publisher: { publish }, graceMinutes: 30,
+      now: () => clock, log: () => undefined });
+    clock = new Date("2026-09-03T06:14:59.999Z");
+    expect((await worker({ source: "kin.scheduler" }, "before-reply-grace")).counts).toEqual({});
+    expect(publish).not.toHaveBeenCalled();
+    clock = new Date("2026-09-03T06:15:00.000Z");
+    expect((await worker({ source: "kin.scheduler" }, "at-reply-grace")).counts).toEqual({ sent: 1 });
+    await worker({ source: "kin.scheduler" }, "replayed-sweep");
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect((await repository.today()).escalations[0]).toMatchObject({ taskId: "late-reply", status: "sent" });
+    const task = (await repository.escalationSnapshot(clock)).tasks[0];
+    expect(task).toMatchObject({ state: "scheduled", lastResponse: "not_yet", confirmedAt: "2026-09-03T05:45:00.000Z" });
   });
 });

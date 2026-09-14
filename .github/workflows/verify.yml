@@ -1,0 +1,33 @@
+name: Verify Kin
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts --no-audit --fund=false
+      - run: npm run build
+      - run: npm test -- --sequence.shuffle --sequence.seed=9102611
+      - run: npm test -- --sequence.shuffle --sequence.seed=9102612
+      - run: npx --no-install playwright install --with-deps chromium
+      - run: npm run test:browser

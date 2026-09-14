@@ -22,6 +22,7 @@ export interface OAuthInteractionRouterInput {
   csrfSecret: string;
   enrollment?: FamilyEnrollment;
   browserClientId?: string;
+  echoClientId?: string;
 }
 
 const maxFormBytes = "8kb";
@@ -33,6 +34,7 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
 
   router.use((request, response, next) => {
     response.locals.browserClientId = input.browserClientId;
+    response.locals.echoClientId = input.echoClientId;
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Pragma", "no-cache");
     response.setHeader("Referrer-Policy", "no-referrer");
@@ -72,11 +74,16 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
     try {
       const newPassword = scalarBody(request.body?.newPassword);
       if (request.body?.newPassword !== undefined && (!newPassword || newPassword !== scalarBody(request.body?.confirmPassword))) throw new NewPasswordRejectedError();
+      const authenticationStartedAt = Date.now();
       const account = newPassword ? await input.authenticator.authenticate(username, password, newPassword) : await input.authenticator.authenticate(username, password);
+      const authenticatedAt = account.authenticatedAt ?? authenticationStartedAt;
+      if (!Number.isFinite(authenticatedAt) || authenticatedAt <= 0 || authenticatedAt > Date.now()) {
+        throw new Error("Invalid server authentication time");
+      }
       await input.provider.interactionFinished(
         request,
         response,
-        { login: { accountId: account.accountId } },
+        { login: { accountId: account.accountId, ts: authenticatedAt / 1_000 } },
         { mergeWithLastSubmission: false },
       );
     } catch (error) {
@@ -119,18 +126,34 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
     const accountId = details.session?.accountId;
     const clientId = details.params.client_id;
     if (!accountId || !clientId) throw new InteractionRequestError("Authorization session is incomplete");
+    // The primary button and Enter can submit the unreviewed invitation form.
+    // Treat that as review only: never save a grant or membership implicitly.
+    const unreviewedCode = scalarBody(request.body?.invitation).trim();
+    if (input.enrollment && unreviewedCode && request.body?.invitationProof === undefined && request.body?.familyConsent === undefined) {
+      try {
+        const invitation = await input.enrollment.review(accountId, unreviewedCode);
+        renderPrompt(response, details, csrfToken(input.csrfSecret, details.uid), undefined, 200, "", {
+          code: unreviewedCode, invitation, proof: invitationProof(input.csrfSecret, details.uid, accountId, unreviewedCode, invitation),
+        });
+      } catch (error) {
+        if (!(error instanceof InvitationUnavailableError)) throw error;
+        renderPrompt(response, details, csrfToken(input.csrfSecret, details.uid), error.message, 400, "", {});
+      }
+      return;
+    }
+    const clientScopes = clientId === input.echoClientId ? new Set<string>([alexaScopes.tools]) : allowedUserScopes;
 
     let grant = details.grantId ? await input.provider.Grant.find(details.grantId) : undefined;
     grant ??= new input.provider.Grant({ accountId, clientId });
     const oidcScopes = details.prompt.details.missingOIDCScope ?? [];
     const oidcClaims = details.prompt.details.missingOIDCClaims ?? [];
-    if (oidcScopes.some((scope) => !allowedUserScopes.has(scope)) || oidcClaims.length > 0) {
+    if (oidcScopes.some((scope) => !clientScopes.has(scope)) || oidcClaims.length > 0) {
       throw new InteractionRequestError("Authorization request contains an unsupported permission");
     }
     if (oidcScopes.length > 0) grant.addOIDCScope(oidcScopes.join(" "));
     const resources = details.prompt.details.missingResourceScopes ?? {};
     for (const [resource, scopes] of Object.entries(resources)) {
-      if (resource !== input.resourceUri || scopes.some((scope) => !allowedUserScopes.has(scope))) {
+      if (resource !== input.resourceUri || scopes.some((scope) => !clientScopes.has(scope))) {
         throw new InteractionRequestError("Authorization request contains an unsupported permission");
       }
       grant.addResourceScope(resource, scopes.join(" "));
@@ -179,7 +202,7 @@ export function createOAuthInteractionRouter(input: OAuthInteractionRouterInput)
       next(error);
       return;
     }
-    response.status(400).type("text").send("This authorization request is no longer valid. Start again from Alexa+.");
+    response.status(400).type("text").send("This authorization request is no longer valid. Return to the app where you started and sign in again.");
   });
 
   return router;
@@ -247,6 +270,7 @@ function renderPrompt(
   );
   response.status(status).type("html").send(page({
     browser: !!response.locals.browserClientId && details.params.client_id === response.locals.browserClientId,
+    echo: !!response.locals.echoClientId && details.params.client_id === response.locals.echoClientId,
     uid: details.uid,
     prompt: details.prompt.name as "login" | "consent",
     nonce,
@@ -261,6 +285,7 @@ function renderPrompt(
 function page(input: {
   passwordSetup: boolean;
   browser: boolean;
+  echo: boolean;
   uid: string;
   prompt: "login" | "consent";
   nonce: string;
@@ -273,21 +298,26 @@ function page(input: {
   const csrf = escapeHtml(input.csrf);
   const signIn = input.prompt === "login";
   const reviewed = !signIn ? input.enrollment?.invitation : undefined;
-  const title = signIn ? input.passwordSetup ? "Make this account yours" : "Bring your care circle together" : reviewed ? "A place in the circle" : input.browser ? "Open your family workspace" : "Connect Kin to Alexa+";
+  const title = signIn ? input.passwordSetup ? "Make this account yours" : "Bring your care circle together" : reviewed ? "A place in the circle" : input.browser ? "Open your family workspace" : input.echo ? "Connect Kin to your Echo" : "Connect Kin to Alexa+";
   const eyebrow = signIn ? "Family sign in" : reviewed ? "Your choice to join" : "Account connection";
   const body = signIn
     ? input.passwordSetup ? "Use the temporary password from your email once more. Then set your own." : "Use the private family account your Kin organizer invited."
-    : input.browser ? "This browser can use Kin within your existing family permissions. Signing in alone does not grant membership or organizer access."
-      : reviewed ? "Check who you are joining and what you can do. Accepting also connects Kin to Alexa+, within your role's permissions."
+    : reviewed ? input.browser
+      ? "Check who you are joining and what you can do. Accepting opens this browser workspace within your family permissions."
+      : input.echo ? "Check who you are joining and what you can do. Accepting also connects the Kin custom skill to this account, within your family role's permissions."
+        : "Check who you are joining and what you can do. Accepting also connects Kin to Alexa+, within your role's permissions."
+      : input.browser ? "This browser can use Kin within your existing family permissions. Signing in alone does not grant membership or organizer access."
+        : input.echo ? "The Kin custom skill can read your shared family plan and record reviewed check-in confirmations within your role's permissions. Connecting does not grant family membership."
         : "Alexa+ can use Kin within your family role's permissions. Connecting alone does not grant family membership.";
-  const primary = signIn ? input.passwordSetup ? "Set password and continue" : "Continue securely" : reviewed ? "Join circle and connect" : input.browser ? "Open workspace" : "Allow and connect";
+  const primary = signIn ? input.passwordSetup ? "Set password and continue" : "Continue securely" : reviewed ? input.browser ? "Join circle and open workspace" : "Join circle and connect" : input.browser ? "Open workspace" : "Allow and connect";
   const action = signIn ? "login" : "consent";
   const fields = signIn ? `
     <label>Email<input name="username" type="email" inputmode="email" autocomplete="username" value="${escapeHtml(input.username)}" maxlength="320" required autofocus></label>
     <label>${input.passwordSetup ? "Temporary password from email" : "Password"}<input name="password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required></label>
     ${input.passwordSetup ? `<p class="promise">Use 12–256 characters with uppercase and lowercase letters, a number, and a symbol. No spaces. Choose something different from the temporary password.</p><label>New password<input name="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label><label>Confirm new password<input name="confirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>` : ""}` : `
     ${reviewed ? "" : `<div class="permission"><span aria-hidden="true">✓</span><div><strong>${input.browser ? "Your family permissions" : "Care tasks"}</strong><p>${input.browser ? "Read care activity and use the actions your family role permits. Only designated organizers can invite." : "Read the shared plan. Record voice confirmations only if your role permits it."}</p></div></div>`}
-    <p class="promise">${input.browser ? "Closing this workspace does not remove your family membership or sign you out of the account provider." : "Kin never gives Alexa+ your password. Disconnecting Alexa does not remove your family membership."}</p>
+    <p class="promise">${input.browser ? "Closing this workspace does not remove your family membership or sign you out of the account provider." : input.echo ? "Kin never gives Alexa your password. Disconnecting the skill does not remove your family membership." : "Kin never gives Alexa+ your password. Disconnecting Alexa does not remove your family membership."}</p>
+    ${input.echo ? '<p class="promise">Anyone who can speak to this Echo may use the linked Kin skill with this account\'s permissions. This connection does not verify the speaker\'s identity. Link only an account whose family information and allowed actions you are comfortable sharing on this device.</p>' : ""}
     ${reviewed ? `<section class="invitation"><div class="eyebrow">Your invitation</div><h2>${escapeHtml(reviewed.circleName)}</h2><p>You are joining as <strong>${escapeHtml(reviewed.name)}</strong>.</p><p>${escapeHtml(roleDescription(reviewed.role))}</p><input type="hidden" name="invitation" value="${escapeHtml(input.enrollment?.code ?? "")}"><input type="hidden" name="invitationProof" value="${escapeHtml(input.enrollment?.proof ?? "")}"><label class="consent"><input type="checkbox" name="familyConsent" value="${familyConsentVersion}" required><span>I agree to join this shared care circle with these permissions. My recorded care activity will be visible to other circle members.</span></label></section>`
       : input.enrollment ? `<section class="invitation"><label>Have a family invitation?<input name="invitation" autocomplete="off" spellcheck="false" maxlength="43" placeholder="Paste your invitation code"></label><button class="cancel" type="submit" formaction="/interaction/${uid}/invitation" formnovalidate>Review invitation</button><p class="promise">New here? Review your invitation before connecting. Already a member? Leave the code empty.</p></section>` : ""}`;
   const error = input.error ? `<div class="error" role="alert">${escapeHtml(input.error)}</div>` : "";

@@ -4,12 +4,15 @@ import { createDemoStore } from "../src/domain.js";
 import { createHttpApp } from "../src/http.js";
 import { AccessDeniedError, type AccessAuthorizer } from "../src/auth.js";
 import type { Membership } from "../src/membership.js";
+import { taskReview } from "../src/task-review.js";
 
 const member: Membership = { circleId: "family-a", memberId: "maya", name: "Maya", role: "caregiver", status: "active" };
 const authorizer: AccessAuthorizer = {
-  async authorize(header) {
+  async authorize(header, requiredScopes) {
     if (!header) throw new AccessDeniedError(401, "invalid_token");
-    return { subject: "subject-a", scopes: new Set(["mcp:tools", "mcp:resources", "mcp:service"]), claims: { iss: "https://issuer.example" } };
+    const scopes = new Set(header === "Bearer service" ? ["mcp:service"] : ["mcp:tools", "mcp:resources"]);
+    if (!requiredScopes.every(scope => scopes.has(scope))) throw new AccessDeniedError(403, "insufficient_scope");
+    return { subject: "subject-a", scopes, claims: { iss: "https://issuer.example" } };
   },
 };
 const toolRequest = (name = "show_today", args = {}) => ({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
@@ -24,7 +27,9 @@ describe("family authorization at the HTTP boundary", () => {
   it("requires caregiver authority for acknowledgment and takes the name from membership", async () => {
     const { app, store, find } = setup();
     const task = (await store.today()).tasks[0]!;
-    const { record } = await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
+    const queued = await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
+    if (!queued) throw new Error("Expected the unchanged synthetic task to queue");
+    const { record } = queued;
     const url = `/api/escalations/${encodeURIComponent(record.id)}/acknowledge`;
     await request(app).post(url).send({ confirm: true }).expect(401);
     find.mockResolvedValue({ ...member, role: "viewer" });
@@ -55,7 +60,7 @@ describe("family authorization at the HTTP boundary", () => {
 
   it.each(["viewer", "care_recipient", "caregiver"] as const)("enforces the %s write permissions", async role => {
     const { app, store } = setup({ ...member, role });
-    const body = { response: "done", actor: "Forged actor", requestId: "permission-request" };
+    const body = { response: "done", actor: "Forged actor", requestId: "permission-request", expected: taskReview((await store.today()).tasks[0]!) };
     const result = await request(app).post("/api/tasks/morning-water/confirm").set("authorization", "Bearer user").send(body);
     expect(result.status).toBe(role === "viewer" ? 403 : 201);
     if (role !== "viewer") expect(result.body.confirmation.actor).toBe("Maya");
@@ -79,6 +84,31 @@ describe("family authorization at the HTTP boundary", () => {
     await request(app).post("/mcp").set("authorization", "Bearer service").send(toolRequest()).expect(403);
   });
 
+  it.each([null, { ...member, status: "revoked" }, { ...member, circleId: "foreign" }])(
+    "requires current membership even for user metadata: %j", async record => {
+      const { app, find, store } = setup(record);
+      const read = vi.spyOn(store, "today");
+      for (const method of ["initialize", "notifications/initialized", "ping", "tools/list"]) {
+        await request(app).post("/mcp").set("authorization", "Bearer user")
+          .set("accept", "application/json, text/event-stream")
+          .send({ jsonrpc: "2.0", ...(method === "notifications/initialized" ? {} : { id: 1 }), method,
+            ...(method === "initialize" ? { params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "membership-test", version: "1.0" } } } : {}),
+          }).expect(403, { error: "family_access_denied" });
+      }
+      expect(find).toHaveBeenCalledTimes(4);
+      expect(read).not.toHaveBeenCalled();
+    });
+
+  it("does not treat mixed service and user scopes as an anonymous service identity", async () => {
+    const find = vi.fn(async () => null);
+    const app = createHttpApp(createDemoStore(), undefined, { familyAccess: { circleId: "family-a", directory: { find } },
+      accessAuthorizer: { async authorize() { return { subject: "mixed", claims: {}, scopes: new Set(["mcp:service", "mcp:tools"]) }; } } });
+    await request(app).post("/mcp").set("authorization", "Bearer mixed")
+      .set("accept", "application/json, text/event-stream")
+      .send({ jsonrpc: "2.0", id: 1, method: "tools/list" }).expect(403, { error: "family_access_denied" });
+    expect(find).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed without a directory and during directory failure", async () => {
     const app = createHttpApp(createDemoStore(), undefined, { accessAuthorizer: authorizer });
     await request(app).post("/mcp").set("authorization", "Bearer user").send(toolRequest()).expect(403);
@@ -96,9 +126,10 @@ describe("family authorization at the HTTP boundary", () => {
   });
 
   it("isolates retry identities between members while preserving each member's retries", async () => {
-    const { app, find } = setup();
+    const { app, find, store } = setup();
+    const reviews = new Map((await store.today()).tasks.map(task => [task.id, taskReview(task)]));
     const send = (task: string) => request(app).post(`/api/tasks/${task}/confirm`).set("authorization", "Bearer user")
-      .send({ response: "done", actor: "Forged", requestId: "same-client-request" });
+      .send({ response: "done", actor: "Forged", requestId: "same-client-request", expected: reviews.get(task) });
     const first = await send("morning-water").expect(201);
     expect(first.body.confirmation).toMatchObject({ actor: "Maya", requestId: "same-client-request" });
     await send("morning-water").expect(200);
@@ -110,7 +141,7 @@ describe("family authorization at the HTTP boundary", () => {
   it("uses the authenticated member for MCP confirmations", async () => {
     const { app, store } = setup();
     await request(app).post("/mcp").set("authorization", "Bearer user").set("accept", "application/json, text/event-stream")
-      .send(toolRequest("confirm_care_task", { taskId: "morning-water", response: "done", actor: "Impersonated", requestId: "mcp-member-request" })).expect(200);
+      .send(toolRequest("confirm_care_task", { taskId: "morning-water", response: "done", actor: "Impersonated", requestId: "mcp-member-request", expected: taskReview((await store.today()).tasks[0]!) })).expect(200);
     expect((await store.today()).tasks.find(task => task.id === "morning-water")?.confirmedBy).toBe("Maya");
   });
 });

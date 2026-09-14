@@ -1,5 +1,6 @@
-import { createJwtAccessAuthorizer } from "./auth.js";
+import { createJwtAccessAuthorizer, parseMcpAuthMode } from "./auth.js";
 import { createDynamoAccessManagement } from "./access-management.js";
+import { createDynamoRosterManagement } from "./roster-management.js";
 import { browserAuthConfig } from "./browser-auth-config.js";
 import { createDynamoMembershipDirectory } from "./membership.js";
 import { createCognitoInvitableAccounts, createDynamoInvitationIssuer } from "./invitation-issuer.js";
@@ -12,6 +13,8 @@ import { createBedrockBriefGenerator, WeeklyBriefService } from "./weekly-brief.
 import { createBedrockIntentGenerator } from "./demo-conversation.js";
 import { createFamilyConversationService } from "./family-conversation.js";
 import { createDynamoConversationBudget } from "./conversation-budget.js";
+import { createPushSubscriptions } from "./push-subscriptions.js";
+import { createDynamoReminderTickets } from "./reminder-tickets.js";
 
 export interface RuntimeOptions {
   requireOAuth?: boolean;
@@ -23,11 +26,14 @@ export function createConfiguredApp(
   options: RuntimeOptions = {},
 ) {
   if (environment.KIN_PUBLIC_API_ENABLED === "false") return createUnavailablePublicApp();
+  const mcpAuthMode = parseMcpAuthMode(environment.KIN_MCP_AUTH_MODE);
   const tableName = environment.KIN_DYNAMODB_TABLE?.trim();
   const circleId = environment.KIN_CIRCLE_ID?.trim() || "demo-family";
   const timeZone = environment.KIN_TIME_ZONE?.trim() || "UTC";
   const repository = tableName
     ? createDynamoCareRepository({
+        completionUndoEnabled: environment.KIN_COMPLETION_UNDO_ENABLED === "true",
+        planPauseEnabled: environment.KIN_PLAN_PAUSE_ENABLED === "true",
         tableName,
         circleId,
         region: environment.AWS_REGION,
@@ -79,6 +85,8 @@ export function createConfiguredApp(
     circleId, directory: createDynamoMembershipDirectory({ tableName, circleId, region: environment.AWS_REGION }),
   } : undefined;
   const browserEnabled = environment.KIN_BROWSER_AUTH_ENABLED === "true";
+  const reminderTicketsEnabled = environment.KIN_REMINDER_TICKETS_ENABLED === "true";
+  if (reminderTicketsEnabled && (!familyAccess || !oauthValues.every(Boolean))) throw new Error("Reminder tickets require authenticated family access.");
   const familyEnabled = environment.KIN_FAMILY_WORKSPACE_ENABLED === "true";
   if (familyEnabled && !browserEnabled) {
     throw new Error("Family workspace requires browser sign-in");
@@ -91,6 +99,11 @@ export function createConfiguredApp(
     redirectUri: environment.KIN_BROWSER_REDIRECT_URI ?? "", resource: canonicalMcpUri ?? `${oauthIssuer}/mcp`,
   }) : undefined;
   const familyConversationEnabled = environment.KIN_FAMILY_CONVERSATION_ENABLED === "true";
+  const pushEnabled = environment.KIN_WEB_PUSH_ENABLED === "true";
+  const pushPublicKey = environment.KIN_WEB_PUSH_PUBLIC_KEY ?? "";
+  if (pushEnabled && (!familyEnabled || !browserAuth || !familyAccess || !/^[A-Za-z0-9_-]{87}$/.test(pushPublicKey))) {
+    throw new Error("Push requires the authenticated workspace and a public application key");
+  }
   if (familyConversationEnabled && (!familyEnabled || !browserAuth || !familyAccess || !oauthValues.every(Boolean))) {
     throw new Error("Family conversation requires the authenticated family workspace and a care table");
   }
@@ -110,12 +123,17 @@ export function createConfiguredApp(
     weeklyBrief,
     canonicalMcpResource && oauthIssuer && oauthJwksUri
       ? {
+          mcpAuthMode,
           accessAuthorizer: createJwtAccessAuthorizer({
             issuer: oauthIssuer,
             audience: canonicalMcpResource,
             jwksUri: oauthJwksUri,
           }),
           familyAccess,
+          rescheduleEnabled: environment.KIN_RESCHEDULE_ENABLED === "true",
+          reminderTickets: reminderTicketsEnabled ? createDynamoReminderTickets({ tableName: tableName!, circleId }) : undefined,
+          push: pushEnabled ? { publicKey: pushPublicKey,
+            subscriptions: createPushSubscriptions({ tableName: tableName!, circleId: familyAccess!.circleId, region: environment.AWS_REGION }) } : undefined,
           familyConversation,
           browserAuth: browserAuth && typeof canonicalMcpResource === "function" ? async () => {
             if (await canonicalMcpResource() !== browserAuth.resource) throw new Error("Browser resource does not match canonical MCP resource");
@@ -124,6 +142,7 @@ export function createConfiguredApp(
           serveFamilyWorkspace: familyEnabled,
           familyAssetDirectory: options.familyAssetDirectory,
           accessManagement: familyEnabled ? createDynamoAccessManagement({ tableName: tableName!, familyAccess: familyAccess!, region: environment.AWS_REGION }) : undefined,
+          rosterManagement: familyEnabled ? createDynamoRosterManagement({ tableName: tableName!, familyAccess: familyAccess!, region: environment.AWS_REGION }) : undefined,
           invitationIssuer: issuingEnabled ? createDynamoInvitationIssuer({
             tableName: tableName!, familyAccess: familyAccess!, circleName: circleName!, issuer: oauthIssuer,
             accounts: createCognitoInvitableAccounts({ userPoolId: userPoolId!, region: environment.AWS_REGION }),
@@ -133,7 +152,7 @@ export function createConfiguredApp(
           authorizationServer: oauthAuthorizationServer,
           serveSimulator: environment.KIN_SERVE_SIMULATOR === "true",
         }
-      : { demoIntentGenerator: environment.KIN_DEMO_CONVERSATION_MODEL_ID?.trim()
+      : { mcpAuthMode, demoIntentGenerator: environment.KIN_DEMO_CONVERSATION_MODEL_ID?.trim()
         ? createBedrockIntentGenerator({ modelId: environment.KIN_DEMO_CONVERSATION_MODEL_ID.trim(), region: environment.AWS_REGION }) : undefined },
   );
 }

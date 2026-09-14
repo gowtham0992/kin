@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
-import type { AccessPrincipal } from "./auth.js";
+import { isMcpDiscoveryRequest, type AccessPrincipal } from "./auth.js";
 
 const membershipSchema = z.object({
   circleId: z.string().min(1).max(100),
@@ -13,7 +13,7 @@ const membershipSchema = z.object({
   canInvite: z.boolean().optional(),
 });
 export type Membership = z.infer<typeof membershipSchema>;
-export type CarePermission = "read" | "confirm" | "manage_duty" | "manage_plan" | "invite";
+export type CarePermission = "read" | "confirm" | "manage_duty" | "manage_plan" | "pause_plan" | "invite";
 export interface MembershipDirectory {
   find(principal: AccessPrincipal): Promise<unknown>;
 }
@@ -33,7 +33,7 @@ export async function requireMembership(
   if (!parsed.success || parsed.data.circleId !== access.circleId) throw new FamilyAccessDeniedError();
   const member = parsed.data;
   if (permission === "invite" && (member.role !== "caregiver" || member.canInvite !== true)) throw new FamilyAccessDeniedError();
-  if ((permission === "confirm" && member.role === "viewer") ||
+  if ((["confirm", "pause_plan"].includes(permission) && member.role === "viewer") ||
       (["manage_duty", "manage_plan"].includes(permission) && member.role !== "caregiver")) throw new FamilyAccessDeniedError();
   return member;
 }
@@ -43,11 +43,13 @@ export function mcpCarePermission(body: unknown): CarePermission | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new FamilyAccessDeniedError();
   const request = body as { method?: unknown; params?: { name?: unknown } };
   if (request.method === "tools/call") {
-    if (request.params?.name === "confirm_care_task") return "confirm";
+    if (["review_plan_pause", "pause_care_plan"].includes(String(request.params?.name))) return "pause_plan";
+    if (["confirm_care_task", "undo_care_completion"].includes(String(request.params?.name))) return "confirm";
+    if (request.params?.name === "prepare_plan_reminder") return "confirm";
     if (["show_today", "show_weekly_brief"].includes(String(request.params?.name))) return "read";
     throw new FamilyAccessDeniedError();
   }
-  if (["initialize", "notifications/initialized", "ping", "tools/list"].includes(String(request.method))) return null;
+  if (isMcpDiscoveryRequest(body)) return null;
   return "read";
 }
 

@@ -3,6 +3,36 @@ const { createWorkspaceClient, createPlanDraft, dutyDays } = await import(new UR
 const ok = (data: unknown) => ({ ok: true, json: async () => data });
 
 describe("authenticated workspace requests", () => {
+  it("retries the exact one-off change after response loss and validates its full receipt", async () => {
+    const bodies: string[] = [];
+    const request = vi.fn(async (_url: string, options: { body: string }): Promise<unknown> => { bodies.push(options.body); throw new Error("connection lost"); });
+    const client = createWorkspaceClient({ request, newRequestId: () => "one-off-change-0001" });
+    const input = { taskId: "care-123", action: "rename", title: "Call together", expected: { title: "Old wording", dueAt: "2026-09-09T15:00:00.000Z" }, confirm: true };
+    await expect(client.changeTask(input)).rejects.toThrow("connection lost");
+    expect(client.pendingKind).toBe("check-in change");
+    await expect(client.changeTask({ ...input, title: "Different" })).rejects.toThrow("Resolve");
+    request.mockImplementation(async (_url, options) => { bodies.push(options.body); return { ok: true, json: async () => ({ requestId: "one-off-change-0001", taskId: input.taskId, action: "rename", changed: 1 }) }; });
+    await client.retry();
+    expect(request.mock.calls.map(([url]) => url)).toEqual(["/api/tasks/care-123/change", "/api/tasks/care-123/change"]);
+    expect(bodies[0]).toBe(bodies[1]); expect(JSON.parse(bodies[0]!)).not.toHaveProperty("taskId");
+    expect(client.pending).toBeNull();
+  });
+  it.each(["requestId", "taskId", "action", "changed"])("keeps a one-off retry pending when receipt %s is wrong", async field => {
+    const result: Record<string, unknown> = { requestId: "one-off-change-0002", taskId: "care-123", action: "cancel", changed: 1, [field]: field === "changed" ? 0 : "wrong" };
+    const client = createWorkspaceClient({ request: async () => ok(result), newRequestId: () => "one-off-change-0002" });
+    await expect(client.changeTask({ taskId: "care-123", action: "cancel", expected: { title: "Call", dueAt: "2026-09-09T15:00:00.000Z" }, confirm: true })).rejects.toThrow("Receipt mismatch");
+    expect(client.pending).not.toBeNull();
+  });
+  it("releases a definitively conflicted one-off change and rejects late replies after reset", async () => {
+    const request = vi.fn(async (): Promise<unknown> => ({ ok: false, status: 409 }));
+    const client = createWorkspaceClient({ request, newRequestId: () => "one-off-change-0003" });
+    const input = { taskId: "care-123", action: "cancel", expected: { title: "Call", dueAt: "2026-09-09T15:00:00.000Z" }, confirm: true };
+    await expect(client.changeTask(input)).rejects.toMatchObject({ status: 409 }); expect(client.pending).toBeNull();
+    let finish!: (value: unknown) => void;
+    request.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const saving = client.changeTask(input); client.reset(); finish(ok({ requestId: "one-off-change-0003", taskId: "care-123", action: "cancel", changed: 1 }));
+    await expect(saving).rejects.toMatchObject({ stale: true }); expect(client.pending).toBeNull();
+  });
   it("materializes seven calendar days with uncovered slots across a month boundary", () => {
     const result = dutyDays({ startDate: "2026-10-29", endDate: "2026-11-04", assignments: [{ date: "2026-11-01", memberId: "maya" }] });
     expect(result.map((day: { date: string }) => day.date)).toEqual(["2026-10-29", "2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04"]);

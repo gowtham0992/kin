@@ -16,6 +16,8 @@ interface CognitoSender {
 export interface AuthenticatedAccount {
   accountId: string;
   username: string;
+  /** Server-side start of this successful authentication, in epoch milliseconds. */
+  authenticatedAt?: number;
 }
 
 export class InvalidCredentialsError extends Error {
@@ -42,11 +44,13 @@ export class NewPasswordRejectedError extends Error {
 export class CognitoAccountAuthenticator {
   readonly #client: CognitoSender;
   readonly #clientId: string;
+  readonly #now: () => number;
 
-  constructor(input: { clientId: string; region?: string; client?: CognitoSender }) {
+  constructor(input: { clientId: string; region?: string; client?: CognitoSender; now?: () => number }) {
     this.#clientId = input.clientId.trim();
     if (!this.#clientId) throw new Error("Cognito app client ID is required");
     this.#client = input.client ?? new CognitoIdentityProviderClient({ region: input.region });
+    this.#now = input.now ?? Date.now;
   }
 
   async authenticate(usernameInput: string, password: string, newPassword?: string): Promise<AuthenticatedAccount> {
@@ -59,6 +63,7 @@ export class CognitoAccountAuthenticator {
     }
 
     let auth: InitiateAuthCommandOutput;
+    let authenticatedAt = this.#now();
     try {
       auth = await this.#client.send(new InitiateAuthCommand({
         AuthFlow: "USER_PASSWORD_AUTH",
@@ -84,6 +89,21 @@ export class CognitoAccountAuthenticator {
         if (isCredentialFailure(error)) throw new InvalidCredentialsError();
         throw error;
       }
+      if (auth.ChallengeName) throw new UnsupportedSignInChallengeError(auth.ChallengeName);
+      if (!auth.AuthenticationResult?.AccessToken) throw new InvalidCredentialsError();
+      // Setting the initial password changes the account after the original
+      // proof began. Authenticate the new credential afresh; never stamp the
+      // old proof after a concurrent account change.
+      authenticatedAt = this.#now();
+      try {
+        auth = await this.#client.send(new InitiateAuthCommand({
+          AuthFlow: "USER_PASSWORD_AUTH", ClientId: this.#clientId,
+          AuthParameters: { USERNAME: username, PASSWORD: newPassword },
+        })) as InitiateAuthCommandOutput;
+      } catch (error) {
+        if (isCredentialFailure(error)) throw new InvalidCredentialsError();
+        throw error;
+      }
     }
     if (auth.ChallengeName) throw new UnsupportedSignInChallengeError(auth.ChallengeName);
     const accessToken = auth.AuthenticationResult?.AccessToken;
@@ -97,7 +117,7 @@ export class CognitoAccountAuthenticator {
     if (!accountId || !identity.Username) {
       throw new Error("Cognito returned an authenticated user without a stable identity");
     }
-    return { accountId, username: identity.Username };
+    return { accountId, username: identity.Username, authenticatedAt };
   }
 }
 

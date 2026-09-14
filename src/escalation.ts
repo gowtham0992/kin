@@ -1,6 +1,29 @@
 import type { CareTask, DutyAssignment, TodaySnapshot } from "./domain.js";
+import { calendarDate, shiftCalendarDate } from "./calendar.js";
 
-export interface MissedTaskEscalation {
+export const dutyReviewFields = ["memberId", "memberName", "startsAt", "endsAt", "changedAt", "changedBy"] as const;
+
+// Assignments arrive in dated-key order; a prior-day shift can cover early today.
+export function activeDutyAt(assignments: DutyAssignment[], now: Date): DutyAssignment | null {
+  const instant = now.getTime();
+  return assignments.find(duty => {
+    const startsAt = Date.parse(duty.startsAt), endsAt = Date.parse(duty.endsAt);
+    return Number.isFinite(startsAt) && Number.isFinite(endsAt) && startsAt <= instant && endsAt > instant;
+  }) ?? null;
+}
+
+export function dutyRoutingDate(duty: DutyAssignment, now: Date, timeZone: string): string | null {
+  if (!activeDutyAt([duty], now)) return null;
+  const date = calendarDate(new Date(duty.startsAt), timeZone), today = calendarDate(now, timeZone);
+  return date === today || date === shiftCalendarDate(today, -1) ? date : null;
+}
+
+export interface FollowUpContext {
+  responseState?: "not_yet" | "no_response";
+  responseRecordedAt?: string | null;
+}
+
+export interface MissedTaskEscalation extends FollowUpContext {
   id: string;
   taskId: string;
   taskTitle: string;
@@ -9,16 +32,18 @@ export interface MissedTaskEscalation {
   recipient: DutyAssignment;
 }
 
-export interface BlockedEscalation {
+export interface BlockedEscalation extends FollowUpContext {
   taskId: string;
   taskTitle: string;
   dueAt: string;
   reason: "no_active_duty_assignment";
 }
 
-export type EscalationStatus = "blocked" | "queued" | "sending" | "sent" | "failed";
+export type EscalationStatus = "blocked" | "queued" | "sending" | "sent" | "failed" | "receipt_pending";
 
-export interface EscalationRecord {
+export interface EscalationRecord extends FollowUpContext {
+  /** Provider acceptance, not handset delivery; never inferred for legacy records. */
+  sentAt?: string;
   acknowledgment?: { memberId: string; name: string; at: string };
   id: string;
   taskId: string;
@@ -44,10 +69,13 @@ export type EscalationSummary = Pick<
   | "updatedAt"
   | "recipientMemberName"
   | "status"
-> & { acknowledgedBy?: string; acknowledgedAt?: string };
+> & FollowUpContext & { acknowledgedBy?: string; acknowledgedAt?: string; recipientMemberId?: string | null; sentAt?: string };
 
 export function toEscalationSummary(record: EscalationRecord): EscalationSummary {
   return {
+    ...followUpContext(record),
+    ...(record.sentAt ? { sentAt: record.sentAt } : {}),
+    recipientMemberId: record.recipientMemberId,
     ...(record.acknowledgment ? { acknowledgedBy: record.acknowledgment.name, acknowledgedAt: record.acknowledgment.at } : {}),
     id: record.id,
     taskId: record.taskId,
@@ -58,11 +86,22 @@ export function toEscalationSummary(record: EscalationRecord): EscalationSummary
   };
 }
 
+export function followUpContext(input: FollowUpContext): FollowUpContext {
+  return input.responseState ? { responseState: input.responseState,
+    ...(input.responseState === "not_yet" && input.responseRecordedAt ? { responseRecordedAt: input.responseRecordedAt } : {}) } : {};
+}
+
+function responseContext(task: CareTask): FollowUpContext {
+  return task.lastResponse === "not_yet"
+    ? { responseState: "not_yet", ...(task.confirmedAt ? { responseRecordedAt: task.confirmedAt } : {}) }
+    : { responseState: "no_response" };
+}
+
 export interface EscalationStore {
   queueEscalation(input: MissedTaskEscalation | BlockedEscalation): Promise<{
     record: EscalationRecord;
     replayed: boolean;
-  }>;
+  } | null>;
   claimEscalation(input: {
     event: MissedTaskEscalation;
     attemptId: string;
@@ -70,6 +109,13 @@ export interface EscalationStore {
     leaseSeconds: number;
   }): Promise<EscalationRecord | null>;
   completeEscalation(input: {
+    record: EscalationRecord;
+    attemptId: string;
+    providerMessageId: string;
+    completedAt: Date;
+  }): Promise<EscalationRecord>;
+  /** The provider accepted; preserve its receipt without making this a retryable send. */
+  deferEscalationReceipt(input: {
     record: EscalationRecord;
     attemptId: string;
     providerMessageId: string;
@@ -104,11 +150,12 @@ export function planMissedTaskEscalations(input: {
   }
 
   const missed = input.snapshot.tasks.filter((task) => isMissed(task, now, graceMinutes));
-  const onDuty = activeDuty(input.snapshot.onDuty, now);
+  const onDuty = activeDutyAt(input.snapshot.onDuty ? [input.snapshot.onDuty] : [], now);
   if (!onDuty) {
     return {
       events: [],
       blocked: missed.map((task) => ({
+        ...responseContext(task),
         taskId: task.id,
         taskTitle: task.title,
         dueAt: task.dueAt,
@@ -120,6 +167,7 @@ export function planMissedTaskEscalations(input: {
   return {
     blocked: [],
     events: missed.map((task) => ({
+      ...responseContext(task),
       id: `missed_${task.id}_${task.dueAt}`,
       taskId: task.id,
       taskTitle: task.title,
@@ -137,6 +185,7 @@ export async function runEscalationSweep(input: {
   now?: Date;
   graceMinutes?: number;
   attemptId: string;
+  completionClock?: () => Date;
 }): Promise<{ records: EscalationRecord[] }> {
   const now = input.now ?? new Date();
   const plan = planMissedTaskEscalations({
@@ -148,12 +197,13 @@ export async function runEscalationSweep(input: {
 
   for (const blocked of plan.blocked) {
     const queued = await input.store.queueEscalation(blocked);
-    records.push(queued.record);
+    if (queued) records.push(queued.record);
   }
 
   for (const event of plan.events) {
     const queued = await input.store.queueEscalation(event);
-    if (queued.record.status === "sent" || queued.record.status === "blocked") {
+    if (!queued) continue;
+    if (["sent", "blocked", "receipt_pending"].includes(queued.record.status)) {
       records.push(queued.record);
       continue;
     }
@@ -169,22 +219,28 @@ export async function runEscalationSweep(input: {
       continue;
     }
 
+    let published: { messageId: string };
     try {
-      const published = await input.publisher.publish(claimed);
-      records.push(await input.store.completeEscalation({
-        record: claimed,
-        attemptId: input.attemptId,
-        providerMessageId: published.messageId,
-        completedAt: now,
-      }));
+      published = await input.publisher.publish(claimed);
     } catch (error) {
       const errorCode = error instanceof Error && error.name ? error.name : "AlertPublishError";
       records.push(await input.store.failEscalation({
         record: claimed,
         attemptId: input.attemptId,
         errorCode,
-        failedAt: now,
+        failedAt: input.completionClock?.() ?? now,
       }));
+      continue;
+    }
+
+    const receipt = { record: claimed, attemptId: input.attemptId,
+      providerMessageId: published.messageId, completedAt: input.completionClock?.() ?? now };
+    try {
+      records.push(await input.store.completeEscalation(receipt));
+    } catch {
+      // Never turn a known accepted publish into a retryable failure. If even this
+      // write fails, propagate: the durable sending state also cannot be reclaimed.
+      records.push(await input.store.deferEscalationReceipt(receipt));
     }
   }
 
@@ -194,13 +250,12 @@ export async function runEscalationSweep(input: {
 function isMissed(task: CareTask, now: Date, graceMinutes: number): boolean {
   if (task.state !== "scheduled") return false;
   const dueAt = new Date(task.dueAt).getTime();
-  return Number.isFinite(dueAt) && now.getTime() >= dueAt + graceMinutes * 60_000;
-}
-
-function activeDuty(duty: DutyAssignment | null, now: Date): DutyAssignment | null {
-  if (!duty) return null;
-  const nowMs = now.getTime();
-  if (new Date(duty.startsAt).getTime() > nowMs) return null;
-  if (new Date(duty.endsAt).getTime() <= nowMs) return null;
-  return duty;
+  if (!Number.isFinite(dueAt)) return false;
+  const repliedAt = task.lastResponse === "not_yet" && task.confirmedAt
+    ? new Date(task.confirmedAt).getTime() : Number.NaN;
+  // Reuse the persisted reply timestamp, so replaying a receipt cannot postpone follow-up.
+  // A malformed or future timestamp must not hide an overdue check-in indefinitely.
+  const graceStartsAt = Number.isFinite(repliedAt) && repliedAt <= now.getTime()
+    ? Math.max(dueAt, repliedAt) : dueAt;
+  return now.getTime() >= graceStartsAt + graceMinutes * 60_000;
 }

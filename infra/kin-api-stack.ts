@@ -50,6 +50,7 @@ import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import { Provider as CustomResourceProvider } from "aws-cdk-lib/custom-resources";
 import type { Construct } from "constructs";
+import { configureOperationsRouting } from "./operations-routing.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +59,14 @@ export type KinApiStackProps = StackProps;
 export class KinApiStack extends Stack {
   constructor(scope: Construct, id: string, props: KinApiStackProps) {
     super(scope, id, props);
+    const webPushEnabled = new CfnParameter(this, "WebPushEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Expose opt-in caregiver push only after the worker and application key are configured.",
+    });
+    const webPushPublicKey = new CfnParameter(this, "WebPushPublicKey", {
+      type: "String", default: "", allowedPattern: "^$|^[A-Za-z0-9_-]{87}$",
+      description: "Public VAPID application key only. Never place the private key in this parameter.",
+    });
 
     const alexaRedirectUrisParameter = new CfnParameter(this, "AlexaRedirectUris", {
       type: "String",
@@ -65,11 +74,21 @@ export class KinApiStack extends Stack {
       description: "Comma-separated exact HTTPS callback URIs supplied by Alexa MCP Toolkit.",
       allowedPattern: "^$|^https://[^,]+(,https://[^,]+)*$",
     });
+    const echoRedirectUrisParameter = new CfnParameter(this, "EchoRedirectUris", {
+      type: "String",
+      default: "",
+      description: "Comma-separated exact HTTPS Alexa redirect URLs copied from the classic Kin skill account-linking console. Keep empty until the separate Echo OAuth client is provisioned.",
+      allowedPattern: "^$|^https://[^\\s,@#*]+(,https://[^\\s,@#*]+)*$",
+    });
     const publicApiEnabledParameter = new CfnParameter(this, "PublicApiEnabled", {
       type: "String",
       default: "false",
       allowedValues: ["true", "false"],
       description: "Deployment safety switch. Promote to true only after disabled-state verification.",
+    });
+    const mcpAuthMode = new CfnParameter(this, "McpAuthMode", {
+      type: "String", default: "alexa", allowedValues: ["alexa", "standard"],
+      description: "Select standard for ordinary preregistered MCP OAuth clients; alexa preserves the existing discovery profile. This does not register clients.",
     });
     const canonicalResourceParameterName = "/kin/mcp/canonical-uri";
     const familyWorkspaceEnabled = new CfnParameter(this, "FamilyWorkspaceEnabled", {
@@ -85,6 +104,22 @@ export class KinApiStack extends Stack {
     const familyConversationEnabled = new CfnParameter(this, "FamilyConversationEnabled", {
       type: "String", default: "false", allowedValues: ["true", "false"],
       description: "Enable optional per-request-consented Bedrock interpretation for authenticated family members. Keep disabled until separately approved.",
+    });
+    const reminderTicketsEnabled = new CfnParameter(this, "ReminderTicketsEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Issue consent tickets only after the isolated cancellation receiver and runtime grants are verified.",
+    });
+    const completionUndoEnabled = new CfnParameter(this, "CompletionUndoEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Enable completion undo only after compatible API and Echo readers are the verified rollback baseline.",
+    });
+    const rescheduleEnabled = new CfnParameter(this, "RescheduleEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Enable reviewed one-off rescheduling only after compatible API and Echo readers are the verified rollback baseline.",
+    });
+    const planPauseEnabled = new CfnParameter(this, "PlanPauseEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Enable reviewed one-week pauses only after every task writer honors plan-control versions. Retain compatible writers on rollback.",
     });
     const careStateTable = Table.fromTableName(this, "CareState", "kin-care-state");
 
@@ -206,10 +241,17 @@ export class KinApiStack extends Stack {
         KIN_BEDROCK_MODEL_ID: "amazon.nova-micro-v1:0",
         KIN_BEDROCK_TIMEOUT_MS: "300",
         KIN_MCP_RESOURCE_PARAMETER: canonicalResourceParameterName,
+        KIN_MCP_AUTH_MODE: mcpAuthMode.valueAsString,
         KIN_PUBLIC_API_ENABLED: publicApiEnabledParameter.valueAsString,
         KIN_SERVE_SIMULATOR: "false",
         KIN_FAMILY_WORKSPACE_ENABLED: familyWorkspaceEnabled.valueAsString,
+        KIN_WEB_PUSH_ENABLED: webPushEnabled.valueAsString,
+        KIN_WEB_PUSH_PUBLIC_KEY: webPushPublicKey.valueAsString,
         KIN_FAMILY_CONVERSATION_ENABLED: familyConversationEnabled.valueAsString,
+        KIN_REMINDER_TICKETS_ENABLED: reminderTicketsEnabled.valueAsString,
+        KIN_COMPLETION_UNDO_ENABLED: completionUndoEnabled.valueAsString,
+        KIN_RESCHEDULE_ENABLED: rescheduleEnabled.valueAsString,
+        KIN_PLAN_PAUSE_ENABLED: planPauseEnabled.valueAsString,
         KIN_BROWSER_AUTH_ENABLED: familyWorkspaceEnabled.valueAsString,
         KIN_BROWSER_CLIENT_ID: "kin-family-browser",
         KIN_INVITATION_ISSUING_ENABLED: invitationIssuingEnabled.valueAsString,
@@ -260,6 +302,13 @@ export class KinApiStack extends Stack {
       ],
     }));
     // Invitation and revocation transactions recheck membership atomically.
+    // Self-connection replaces only an unused, self-created roster entry; the
+    // application transaction retains its prior record in the request receipt.
+    apiFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW, actions: ["dynamodb:DeleteItem"], resources: [careStateTable.tableArn],
+      conditions: { "ForAnyValue:StringEquals": { "dynamodb:EnclosingOperation": ["TransactWriteItems"] },
+        "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["CIRCLE#demo-family"] } },
+    }));
     apiFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
       actions: ["dynamodb:ConditionCheckItem"],
@@ -299,8 +348,10 @@ export class KinApiStack extends Stack {
         KIN_MCP_RESOURCE_URI: `${httpApi.apiEndpoint}/mcp`,
         KIN_OAUTH_STATE_TABLE: oauthStateTable.tableName,
         KIN_COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
+        KIN_COGNITO_USER_POOL_ID: userPool.userPoolId,
         KIN_OAUTH_SECRET_ID: oauthSecret.secretArn,
         KIN_ALEXA_REDIRECT_URIS: alexaRedirectUrisParameter.valueAsString,
+        KIN_ECHO_REDIRECT_URIS: echoRedirectUrisParameter.valueAsString,
         KIN_PUBLIC_API_ENABLED: publicApiEnabledParameter.valueAsString,
         KIN_BROWSER_AUTH_ENABLED: familyWorkspaceEnabled.valueAsString,
         KIN_BROWSER_CLIENT_ID: "kin-family-browser",
@@ -324,6 +375,9 @@ export class KinApiStack extends Stack {
     });
     oauthFunction.node.addDependency(secretProvisioning);
     oauthSecret.grantRead(oauthFunction);
+    oauthFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW, actions: ["cognito-idp:AdminGetUser"], resources: [userPool.userPoolArn],
+    }));
     oauthFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW, actions: ["dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:TransactWriteItems"], resources: [careStateTable.tableArn],
     }));
@@ -407,18 +461,18 @@ export class KinApiStack extends Stack {
       resources: [canonicalResourceParameter.parameterArn],
     }));
 
-    new Alarm(this, "ApiServerErrors", {
+    const serverErrors = new Alarm(this, "ApiServerErrors", {
       alarmName: "kin-mcp-api-server-errors",
-      alarmDescription: "Kin's public MCP endpoint is returning server errors.",
+      alarmDescription: "Kin's public MCP endpoint is returning server errors. Operator runbook: docs/delivery-operations.md#api-and-reminder-sync-recovery",
       metric: stage.metricServerError({ period: Duration.minutes(5) }),
       threshold: 1,
       evaluationPeriods: 1,
       comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: TreatMissingData.NOT_BREACHING,
     });
-    new Alarm(this, "ApiP95Latency", {
+    const apiLatency = new Alarm(this, "ApiP95Latency", {
       alarmName: "kin-mcp-api-p95-latency",
-      alarmDescription: "Kin's p95 API latency exceeds Alexa+'s 500 ms budget.",
+      alarmDescription: "Kin's p95 API latency exceeds its 450 ms service target. Operator runbook: docs/delivery-operations.md#api-and-reminder-sync-recovery",
       metric: stage.metricLatency({
         period: Duration.minutes(5),
         statistic: "p95",
@@ -428,6 +482,8 @@ export class KinApiStack extends Stack {
       comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: TreatMissingData.NOT_BREACHING,
     });
+
+    configureOperationsRouting(this, [serverErrors, apiLatency]);
 
     new CfnOutput(this, "CanonicalMcpUri", { value: canonicalMcpUri });
     new CfnOutput(this, "OAuthIssuer", { value: httpApi.apiEndpoint });

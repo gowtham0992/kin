@@ -11,6 +11,34 @@ describe("read-only conversation proposals", () => {
     expect(await proposeConversation("Not yet drink a glass of water", snapshot)).toMatchObject({ action: "confirm", taskId: "morning-water", response: "not_yet" });
     expect(await proposeConversation("Done drink a glass of water maybe", snapshot)).toMatchObject({ action: "clarify" });
   });
+  it.each([
+    ["Done", "done"], ["Not yet", "not_yet"], ["Skip", "skipped"],
+  ])("preserves task-title punctuation in the %s shortcut", async (command, response) => {
+    const snapshot = await store().today();
+    for (const punctuation of [".", "!", "?"]) {
+      const task = { ...snapshot.tasks[0]!, title: `Call Mum${punctuation}` };
+      snapshot.tasks = [task];
+      expect(await proposeConversation(`${command}: ${task.title}`, snapshot)).toMatchObject({
+        action: "confirm", taskId: task.id, response, task: { title: task.title },
+      });
+    }
+  });
+  it("matches exact punctuation before considering spoken sentence endings", async () => {
+    const snapshot = await store().today(), task = snapshot.tasks[0]!;
+    snapshot.tasks = [{ ...task, id: "question", title: "Call Mum?" }, { ...task, id: "plain", title: "Call Mum" }];
+    expect(await proposeConversation("Done: Call Mum?", snapshot)).toMatchObject({ action: "confirm", taskId: "question" });
+    expect(await proposeConversation("Done: Call Mum", snapshot)).toMatchObject({ action: "confirm", taskId: "plain" });
+  });
+  it("clarifies a non-exact spoken ending when punctuation variants identify different tasks", async () => {
+    const snapshot = await store().today(), task = snapshot.tasks[0]!;
+    snapshot.tasks = [{ ...task, id: "question", title: "Call Mum?" }, { ...task, id: "plain", title: "Call Mum" }];
+    for (const message of ["Done: Call Mum!", "Not yet Call Mum?!", "Skip Call Mum."]) {
+      expect(await proposeConversation(message, snapshot)).toEqual({ action: "clarify", mode: "limited" });
+    }
+    // Sentence punctuation remains usable when there is only one possible task.
+    snapshot.tasks = [snapshot.tasks[1]!];
+    expect(await proposeConversation("Done call mum!", snapshot)).toMatchObject({ action: "confirm", taskId: "plain" });
+  });
   it("proposes an exact named task without writing care state", async () => {
     const repository = store();
     const confirm = vi.spyOn(repository, "confirm");

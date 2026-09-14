@@ -117,7 +117,7 @@ main { max-width: 1380px; margin: 0 auto; padding: 18px 48px 56px; }
 .escalation-card { display: flex; align-items: center; gap: 10px; margin-top: 13px; padding: 11px; border: 1px solid var(--line); border-radius: 13px; background: #f4f7f2; }
 .escalation-mark { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 30px; border-radius: 10px; color: var(--sage); background: var(--sage-soft); font-weight: 900; }
 .escalation-card p { margin: 0 0 2px; color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
-.escalation-card strong { display: block; max-width: 205px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.escalation-card strong { display: block; max-width: 205px; overflow-wrap: anywhere; font-size: 10px; }
 .escalation-card.is-sent { border-color: rgba(231,125,97,.32); background: #fff5ef; }
 .escalation-card.is-sent .escalation-mark { color: #8d3f32; background: #f8d6ca; }
 .escalation-card.is-blocked, .escalation-card.is-failed { border-color: #e8bd78; background: #fff8e8; }

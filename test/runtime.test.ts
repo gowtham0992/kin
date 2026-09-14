@@ -5,6 +5,20 @@ const parameter = vi.hoisted(() => vi.fn(async () => "https://kin.example/mcp"))
 vi.mock("../src/parameter.js", () => ({ createStringParameterProvider: () => parameter }));
 
 describe("Kin runtime configuration", () => {
+  it("makes standard MCP discovery opt-in and leaves Alexa mode as the default", async () => {
+    const environment = { KIN_MCP_CANONICAL_URI: "https://kin.example/mcp", KIN_OAUTH_ISSUER: "https://kin.example",
+      KIN_OAUTH_JWKS_URI: "https://kin.example/jwks" };
+    const original = await request(createConfiguredApp(environment)).post("/mcp").send({ method: "initialize" }).expect(401);
+    expect(original.headers["www-authenticate"]).toBeUndefined();
+    const standard = createConfiguredApp({ ...environment, KIN_MCP_AUTH_MODE: "standard" });
+    const response = await request(standard).post("/mcp").send({ method: "initialize" }).expect(401);
+    expect(response.headers["www-authenticate"]).toContain('scope="mcp:tools mcp:resources"');
+    const metadata = await request(standard).get("/.well-known/oauth-protected-resource/mcp").expect(200);
+    expect(metadata.body.scopes_supported).toEqual(["mcp:tools", "mcp:resources"]);
+    expect(() => createConfiguredApp({ KIN_MCP_AUTH_MODE: "invalid" })).toThrow("KIN_MCP_AUTH_MODE");
+    expect(() => createConfiguredApp({ KIN_MCP_AUTH_MODE: "" })).toThrow("KIN_MCP_AUTH_MODE");
+    expect(() => createConfiguredApp({ KIN_MCP_AUTH_MODE: "standard" })).toThrow("Standard MCP auth requires");
+  });
   it("refuses natural-language activation without an authenticated workspace", () => {
     expect(() => createConfiguredApp({ KIN_FAMILY_CONVERSATION_ENABLED: "true" })).toThrow("Family conversation requires");
   });

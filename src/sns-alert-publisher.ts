@@ -22,7 +22,11 @@ export class SnsAlertPublisher {
       new PublishCommand({
         TopicArn: this.#topicArn,
         Subject: "Kin care check-in needs attention",
-        Message: "A scheduled Kin check-in was missed. Open Kin to see the shared family update.",
+        Message: record.responseState === "not_yet"
+          ? "A Kin check-in still needs follow-up after a recorded Not yet response. Open Kin to see the shared family update."
+          : record.responseState === "no_response"
+            ? "No response was recorded for a Kin check-in. Open Kin to see the shared family update."
+            : "A Kin check-in needs family follow-up. Open Kin to see the shared family update.",
         MessageAttributes: {
           onDutyMemberId: { DataType: "String", StringValue: record.recipientMemberId },
           escalationId: { DataType: "String", StringValue: record.id },

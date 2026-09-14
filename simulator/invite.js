@@ -3,6 +3,8 @@ import { createBrowserAuth } from "./browser-auth.js";
 import { createWorkspace } from "./workspace.js";
 
 let auth = null;
+let entryGeneration = 0, suspended = false;
+const ownsEntry = generation => !suspended && generation === entryGeneration;
 const client = createInvitationClient({ request: (...args) => auth ? auth.request(...args) : fetch(...args) });
 const $ = id => document.getElementById(id);
 const form = $("invite-form");
@@ -20,9 +22,11 @@ const workspace = createWorkspace({
   request: (...args) => auth ? auth.request(...args) : fetch(...args),
   onInvite: load,
   onLeaveInvite: clearReceipt,
-  onAccessLost(code) {
+  onAccessLost(code, pending) {
     clearReceipt(); $("invitation-area").hidden = true;
-    status.textContent = code === 403 ? "Your account does not have active family access. Ask your organizer to review your membership." : code === 401 ? "Your workspace session ended. Sign in to reconnect." : "Kin could not load the workspace. Check your connection and try again.";
+    status.textContent = pending?.outcomeUnknown === true && /^[A-Za-z0-9_-]{1,100}$/.test(pending.requestId ?? "")
+      ? `Your family access changed. The pending change may have completed. Ask an organizer to check the care plan before trying again. Reference: ${pending.requestId}.`
+      : code === 403 ? "Your account does not have active family access. Ask your organizer to review your membership." : code === 401 ? "Your workspace session ended. Sign in to reconnect." : "Kin could not load the workspace. Check your connection and try again.";
     $("browser-signin").hidden = !auth; $("invite-reload").hidden = false;
   },
 });
@@ -99,26 +103,49 @@ function clearReceipt() {
   $("role-note").textContent = roleNotes.viewer;
 }
 $("invite-clear").addEventListener("click", () => { clearReceipt(); void load().then(() => { if (!form.hidden) $("invite-member").focus(); }); });
-window.addEventListener("pagehide", () => { workspace.reset(); clearReceipt(); auth?.suspend(); });
-window.addEventListener("pageshow", event => { if (event.persisted) void initialize(); });
+window.addEventListener("pagehide", () => {
+  suspended = true; entryGeneration += 1;
+  workspace.reset(); clearReceipt(); auth?.suspend(); $("browser-signin").disabled = true;
+});
+window.addEventListener("pageshow", event => { if (event.persisted) { suspended = false; void initialize(); } });
 $("browser-signin").addEventListener("click", async () => {
+  if (suspended || !auth || $("browser-signin").disabled) return;
+  const current = ++entryGeneration, owner = auth;
   $("browser-signin").disabled = true;
-  try { window.location.assign(await auth.start()); }
-  catch { status.textContent = "Kin could not start sign-in. Check that this browser allows session storage and try again."; $("browser-signin").disabled = false; }
+  try {
+    // Turns uses the existing allowlisted Circle return view through sign-in.
+    const view = window.location.hash.slice(1);
+    const target = await owner.start(view === "turns" ? "circle" : view);
+    if (ownsEntry(current) && auth === owner) window.location.assign(target);
+  } catch {
+    if (!ownsEntry(current)) return;
+    status.textContent = "Kin could not start sign-in. Check that this browser allows session storage and try again."; $("browser-signin").disabled = false;
+  }
 });
 $("browser-disconnect").addEventListener("click", () => {
+  entryGeneration += 1;
   auth?.disconnect(); workspace.reset(); clearReceipt(); form.hidden = true; $("invitation-area").hidden = true;
-  $("browser-disconnect").hidden = true; $("browser-signin").hidden = false;
+  $("browser-disconnect").hidden = true; $("browser-signin").hidden = false; $("browser-signin").disabled = false;
   status.textContent = "Workspace session closed. This does not sign you out of the account provider or remove family access.";
 });
 async function initialize() {
+  if (suspended) return;
+  const current = ++entryGeneration;
+  auth?.suspend(); auth = null; workspace.reset(); clearReceipt();
+  $("browser-signin").disabled = true;
   const callbackUrl = window.location.href;
   if (window.location.search) window.history.replaceState(null, "", "/invite.html");
   try {
     const response = await fetch("/family-auth-config", { cache: "no-store", signal: AbortSignal.timeout(8000) });
+    if (!ownsEntry(current)) return;
     if (response.ok) {
-      auth = createBrowserAuth({ config: await response.json(), origin: window.location.origin, storage: window.sessionStorage });
-      await auth.complete(callbackUrl);
+      const config = await response.json();
+      if (!ownsEntry(current)) return;
+      const owner = createBrowserAuth({ config, origin: window.location.origin, storage: window.sessionStorage });
+      auth = owner;
+      const completed = await owner.complete(callbackUrl);
+      if (!ownsEntry(current)) return;
+      if (completed) window.history.replaceState(null, "", `/invite.html#${owner.returnView === "circle" ? "turns" : owner.returnView}`);
       $("browser-disconnect").hidden = !auth.connected;
     } else if (response.status !== 404) throw new Error("Unavailable");
     if (auth) {
@@ -128,13 +155,17 @@ async function initialize() {
       if (auth.connected) await workspace.open();
     } else {
       await workspace.open();
+      if (!ownsEntry(current)) return;
       if ($("workspace-nav").hidden) await load();
     }
   } catch {
+    if (!ownsEntry(current)) return;
     form.hidden = true;
     status.textContent = "Kin could not complete sign-in. Start again to open the workspace.";
     $("browser-signin").hidden = !auth;
     $("invite-reload").hidden = false;
+  } finally {
+    if (ownsEntry(current)) $("browser-signin").disabled = false;
   }
 }
 void initialize();

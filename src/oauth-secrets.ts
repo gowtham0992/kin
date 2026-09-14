@@ -28,6 +28,8 @@ const oauthSecretsSchema = z.object({
   csrfSecret: z.string().min(32),
   serviceClient: clientSchema,
   userClient: clientSchema,
+  // Existing version-one secrets remain valid; Echo linking is opt-in.
+  echoClient: clientSchema.optional(),
 }).strict();
 
 export type OAuthSecrets = z.infer<typeof oauthSecretsSchema>;
@@ -42,9 +44,14 @@ export async function loadOAuthSecrets(input: {
   const client = input.client ?? new SecretsManagerClient({ region: input.region });
   const response = await client.send(new GetSecretValueCommand({ SecretId: secretId }));
   if (!response.SecretString) throw new Error("OAuth secret has no string value");
+  return parseOAuthSecrets(response.SecretString);
+}
+
+/** Validate secret material without including it in parser errors. */
+export function parseOAuthSecrets(secretString: string): OAuthSecrets {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(response.SecretString);
+    parsed = JSON.parse(secretString);
   } catch {
     throw new Error("OAuth secret is not valid JSON");
   }

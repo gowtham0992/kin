@@ -1,9 +1,12 @@
-import { createHash } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 import { exportJWK, generateKeyPair, jwtVerify } from "jose";
 import request from "supertest";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createConfiguredOAuthApp } from "../src/oauth-lambda.js";
 import type { OAuthSecrets } from "../src/oauth-secrets.js";
+import { familyConsentVersion, type Invitation } from "../src/invitations.js";
+import { requireMembership } from "../src/membership.js";
+const { createBrowserAuth } = await import(new URL("../simulator/browser-auth.js", import.meta.url).href);
 
 describe("configured OAuth Lambda application", () => {
   let secrets: OAuthSecrets;
@@ -40,6 +43,7 @@ describe("configured OAuth Lambda application", () => {
       KIN_MCP_RESOURCE_URI: "https://api-id.execute-api.us-east-1.amazonaws.com/mcp",
       KIN_OAUTH_STATE_TABLE: "kin-oauth-state",
       KIN_COGNITO_CLIENT_ID: "cognito-client-id",
+      KIN_COGNITO_USER_POOL_ID: "us-east-1_synthetic",
       KIN_OAUTH_SECRET_ID: "secret-arn",
       KIN_ALEXA_REDIRECT_URIS: "https://alexa.amazon.com/callback, https://layla.amazon.com/callback",
     }, { secrets });
@@ -69,6 +73,20 @@ describe("configured OAuth Lambda application", () => {
     }, { secrets })).rejects.toThrow("KIN_OAUTH_ISSUER must use HTTPS");
   });
 
+  it("offers neutral recovery when an expired browser interaction cannot be loaded", async () => {
+    const issuer = "https://api-id.execute-api.us-east-1.amazonaws.com";
+    const app = await createConfiguredOAuthApp({ KIN_OAUTH_ISSUER: issuer, KIN_MCP_RESOURCE_URI: `${issuer}/mcp`,
+      KIN_OAUTH_STATE_TABLE: "synthetic-oauth-state", KIN_COGNITO_CLIENT_ID: "synthetic-client", KIN_OAUTH_SECRET_ID: "synthetic-secret",
+      KIN_COGNITO_USER_POOL_ID: "us-east-1_synthetic",
+      KIN_BROWSER_AUTH_ENABLED: "true", KIN_BROWSER_CLIENT_ID: "kin-family-browser", KIN_BROWSER_REDIRECT_URI: `${issuer}/invite.html`,
+    }, { secrets, adapter: MemoryAdapter, authenticator: { authenticate: async () => { throw new Error("Credentials must not be reached"); } } });
+    const response = await request(app).get("/interaction/expired-synthetic-request")
+      .set("Host", new URL(issuer).host).set("X-Forwarded-Proto", "https").expect(500);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.text).toBe("Kin couldn't complete sign-in. Return to the app where you started and try again.");
+    expect(response.text).not.toMatch(/Alexa|expired-synthetic-request|Credentials/);
+  });
+
   it("completes login, explicit consent, PKCE exchange, and refresh as one real flow", async () => {
     MemoryAdapter.reset();
     const issuer = "https://api-id.execute-api.us-east-1.amazonaws.com";
@@ -80,11 +98,13 @@ describe("configured OAuth Lambda application", () => {
       KIN_MCP_RESOURCE_URI: resource,
       KIN_OAUTH_STATE_TABLE: "kin-oauth-state",
       KIN_COGNITO_CLIENT_ID: "cognito-client-id",
+      KIN_COGNITO_USER_POOL_ID: "us-east-1_synthetic",
       KIN_OAUTH_SECRET_ID: "secret-arn",
       KIN_ALEXA_REDIRECT_URIS: redirectUri,
     }, {
       secrets,
       adapter: MemoryAdapter,
+      accountStatus: { async find(accountId) { return { accountId, modifiedAt: 1 }; } },
       authenticator: {
         authenticate: async () => ({ accountId: "family-account", username: "owner@example.com" }),
       },
@@ -180,6 +200,100 @@ describe("configured OAuth Lambda application", () => {
       .expect(200);
     expect(refreshed.body.access_token).toBeTruthy();
     expect(refreshed.body.scope).toBe("mcp:tools mcp:resources");
+  });
+
+  it("lets a returning browser account review an invitation after its first sign-in without granting family access before consent", async () => {
+    MemoryAdapter.reset();
+    const issuer = "https://api-id.execute-api.us-east-1.amazonaws.com";
+    const resource = `${issuer}/mcp`, clientId = "kin-family-browser", accountId = "returning-account";
+    const code = "r".repeat(43);
+    const invitation: Invitation = { circleId: "family-a", circleName: "Evelyn's family", memberId: "theo", name: "Theo",
+      role: "viewer", targetKey: "synthetic-account-key", expiresAt: 2_000_000_000, status: "pending", rosterBound: true };
+    let membership: unknown = null;
+    const access = { circleId: invitation.circleId, directory: { async find() { return membership; } } };
+    const principal = { subject: accountId, scopes: new Set(["mcp:tools"]), claims: { iss: issuer } };
+    const review = vi.fn(async (account: string, submittedCode: string) => {
+      expect(account).toBe(accountId); expect(submittedCode).toBe(code);
+      return invitation;
+    });
+    const accept = vi.fn(async (account: string, submittedCode: string, consent: string, reviewed: Invitation) => {
+      expect(account).toBe(accountId); expect(submittedCode).toBe(code);
+      expect(consent).toBe(familyConsentVersion); expect(reviewed).toEqual(invitation);
+      membership = { circleId: invitation.circleId, memberId: invitation.memberId, name: invitation.name, role: invitation.role, status: "active" };
+    });
+    const app = await createConfiguredOAuthApp({
+      KIN_OAUTH_ISSUER: issuer, KIN_MCP_RESOURCE_URI: resource, KIN_OAUTH_STATE_TABLE: "synthetic-state",
+      KIN_COGNITO_CLIENT_ID: "synthetic-cognito-client", KIN_OAUTH_SECRET_ID: "synthetic-secret",
+      KIN_COGNITO_USER_POOL_ID: "us-east-1_synthetic",
+      KIN_BROWSER_AUTH_ENABLED: "true", KIN_BROWSER_CLIENT_ID: clientId, KIN_BROWSER_REDIRECT_URI: `${issuer}/invite.html`,
+    }, { secrets, adapter: MemoryAdapter, enrollment: { review, accept },
+      accountStatus: { async find(accountId) { return { accountId, modifiedAt: 1 }; } },
+      authenticator: { async authenticate() { return { accountId, username: "returning@example.com" }; } } });
+    const cookies = new Map<string, string>();
+    const storage = new Map<string, string>();
+    let random = 0;
+    const auth = createBrowserAuth({ config: { clientId, issuer, redirectUri: `${issuer}/invite.html`, resource }, origin: issuer,
+      storage: { setItem: (key: string, value: string) => storage.set(key, value), getItem: (key: string) => storage.get(key) ?? null, removeItem: (key: string) => storage.delete(key) },
+      now: () => 1_000_000, cryptoApi: { subtle: webcrypto.subtle, getRandomValues: (array: Uint8Array) => array.fill(++random) } });
+    async function follow(response: Awaited<ReturnType<typeof browserGet>>) {
+      for (let redirects = 0; redirects < 10; redirects++) {
+        const location = response.headers.location;
+        if (!location || new URL(location, issuer).pathname === "/invite.html") return response;
+        response = await browserGet(app, localPath(location, issuer), cookies);
+      }
+      throw new Error("Browser sign-in exceeded its redirect limit");
+    }
+    async function signIn() {
+      const login = await follow(await browserGet(app, localPath(await auth.start(), issuer), cookies));
+      expect(login.status).toBe(200);
+      expect(login.text).toContain('name="password"');
+      return follow(await browserPost(app, new URL(login.request.url).pathname + "/login", {
+        csrf: csrfFrom(login.text), username: "returning@example.com", password: "synthetic-password",
+      }, cookies));
+    }
+
+    // Completing account setup may precede issuing a code. Continuing here saves
+    // a real provider grant but must not create family membership.
+    const firstConsent = await signIn();
+    expect(firstConsent.status).toBe(200);
+    expect(firstConsent.text).toContain("Review invitation");
+    const firstCallback = await follow(await browserPost(app, new URL(firstConsent.request.url).pathname + "/consent", {
+      csrf: csrfFrom(firstConsent.text),
+    }, cookies));
+    const firstRedirect = new URL(requiredLocation(firstCallback.headers.location), issuer);
+    expect(firstRedirect.pathname).toBe("/invite.html");
+    expect(firstRedirect.searchParams.get("code")).toBeTruthy();
+    expect(firstRedirect.searchParams.has("error")).toBe(false);
+    expect(review).not.toHaveBeenCalled(); expect(accept).not.toHaveBeenCalled();
+    await expect(requireMembership(access, principal, "read")).rejects.toThrow("Family access denied");
+
+    // Reuse the same provider, account and cookies: a preexisting OAuth grant
+    // must not hide the only form where this nonmember can review a new code.
+    const secondConsent = await signIn();
+    expect(secondConsent.status, "Returning account skipped invitation entry").toBe(200);
+    expect(secondConsent.text).toContain("Review invitation");
+    const interactionPath = new URL(secondConsent.request.url).pathname;
+    const reviewed = await browserPost(app, `${interactionPath}/invitation`, {
+      csrf: csrfFrom(secondConsent.text), invitation: code,
+    }, cookies);
+    expect(reviewed.status).toBe(200);
+    expect(reviewed.text).toContain("Evelyn&#39;s family");
+    expect(reviewed.text).toContain('name="familyConsent"');
+    const proof = reviewed.text.match(/name="invitationProof" value="([a-f0-9]{64})"/)?.[1];
+    expect(proof).toBeTruthy();
+    const form = { csrf: csrfFrom(reviewed.text), invitation: code, invitationProof: proof! };
+    const unconsented = await browserPost(app, `${interactionPath}/consent`, form, cookies);
+    expect(unconsented.status).toBe(400);
+    expect(accept).not.toHaveBeenCalled();
+    await expect(requireMembership(access, principal, "read")).rejects.toThrow("Family access denied");
+
+    const joined = await follow(await browserPost(app, `${interactionPath}/consent`, { ...form, familyConsent: familyConsentVersion }, cookies));
+    const joinedRedirect = new URL(requiredLocation(joined.headers.location), issuer);
+    expect(joinedRedirect.pathname).toBe("/invite.html");
+    expect(joinedRedirect.searchParams.get("code")).toBeTruthy();
+    expect(joinedRedirect.searchParams.has("error")).toBe(false);
+    expect(accept).toHaveBeenCalledTimes(1);
+    expect(await requireMembership(access, principal, "read")).toMatchObject({ memberId: "theo", role: "viewer", status: "active" });
   });
 });
 

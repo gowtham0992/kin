@@ -1,0 +1,31 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "kin family",
+      "intents": [
+        { "name": "TestReminderIntent", "slots": [], "samples": ["test reminder", "test a reminder", "try a reminder"] },
+        { "name": "NextCheckInReminderIntent", "slots": [], "samples": ["remind me about my next check in", "set my next check in reminder", "next check in reminder"] },
+        {
+          "name": "HelloKinIntent",
+          "slots": [],
+          "samples": ["hello", "say hello", "test the connection", "check the voice connection"]
+        },
+        { "name": "TodayPlanIntent", "slots": [], "samples": ["today's plan", "read today's plan", "read my check ins", "what are my check ins", "read the family plan"] },
+        { "name": "NextTasksIntent", "slots": [], "samples": ["next check ins", "read the next check ins", "read more check ins"] },
+        { "name": "MarkTaskDoneIntent", "slots": [{ "name": "taskNumber", "type": "AMAZON.NUMBER" }], "samples": ["mark check in {taskNumber} done", "check in {taskNumber} is done", "mark number {taskNumber} done"] },
+        { "name": "MarkTaskNotYetIntent", "slots": [{ "name": "taskNumber", "type": "AMAZON.NUMBER" }], "samples": ["mark check in {taskNumber} not yet", "check in {taskNumber} is not done yet", "mark number {taskNumber} not yet"] },
+        { "name": "SkipTaskIntent", "slots": [{ "name": "taskNumber", "type": "AMAZON.NUMBER" }], "samples": ["skip check in {taskNumber}", "mark check in {taskNumber} skipped", "skip number {taskNumber}"] },
+        { "name": "UndoLastCompletionIntent", "slots": [], "samples": ["undo last completion", "undo that completion", "undo my last done response"] },
+        { "name": "PausePlanWeekIntent", "slots": [], "samples": ["pause my plan for a week", "pause check ins for one week", "pause the plan for a week"] },
+        { "name": "AMAZON.YesIntent", "samples": [] },
+        { "name": "AMAZON.NoIntent", "samples": [] },
+        { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.RepeatIntent", "samples": [] },
+        { "name": "AMAZON.CancelIntent", "samples": [] },
+        { "name": "AMAZON.StopIntent", "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] }
+      ],
+      "types": []
+    }
+  }
+}

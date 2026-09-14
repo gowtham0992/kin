@@ -41,9 +41,9 @@ describe("care plan scheduling", () => {
   it("writes the task and scheduling receipt atomically and recovers a concurrent retry", async () => {
     let existing: unknown;
     const send = vi.fn(async (command: unknown) => {
-      if (command instanceof GetCommand) return { Item: existing };
+      if (command instanceof GetCommand) return { Item: command.input.Key?.SK === `PLAN_REQUEST#${input.id}` ? existing : undefined };
       if (command instanceof TransactWriteCommand) {
-        existing = command.input.TransactItems![1]!.Put!.Item;
+        existing = command.input.TransactItems!.find(item => item.Put?.Item?.entityType === "PlanRequest")!.Put!.Item;
         throw Object.assign(new Error("concurrent retry"), { name: "TransactionCanceledException" });
       }
       throw new Error("Unexpected operation");
@@ -52,8 +52,9 @@ describe("care plan scheduling", () => {
     const task = await store.scheduleTask(input);
     expect(task.title).toBe(input.title);
     const transaction = send.mock.calls.find(([command]) => command instanceof TransactWriteCommand)![0] as TransactWriteCommand;
-    expect(transaction.input.TransactItems!.map(item => item.Put?.ConditionExpression)).toEqual(["attribute_not_exists(PK)", "attribute_not_exists(PK)"]);
+    expect(transaction.input.TransactItems!.map(item => item.Put?.ConditionExpression)).toEqual(["attribute_not_exists(PK)", "attribute_not_exists(PK)", "attribute_not_exists(PK)"]);
     expect(transaction.input.TransactItems![0]!.Put!.Item!.SK).toBe(`TASK#${input.dueAt}#${input.id}`);
     expect(transaction.input.TransactItems![1]!.Put!.Item!.SK).toBe(`PLAN_REQUEST#${input.id}`);
+    expect(transaction.input.TransactItems![2]!.Put!.Item).toEqual({ PK: "CIRCLE#test", SK: "PLAN_CONTROL", entityType: "PlanControl", version: 1 });
   });
 });

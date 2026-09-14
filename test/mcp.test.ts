@@ -3,6 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDemoStore } from "../src/domain.js";
 import { createMcpServer } from "../src/mcp.js";
+import { taskReview } from "../src/task-review.js";
 
 const fixedNow = () => new Date("2026-09-02T08:00:00.000Z");
 
@@ -12,6 +13,8 @@ describe("Kin MCP contract", () => {
   let store: ReturnType<typeof createDemoStore>;
 
   beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-02T23:00:00.000Z"));
     store = createDemoStore(fixedNow);
     server = createMcpServer(store);
     client = new Client({ name: "kin-test", version: "0.1.0" });
@@ -21,6 +24,7 @@ describe("Kin MCP contract", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await client.close();
     await server.close();
   });
@@ -41,6 +45,7 @@ describe("Kin MCP contract", () => {
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent).toMatchObject({
       generatedBy: "deterministic",
+      period: { endDate: "2026-09-02" },
       stats: { scheduled: 2 },
     });
     expect(JSON.stringify(result.structuredContent)).toContain("not medical advice");
@@ -70,6 +75,7 @@ describe("Kin MCP contract", () => {
         response: "done",
         actor: "Mom",
         requestId: "voice-turn-0001",
+        expected: taskReview((await store.today()).tasks[0]!),
       },
     });
     expect(confirmation.isError).toBeFalsy();
@@ -81,9 +87,10 @@ describe("Kin MCP contract", () => {
   });
 
   it("keeps a committed confirmation successful when the view cannot refresh", async () => {
+    const expected = taskReview((await store.today()).tasks[0]!);
     vi.spyOn(store, "today").mockRejectedValue(new Error("Read unavailable"));
     const result = await client.callTool({ name: "confirm_care_task", arguments: {
-      taskId: "morning-water", response: "done", actor: "Evelyn", requestId: "mcp-saved-read-failed",
+      taskId: "morning-water", response: "done", actor: "Evelyn", requestId: "mcp-saved-read-failed", expected,
     } });
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent).toMatchObject({

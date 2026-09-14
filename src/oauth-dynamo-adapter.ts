@@ -6,6 +6,7 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { errors } from "oidc-provider";
 
 type AdapterPayload = Record<string, unknown> & {
   grantId?: string;
@@ -123,19 +124,30 @@ export function createDynamoOidcAdapter(config: DynamoOidcAdapterConfig) {
     }
 
     async consume(id: string): Promise<void> {
-      await client.send(new UpdateCommand({
-        TableName: tableName,
-        Key: { PK: modelKey(this.#model), SK: valueKey(id) },
-        UpdateExpression: "SET #payload.#consumed = :consumed",
-        ConditionExpression: "attribute_exists(PK)",
-        ExpressionAttributeNames: {
-          "#payload": "payload",
-          "#consumed": "consumed",
-        },
-        ExpressionAttributeValues: {
-          ":consumed": Math.floor(now().getTime() / 1000),
-        },
-      }));
+      try {
+        await client.send(new UpdateCommand({
+          TableName: tableName,
+          Key: { PK: modelKey(this.#model), SK: valueKey(id) },
+          UpdateExpression: "SET #payload.#consumed = :consumed",
+          // The provider's earlier read is not a lock. Exactly one exchange may
+          // claim an existing, unexpired code/rotating token across Lambda instances.
+          ConditionExpression: "attribute_exists(PK) AND attribute_not_exists(#payload.#consumed) AND (attribute_not_exists(#expiresAt) OR #expiresAt > :consumed)",
+          ExpressionAttributeNames: {
+            "#payload": "payload",
+            "#consumed": "consumed",
+            "#expiresAt": "expiresAt",
+          },
+          ExpressionAttributeValues: {
+            ":consumed": Math.floor(now().getTime() / 1000),
+          },
+        }));
+      } catch (error) {
+        if (error instanceof Error && error.name === "ConditionalCheckFailedException") {
+          // A losing exchange must be invalid_grant, not an opaque server error.
+          throw new errors.InvalidGrant("authorization grant is no longer usable");
+        }
+        throw error;
+      }
     }
 
     async destroy(id: string): Promise<void> {

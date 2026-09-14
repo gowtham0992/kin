@@ -1,22 +1,124 @@
 # Kin
 
-Kin is a shared family-care circle designed for voice-first confirmation on Alexa+ and live coordination across a family.
+Kin helps a family share everyday check-ins, follow-ups, and the next turn at care.
 
-This repository begins with the portable core: an MCP `2025-11-25`-compatible server using Streamable HTTP and an MCP Apps widget. Amazon onboarding metadata will be added after MCP Toolkit partner access is confirmed.
+The family workspace includes shared check-ins, care plans, duty handoffs,
+follow-up acknowledgment, invitations, access management and evidence-linked
+weekly notes. Its portable core is an MCP `2025-11-25`-compatible server using
+Streamable HTTP and an MCP Apps widget. The Alexa+ interface is a labeled
+simulation over real MCP calls. A separate classic Alexa development skill
+connects the owner's Echo Pop to the same linked family account; it is not a
+native Alexa+ add-on.
+
+For the hackathon, Kin targets the self-hosted MCP route with AWS Builder.
+The owner has reported successful physical linked-plan reads and a test
+reminder. Sustained device reliability and the full family/reminder loop remain
+acceptance work. Skills Store publication is not part of this entry's finish
+line. See the [scope review](docs/hackathon-scope-20260911.md) and
+[current completion checkpoint](docs/completion-current-20260913.md).
+
+Standard MCP clients complete
+the tested OAuth sign-in, consent, discovery and reviewed-save journey without
+service credentials. See [MCP interoperability](docs/mcp-interoperability.md)
+for configuration and the limits of that local evidence.
+
+Local browser checks cover the synthetic care story, daily navigation, plan
+editing, responsibility and weekly evidence. Enrollment and invitations are
+enabled; the second caregiver has accepted an invitation and read the shared
+plan. Automatic delivery and paid conversation remain paused. Actual two-account
+handoff/revocation, selected-phone receipt and new-feature deployment remain
+separate from those observations. See the
+[current checkpoint](docs/completion-current-20260913.md) and
+[final acceptance runbook](docs/final-acceptance-runbook.md).
+
+The [earlier hardening release](docs/release-hardening-20260911.md) and
+[subsequent care API release](docs/release-outsider-fixes-20260911.md) retain
+dated deployment and monitoring evidence, not a live health guarantee.
+Processing remains paused and operator notification routing is unconfigured.
+Undo, one-off rescheduling, week-pause and reminder-cancellation changes are
+staged local work, not claims about the live service. Their activation gates
+default off; compatible-reader/writer rollback baselines are required. The
+repository remains private. Release inputs and test evidence are recorded in
+[final local verification](docs/final-local-verification-20260913.md); a local
+source-copy check is distinguished from committed-revision and live acceptance.
+
+## Try one complete family-care story
+
+Use Node **22.23.2** (pinned in `.nvmrc`), install the locked dependencies,
+and start the isolated demonstration:
+
+```bash
+npm ci
+npm run demo:story
+```
+
+Open `http://127.0.0.1:3030/story.html`. Evelyn's morning check-in and Theo's
+family view share one in-memory store: the parent uses real Streamable HTTP MCP,
+while the caregiver reads the REST API independently.
+
+1. Choose **Not yet**, then **Review request** and **Confirm this check-in**.
+   The example button only fills the draft; reviewing does not save it.
+2. Advance the demo clock to **9:31 AM**. The real escalation sweep records a
+   simulated notification for Theo after the 30-minute grace period.
+3. Acknowledge the follow-up in Theo's view. Evelyn's task remains incomplete.
+4. Draft **Done**, review it and confirm. Read the weekly brief to inspect the
+   recorded activity and source evidence.
+
+The clock starts at 9 AM on September 8, 2026 in Denver; six earlier days contain
+synthetic completed check-ins. Alexa dialogue, people, time and notifications
+are simulated. By default, this command does not configure a cloud repository,
+use AWS credentials, invoke a model or send messages. Optional browser dictation
+starts only when requested, may send audio to the browser's speech provider,
+and only fills a draft. Typing always remains available.
+
+An explicit `--bedrock` launch option makes Amazon Nova available with a named
+AWS profile. Every model request needs its own checkbox consent, may incur
+charges, and can only propose a reviewed action. The process caps model attempts
+at 20 and bounds the caller's wait to five seconds. See the
+[story guide](docs/story-demo.md) for setup, privacy and timeout behavior.
+The server binds to loopback and rejects foreign browser origins. Do not expose
+it through a tunnel or proxy.
+
+Restart the command for a fresh story. Reloading preserves the running server's
+synthetic care state but clears draft, transcript, trace and pending-retry memory.
+The evidence panel shows actual client-observed MCP IDs and validated results,
+not device latency or proof of delivery. The story page refuses to operate when
+its dedicated local endpoint is unavailable; these controls are not part of the
+authenticated family deployment.
+
+Simple first-person replies such as “I already had my water” can propose a
+check-in without a paid model. Kin asks you to choose when the task is unclear
+or several titles match. Interpretation never saves a reply by itself.
+
+For reproducible verification, run `npm run check`. Browser checks use the
+locked Playwright dependency: install its browser with
+`npx --no-install playwright install chromium`, then run `npm run test:browser`.
+The checked-in GitHub workflow builds, runs two shuffled test passes and checks
+the synthetic story in Chromium. It does not deploy or use AWS credentials.
 
 ## Current vertical slice
 
+- In standard MCP mode, signed-in Ask Kin reads and saves through authenticated
+  MCP, with a bounded request trace. Task interpretation only proposes a change;
+  an explicit confirmation performs the MCP write. No official Alexa device
+  connection is implied.
 - `show_today` returns today's care plan as text plus structured widget data.
 - `confirm_care_task` records `done`, `not_yet`, or `skipped` responses.
 - Confirmation writes require an idempotency key so retries do not duplicate effects.
+  MCP and authenticated HTTP clients must also supply the reviewed task snapshot
+  returned by `show_today`; missing or changed reviews cannot save a new reply.
 - A small MCP Apps resource renders the Today view.
 - In-memory demo data keeps the first slice runnable without cloud credentials.
 - A DynamoDB repository uses strongly consistent reads and an atomic transaction for the task update plus idempotency record.
 - Missed-task sweeps persist a deterministic outbox record, acquire a conditional 60-second delivery lease, and record the SNS message identifier or a privacy-safe failure code.
-- The deployable worker runs that sweep every five minutes through EventBridge Scheduler, with bounded retries, a retained encrypted dead-letter queue, alarms, structured logs, and X-Ray tracing.
+- When explicitly enabled, the deployable worker runs that sweep every five minutes through EventBridge Scheduler, with bounded retries, a retained encrypted dead-letter queue, alarms, structured logs, and X-Ray tracing. New worker and schedule controls default to paused; see [release controls](docs/release-controls.md) before deployment.
 - Retries publish to the caregiver frozen into the durable outbox record even if the duty assignment changes later.
 - The Circle view makes the seven-day Maya/Theo rotation visible and editable, persists handoffs in DynamoDB, and derives exact local-day boundaries across daylight-saving changes.
-- The caregiver view renders queued, sending, sent, failed, blocked, and empty escalation states from the same shared snapshot.
+- **Propose next week** fills uncovered days using recent assigned responsibility,
+  preserves commitments, and saves the reviewed week atomically. A changed
+  roster invalidates the review; uncertain retries reuse the same receipt.
+- The caregiver view renders queued, sending, sent, failed, blocked, receipt-pending,
+  and empty escalation states from the same shared snapshot.
 - `show_weekly_brief` and `/api/weekly-brief` summarize a seven-day activity window with evidence IDs for every observation.
 - Bedrock ranks recorded events and selects safe follow-up categories; Kin renders every user-visible sentence directly from stored facts.
 - Model output is schema-checked and rejected if it cites an unknown event or applies a follow-up to the wrong event type; failures fall back to a deterministic brief.
@@ -69,9 +171,22 @@ signatures, issuer, audience/resource binding, expiration, and Alexa's reserved
 scopes. The local family simulator is not served unless
 `KIN_SERVE_SIMULATOR=true` is explicitly set.
 
+For ordinary MCP OAuth clients, opt into `KIN_MCP_AUTH_MODE=standard` alongside
+the existing OAuth and membership configuration. This enables user-scope
+discovery challenges; it does not register new clients or callbacks. The
+default `alexa` mode preserves the existing Alexa discovery profile. See the
+[interoperability guide](docs/mcp-interoperability.md) before selecting a mode.
+
 Set `KIN_DYNAMODB_TABLE`, `KIN_CIRCLE_ID`, `KIN_TIME_ZONE`, and `AWS_REGION` to use the AWS-backed repository. `KIN_TIME_ZONE` is an IANA identifier such as `America/Denver` and keeps daily care state aligned with the family's calendar after UTC midnight. With no table configured, Kin intentionally starts in local demo mode.
 
-Seed the cloud demo without overwriting existing confirmations:
+Initialize a cloud demo without overwriting existing records. This command is
+initialization-only: once the circle has a plan-control record (from initialization
+or task activity), it refuses further seeding. It reads the complete bounded seed
+set, then atomically inserts only missing rows and the initial plan version. A
+concurrent pause or task write prevents the transaction; nothing is partially
+seeded. Use the reviewed family workspace for subsequent plan changes. This
+requires separately authorized DynamoDB read/transaction permissions and makes
+real cloud writes; do not use it as a live notification test.
 
 ```bash
 AWS_PROFILE=kin-dev \
@@ -83,6 +198,10 @@ npm run seed:aws
 
 Run the missed-task worker with `KIN_ALERT_TOPIC_ARN` set in the local environment:
 
+This is a manual, full-circle sweep that bypasses the deployed worker pause.
+Do not use it for a one-message acceptance test or before destination consent
+and routing have been verified.
+
 ```bash
 AWS_PROFILE=kin-dev \
 AWS_REGION=us-east-1 \
@@ -93,7 +212,26 @@ KIN_ALERT_TOPIC_ARN="$KIN_ALERT_TOPIC_ARN" \
 npm run sweep:aws
 ```
 
-Kin prevents concurrent workers from publishing the same alert by leasing the outbox record. SNS standard-topic delivery is at least once; an ambiguous provider timeout can still produce a duplicate, so the message is deliberately non-alarming and contains no task details.
+Kin uses a delivery lease to limit competing workers; it does not guarantee
+exactly-once notification delivery. Known provider acceptance followed by a
+receipt-write error is held for reconciliation, not automatically resent.
+Expired sending attempts are also held because a stopped process may already
+have published. Provider timeouts remain ambiguous and can duplicate on retry.
+Messages contain no task details and ask the caregiver to check Kin.
+See [delivery operations](docs/delivery-operations.md) for the deployed hardening,
+alarm destination setup, and the live verification still required before activation.
+
+A recorded `not_yet` reply keeps the task incomplete and starts the configured
+grace period from the later of its due time or latest reply time (30 minutes by
+default). Replaying the same confirmation keeps the original timestamp.
+Subsequent sweeps use this timing; it does not cancel queued, in-flight or sent
+notifications. The worker evaluates tasks due today or yesterday in the circle's
+time zone; it is not an indefinite follow-up scheduler.
+
+Today includes unresolved follow-ups from the previous local day alongside
+today's alerts. Acknowledging yesterday's follow-up removes it from this view,
+without completing the task or cancelling delivery. Older alerts remain
+addressable by their stable IDs but have no historical inbox in this slice.
 
 Generate the grounded weekly brief with Amazon Nova through the scoped application role:
 
@@ -121,3 +259,8 @@ The Alexa access gate and integration contract live in [docs/alexa-readiness.md]
 ## Product boundary
 
 Kin coordinates ordinary family care. It is not a medical device, medication adviser, fall detector, or emergency monitoring service.
+
+## License
+
+The source is [MIT licensed](LICENSE). Repository visibility remains private at
+the owner’s request; adding a license does not publish the repository.

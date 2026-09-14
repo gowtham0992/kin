@@ -1,0 +1,15 @@
+{
+  "id": "/invite.html",
+  "name": "Kin — Your family circle",
+  "short_name": "Kin",
+  "description": "Your family's agreed check-ins, shared turns, and weekly catch-up.",
+  "start_url": "/invite.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f2ede2",
+  "theme_color": "#20352e",
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "/kin-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

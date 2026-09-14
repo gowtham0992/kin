@@ -20,6 +20,14 @@ function setup() {
 }
 
 describe("separate family workspace", () => {
+  it("explains invitation acceptance through Kin sign-in without requiring Alexa", async () => {
+    const page = await request(setup().app()).get("/invite.html").expect(200);
+    expect(page.text).toContain("sign in to Kin, choose Review invitation, and review their permissions before accepting");
+    expect(page.text).not.toContain("when linking Alexa");
+    expect(page.text).toContain("Closing a workspace session does not remove family membership");
+    expect(page.text).toContain("No access has been granted yet");
+  });
+
   it("keeps optional natural language disabled and requires consent for every model request", async () => {
     const fixture = setup();
     const body = { message: "I had some water", mode: "bedrock", transferConsent: true, disclosureVersion: familyConversationConsentVersion };
@@ -105,23 +113,33 @@ describe("separate family workspace", () => {
     const fixture = setup(); const app = fixture.app();
     await request(app).get("/api/session").expect(401);
     const response = await request(app).get("/api/session").set("authorization", "Bearer test").expect(200);
-    expect(response.body).toEqual({ name: "Maya", memberId: "maya", role: "caregiver", permissions: { confirm: true, manageDuty: true, invite: false } });
+    expect(response.body).toEqual({ name: "Maya", memberId: "maya", role: "caregiver", features: { completionUndo: true, completionUndoWindowSeconds: 300 }, permissions: { confirm: true, manageDuty: true, pausePlan: true, invite: false } });
     expect(response.headers["cache-control"]).toBe("no-store");
     fixture.find.mockResolvedValue({ circleId: "family-a", memberId: "theo", name: "Theo", role: "viewer", status: "active", canInvite: true });
     const viewer = await request(app).get("/api/session").set("authorization", "Bearer test").expect(200);
-    expect(viewer.body.permissions).toEqual({ confirm: false, manageDuty: false, invite: false });
+    expect(viewer.body.permissions).toEqual({ confirm: false, manageDuty: false, pausePlan: false, invite: false });
   });
   it("serves only the family asset allowlist with private-page protections", async () => {
     const app = setup().app();
-    await request(app).get("/").expect(302).expect("location", "/invite.html");
-    for (const asset of ["invite.html", "invite.js", "invite.css", "invite-client.js", "browser-auth.js", "styles.css"]) {
+    const home = await request(app).get("/").expect(200);
+    expect(home.text).toContain('href="/invite.html#ask"');
+    expect(home.text).toContain('href="/invite.html#today"');
+    expect(home.text).toContain("Simulated Alexa+ experience");
+    expect(home.text).toContain("classic Alexa skill");
+    expect(home.text).toContain("not native Alexa+ toolkit integration");
+    expect(home.text).not.toContain("not connected to Alexa or an Echo device");
+    expect(home.text).not.toContain("<script");
+    expect(home.text).not.toContain('href="/story.html"');
+    expect(home.headers["cache-control"]).toBe("no-store");
+    expect(home.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+    for (const asset of ["home.html", "home.css", "conversation.css", "invite.html", "invite.js", "invite.css", "invite-client.js", "browser-auth.js", "styles.css", "mcp-client.js", "completion-undo.js"]) {
       const response = await request(app).get(`/${asset}`).expect(200);
       expect(response.headers["cache-control"]).toBe("no-store");
       expect(response.headers["referrer-policy"]).toBe("no-referrer");
       expect(response.headers["x-content-type-options"]).toBe("nosniff");
       expect(response.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
     }
-    for (const path of ["/index.html", "/app.js", "/package.json", "/%2e%2e%2fpackage.json", "/.env"]) {
+    for (const path of ["/index.html", "/app.js", "/story.html", "/story.js", "/story.css", "/package.json", "/%2e%2e%2fpackage.json", "/.env"]) {
       await request(app).get(path).expect(404);
     }
     await request(app).get("/family-auth-config").expect(200, config);

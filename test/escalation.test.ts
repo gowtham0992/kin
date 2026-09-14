@@ -7,11 +7,89 @@ import {
 } from "../src/escalation.js";
 
 describe("missed-task escalation planning", () => {
+  it.each([
+    { timeZone: "America/Denver", now: "2026-09-03T06:00:00.000Z", previous: "2026-09-03T05:40:00.000Z", old: "2026-09-02T05:40:00.000Z", today: "2026-09-03T07:00:00.000Z" },
+    { timeZone: "Pacific/Kiritimati", now: "2026-09-02T10:00:00.000Z", previous: "2026-09-01T10:30:00.000Z", old: "2026-08-31T10:30:00.000Z", today: "2026-09-02T11:00:00.000Z" },
+  ])("keeps only unresolved prior-day follow-ups alongside today's alerts in $timeZone", async fixture => {
+    const now = new Date(fixture.now);
+    const store = new InMemoryCareStore([
+      ["previous-open", fixture.previous], ["previous-closed", fixture.previous],
+      ["older-open", fixture.old], ["today-closed", fixture.today],
+    ].map(([id, dueAt]) => ({ id: id!, dueAt: dueAt!, title: "A check-in", state: "scheduled", lastResponse: null,
+      confirmedBy: null, confirmedAt: null })), () => now, null, fixture.timeZone);
+    const queue = async (taskId: string, dueAt: string) => (await store.queueEscalation({
+      taskId, taskTitle: "A check-in", dueAt, reason: "no_active_duty_assignment",
+    }))!.record;
+    const previous = await queue("previous-open", fixture.previous);
+    const closed = await queue("previous-closed", fixture.previous);
+    await store.acknowledgeEscalation({ id: closed.id, memberId: "maya", name: "Maya" });
+    await queue("older-open", fixture.old);
+    const today = await queue("today-closed", fixture.today);
+    await store.acknowledgeEscalation({ id: today.id, memberId: "maya", name: "Maya" });
+    expect((await store.today()).escalations.map(alert => alert.id).sort()).toEqual([previous.id, today.id].sort());
+    expect((await store.today()).tasks.map(task => task.id)).toEqual(["today-closed"]);
+    await store.acknowledgeEscalation({ id: previous.id, memberId: "maya", name: "Maya" });
+    expect((await store.today()).escalations.map(alert => alert.id)).toEqual([today.id]);
+  });
+
+  it("gives a recorded Not yet reply a fresh grace period without completing the task", async () => {
+    let now = new Date("2026-09-02T16:00:00.000Z");
+    const store = createDemoStore(() => now);
+    await store.confirm({ taskId: "morning-water", response: "not_yet", actor: "Evelyn", requestId: "not-yet-grace" });
+    const snapshot = await store.today();
+    expect(snapshot.tasks[0]).toMatchObject({ state: "scheduled", lastResponse: "not_yet", confirmedAt: now.toISOString() });
+    expect(planMissedTaskEscalations({ snapshot, now }).events).toEqual([]);
+    now = new Date("2026-09-02T16:29:59.999Z");
+    expect(planMissedTaskEscalations({ snapshot, now }).events).toEqual([]);
+    now = new Date("2026-09-02T16:30:00.000Z");
+    expect(planMissedTaskEscalations({ snapshot, now }).events.map(event => event.taskId)).toEqual(["morning-water"]);
+  });
+
+  it("does not queue a blocked follow-up during the Not yet grace period", async () => {
+    const now = new Date("2026-09-02T16:00:00.000Z");
+    const store = createDemoStore(() => now);
+    await store.confirm({ taskId: "morning-water", response: "not_yet", actor: "Evelyn", requestId: "not-yet-no-coverage" });
+    const snapshot = await store.today(); snapshot.onDuty = null;
+    expect(planMissedTaskEscalations({ snapshot, now })).toEqual({ events: [], blocked: [] });
+  });
+
+  it("does not let a retry extend the grace period of the original reply", async () => {
+    let now = new Date("2026-09-02T16:00:00.000Z");
+    const store = createDemoStore(() => now);
+    const input = { taskId: "morning-water", response: "not_yet" as const, actor: "Evelyn", requestId: "not-yet-replay" };
+    await store.confirm(input);
+    now = new Date("2026-09-02T16:20:00.000Z");
+    expect((await store.confirm(input)).replayed).toBe(true);
+    const snapshot = await store.today();
+    expect(planMissedTaskEscalations({ snapshot, now }).events).toEqual([]);
+    now = new Date("2026-09-02T16:30:00.000Z");
+    expect(planMissedTaskEscalations({ snapshot, now }).events.map(event => event.taskId)).toEqual(["morning-water"]);
+  });
+
+  it("uses the later of the due time and reply time with the configured grace", async () => {
+    const now = new Date("2026-09-02T15:20:00.000Z");
+    const snapshot = await createDemoStore(() => now).today();
+    snapshot.tasks[0]!.lastResponse = "not_yet";
+    snapshot.tasks[0]!.confirmedAt = "2026-09-02T14:00:00.000Z";
+    expect(planMissedTaskEscalations({ snapshot, now, graceMinutes: 30 }).events).toEqual([]);
+    snapshot.tasks[0]!.confirmedAt = "2026-09-02T15:15:00.000Z";
+    expect(planMissedTaskEscalations({ snapshot, now, graceMinutes: 10 }).events).toEqual([]);
+    expect(planMissedTaskEscalations({ snapshot, now: new Date("2026-09-02T15:25:00.000Z"), graceMinutes: 10 }).events).toHaveLength(1);
+  });
+
+  it.each([null, "invalid", "2026-09-03T16:00:00.000Z"])("does not hide an overdue task behind an unusable reply timestamp: %s", async confirmedAt => {
+    const now = new Date("2026-09-02T16:00:00.000Z");
+    const snapshot = await createDemoStore(() => now).today();
+    snapshot.tasks[0]!.lastResponse = "not_yet";
+    snapshot.tasks[0]!.confirmedAt = confirmedAt;
+    expect(planMissedTaskEscalations({ snapshot, now }).events.map(event => event.taskId)).toEqual(["morning-water"]);
+  });
+
   it("records the first caregiver acknowledgment without completing the task or changing delivery state", async () => {
     const now = new Date("2026-09-02T16:00:00Z");
     const store = createDemoStore(() => now);
     const task = (await store.today()).tasks[0]!;
-    const { record } = await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
+    const { record } = (await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" }))!;
     await store.acknowledgeEscalation({ id: record.id, memberId: "maya", name: "Maya" });
     const retry = await store.acknowledgeEscalation({ id: record.id, memberId: "theo", name: "Theo" });
     expect(retry).toMatchObject({ status: "blocked", acknowledgedBy: "Maya", acknowledgedAt: now.toISOString() });
@@ -194,6 +272,7 @@ describe("missed-task escalation planning", () => {
         return { ...prior, status: "sending" as const, attemptId: "retry-2" };
       },
       async completeEscalation() { return { ...prior, status: "sent" as const }; },
+      async deferEscalationReceipt() { throw new Error("Unexpected receipt persistence failure"); },
       async failEscalation() { return prior; },
     };
 

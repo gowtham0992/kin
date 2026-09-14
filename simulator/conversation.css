@@ -1,0 +1,59 @@
+/* Parent conversation: the shared Kin palette, with one clear next action. */
+.care-conversation-heading { max-width: none; }
+#workspace-content .care-conversation-heading h2 { margin: 8px 0 16px; }
+.care-conversation-heading > .care-note { margin: 0; }
+.care-conversation-heading .care-mcp-badge { margin: 0 0 8px; }
+.care-conversation { max-width: none; gap: 0; margin: 24px 0 16px; }
+.care-conversation-prompt { padding: 24px 24px 16px; border-radius: 16px 16px 0 0; background: var(--sage-soft); }
+.care-conversation-prompt h3 { font: 400 clamp(28px, 4vw, 36px)/1.2 Georgia, serif; letter-spacing: -.025em; margin: 12px 0; overflow-wrap: anywhere; }
+.care-conversation-prompt .care-note, .care-voice-panel .care-note, .care-conversation-prompt .kicker { color: var(--sage); }
+.care-reply-label { margin: 24px 0 12px; font-size: 14px; font-weight: 700; }
+.care-reply-choices button { background: transparent; }
+.care-reply-choices button:hover:not(:disabled) { background: var(--sage-soft); border-color: var(--sage); }
+.care-conversation-link { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; color: var(--sage); text-underline-offset: 4px; font-weight: 700; }
+.care-voice-panel { padding: 8px 24px 24px; border-radius: 0 0 16px 16px; background: var(--sage-soft); }
+.care-voice-actions { align-items: center; }
+.care-voice-actions .care-voice-start { min-height: 64px; padding: 16px 32px; font-size: 20px; letter-spacing: -.02em; }
+.care-voice-start[data-phase="listening"] { box-shadow: 0 0 0 4px var(--sage-soft); }
+.care-voice-example { margin: 16px 0 8px; font-size: 17px; color: var(--ink); overflow-wrap: anywhere; }
+.care-conversation #care-voice-status { margin-top: 8px; }
+.care-conversation-draft { display: grid; align-content: start; gap: 8px; padding-top: 24px; }
+.care-conversation-draft input { margin-top: 8px; min-height: 56px; font-size: 18px; }
+.care-conversation-draft input::placeholder { color: var(--muted); opacity: 1; }
+.care-conversation-draft button { margin-top: 8px; }
+#workspace-content .care-conversation-model { margin: 24px 0 0; padding: 20px 0 0; }
+.care-conversation-model .care-transfer { border: 0; margin-top: 20px; padding-top: 0; }
+.care-conversation-model summary { color: var(--sage); }
+.care-conversation-review { max-width: 760px; margin-top: 24px; }
+.care-conversation-review .care-review-task { font: 400 28px/1.3 Georgia, serif; overflow-wrap: anywhere; }
+.care-conversation-review h3:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
+.care-conversation-help, .care-conversation-boundary { max-width: 760px; }
+.care-conversation-help .care-actions { margin: 16px 0; }
+.care-conversation-help button { max-width: 100%; text-align: left; overflow-wrap: anywhere; }
+.care-conversation-help summary, .care-conversation-model summary { min-height: 44px; }
+.care-conversation-help summary:focus-visible, .care-conversation-model summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
+.care-conversation-boundary { padding-top: 8px; }
+.care-conversation button:disabled { cursor: not-allowed; }
+@media (min-width: 901px) {
+  .care-conversation-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 32px; align-items: end; }
+  .care-conversation-heading > .kicker { grid-column: 1; grid-row: 1; }
+  #workspace-content .care-conversation-heading h2 { grid-column: 1; grid-row: 2 / 4; margin-bottom: 0; }
+  .care-conversation-heading .care-mcp-badge { grid-column: 2; grid-row: 1 / 3; margin-bottom: 4px; }
+  .care-conversation-heading > .care-note { grid-column: 2; grid-row: 3; }
+  .care-conversation { grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); column-gap: 40px; }
+  .care-conversation-prompt { grid-column: 1; grid-row: 1; }
+  .care-voice-panel { grid-column: 1; grid-row: 2; }
+  .care-conversation-draft { grid-column: 2; grid-row: 1 / 3; padding-top: 16px; }
+  #workspace-content .care-conversation-model { grid-column: 2; grid-row: 3; }
+}
+@media (max-width: 620px) {
+  .care-conversation { margin-top: 20px; }
+  .care-conversation-prompt { padding: 20px 16px 16px; }
+  .care-voice-panel { padding: 8px 16px 20px; }
+  .care-voice-actions .care-voice-start { width: 100%; }
+  .care-voice-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .care-conversation-draft button { width: 100%; }
+  .care-reply-choices { gap: 8px; }
+  .care-reply-choices button { flex: 1 1 auto; }
+  .care-conversation-review { padding: 24px 16px; }
+}

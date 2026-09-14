@@ -1,7 +1,9 @@
 import { configure as serverlessExpress } from "@codegenie/serverless-express";
 import type { Handler } from "aws-lambda";
 import express, { type NextFunction, type Request, type Response } from "express";
+import { errors } from "oidc-provider";
 import { CognitoAccountAuthenticator } from "./cognito-authenticator.js";
+import { CognitoAccountStatusDirectory, type AccountStatusDirectory } from "./cognito-account-status.js";
 import { createDynamoOidcAdapter } from "./oauth-dynamo-adapter.js";
 import { createOAuthInteractionRouter } from "./oauth-interactions.js";
 import type { AccountAuthenticator } from "./oauth-interactions.js";
@@ -15,6 +17,7 @@ interface OAuthRuntimeDependencies {
   secrets?: OAuthSecrets;
   adapter?: new (model: string) => object;
   authenticator?: AccountAuthenticator;
+  accountStatus?: AccountStatusDirectory;
   enrollment?: FamilyEnrollment;
 }
 
@@ -27,6 +30,7 @@ export async function createConfiguredOAuthApp(
   const resourceUri = requiredHttpsUrl(environment.KIN_MCP_RESOURCE_URI, "KIN_MCP_RESOURCE_URI");
   const tableName = required(environment.KIN_OAUTH_STATE_TABLE, "KIN_OAUTH_STATE_TABLE");
   const cognitoClientId = required(environment.KIN_COGNITO_CLIENT_ID, "KIN_COGNITO_CLIENT_ID");
+  const userPoolId = required(environment.KIN_COGNITO_USER_POOL_ID, "KIN_COGNITO_USER_POOL_ID");
   const secretId = required(environment.KIN_OAUTH_SECRET_ID, "KIN_OAUTH_SECRET_ID");
   const secrets = dependencies.secrets ?? await (dependencies.loadSecrets ?? loadOAuthSecrets)({
     secretId,
@@ -36,6 +40,14 @@ export async function createConfiguredOAuthApp(
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+  const echoRedirectUris = (environment.KIN_ECHO_REDIRECT_URIS ?? "")
+    .split(",").map(value => value.trim()).filter(Boolean);
+  if (echoRedirectUris.length && !secrets.echoClient) {
+    throw new Error("Echo account linking requires dedicated client credentials");
+  }
+  const accountStatus = dependencies.accountStatus ?? new CognitoAccountStatusDirectory({
+    userPoolId, region: environment.AWS_REGION,
+  });
   const provider = createKinOAuthProvider({
     issuer,
     resourceUri,
@@ -53,10 +65,26 @@ export async function createConfiguredOAuthApp(
     ...(redirectUris.length === 0 ? {} : {
       userClient: { ...secrets.userClient, redirectUris },
     }),
-    findAccount: async (accountId) => ({
-      accountId,
-      claims: async () => ({ sub: accountId }),
+    ...(echoRedirectUris.length === 0 ? {} : {
+      echoClient: { ...secrets.echoClient!, redirectUris: echoRedirectUris },
     }),
+    findAccount: async (accountId, lookup) => {
+      const current = await accountStatus.find(accountId);
+      // authTime is the server's original successful authentication start, not
+      // the current exchange time. Preserve milliseconds to catch same-second changes.
+      const authenticatedAt = typeof lookup.authTime === "number" ? lookup.authTime * 1_000 : NaN;
+      if (current?.accountId === accountId && Number.isFinite(current.modifiedAt) && current.modifiedAt > 0 &&
+        Number.isFinite(authenticatedAt) && authenticatedAt >= current.modifiedAt && authenticatedAt <= Date.now()) {
+        return { accountId, claims: async () => ({ sub: accountId }) };
+      }
+      if (lookup.source === "session") {
+        // Returning undefined alone does not clear oidc-provider's logged-in
+        // session. Destroy it so the next interactive attempt can start cleanly.
+        await lookup.invalidateSession?.();
+        throw new errors.LoginRequired("A fresh sign-in is required");
+      }
+      return undefined;
+    },
   });
   const app = express();
   app.disable("x-powered-by");
@@ -69,6 +97,7 @@ export async function createConfiguredOAuthApp(
     resourceUri,
     csrfSecret: secrets.csrfSecret,
     browserClientId: environment.KIN_BROWSER_AUTH_ENABLED === "true" ? environment.KIN_BROWSER_CLIENT_ID?.trim() : undefined,
+    echoClientId: echoRedirectUris.length ? secrets.echoClient!.clientId.trim() : undefined,
     enrollment: dependencies.enrollment ?? (environment.KIN_FAMILY_ENROLLMENT_ENABLED === "true"
       ? createDynamoFamilyEnrollment({
           tableName: required(environment.KIN_DYNAMODB_TABLE, "KIN_DYNAMODB_TABLE"),
@@ -80,7 +109,7 @@ export async function createConfiguredOAuthApp(
   app.use((_error: unknown, _request: Request, response: Response, _next: NextFunction) => {
     if (response.headersSent) return;
     response.setHeader("Cache-Control", "no-store");
-    response.status(500).type("text").send("Kin couldn't complete account linking. Start again from Alexa+.");
+    response.status(500).type("text").send("Kin couldn't complete sign-in. Return to the app where you started and try again.");
   });
   return app;
 }

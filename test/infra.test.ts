@@ -35,6 +35,15 @@ describe("Kin AWS infrastructure", () => {
       roles.some((role: { Ref: string }) => role.Ref === roleFor("kin-oauth-api")) &&
       [statement.Action].flat().includes("dynamodb:PutItem") && JSON.stringify(statement.Resource).includes("kin-care-state"));
     expect(oauthCarePuts).toEqual([conditionChecks[1]]);
+    const userPoolId = Object.keys(template.findResources("AWS::Cognito::UserPool"))[0]!;
+    const oauthFunction = Object.values(functions).find(resource => resource.Properties.FunctionName === "kin-oauth-api")!;
+    expect(oauthFunction.Properties.Environment.Variables.KIN_COGNITO_USER_POOL_ID).toEqual({ Ref: userPoolId });
+    const oauthCognitoReads = statements.filter(({ roles, statement }) =>
+      roles.some((role: { Ref: string }) => role.Ref === roleFor("kin-oauth-api")) &&
+      [statement.Action].flat().some(action => String(action).startsWith("cognito-idp:")));
+    expect(oauthCognitoReads).toEqual([{ roles: [{ Ref: roleFor("kin-oauth-api") }], statement: {
+      Effect: "Allow", Action: "cognito-idp:AdminGetUser", Resource: { "Fn::GetAtt": [userPoolId, "Arn"] },
+    } }]);
   });
   it("issues a valid service JWT from the actual minified OAuth deployment artifact", async () => {
     const app = new App();
@@ -56,6 +65,7 @@ describe("Kin AWS infrastructure", () => {
       KIN_MCP_RESOURCE_URI: `${issuer}/mcp`,
       KIN_OAUTH_STATE_TABLE: "test-state",
       KIN_COGNITO_CLIENT_ID: "test-cognito-client",
+      KIN_COGNITO_USER_POOL_ID: "us-east-1_synthetic",
       KIN_OAUTH_SECRET_ID: "test-secret",
     }, {
       secrets: {
@@ -126,6 +136,19 @@ describe("Kin AWS infrastructure", () => {
     const app = new App();
     const template = Template.fromStack(new KinDataStack(app, "TestKinWorker"));
 
+    for (const parameter of ["EscalationWorkerEnabled", "EscalationScheduleEnabled"]) {
+      template.hasParameter(parameter, {
+        Type: "String", Default: "false", AllowedValues: ["true", "false"],
+      });
+    }
+    const scheduleCondition = {
+      "Fn::And": [
+        { "Fn::Equals": [{ Ref: "EscalationWorkerEnabled" }, "true"] },
+        { "Fn::Equals": [{ Ref: "EscalationScheduleEnabled" }, "true"] },
+      ],
+    };
+    template.hasCondition("EscalationSchedulingEnabled", scheduleCondition);
+
     template.hasResourceProperties("AWS::Lambda::Function", {
       FunctionName: "kin-escalation-worker",
       Runtime: "nodejs22.x",
@@ -137,12 +160,13 @@ describe("Kin AWS infrastructure", () => {
           KIN_CIRCLE_ID: "demo-family",
           KIN_TIME_ZONE: "America/Denver",
           KIN_GRACE_MINUTES: "30",
+          KIN_ESCALATION_WORKER_ENABLED: { Ref: "EscalationWorkerEnabled" },
         }),
       },
     });
     template.hasResourceProperties("AWS::Scheduler::Schedule", {
       Name: "kin-escalation-sweep",
-      State: "ENABLED",
+      State: { "Fn::If": ["EscalationSchedulingEnabled", "ENABLED", "DISABLED"] },
       ScheduleExpression: "rate(5 minutes)",
       FlexibleTimeWindow: { Mode: "OFF" },
       Target: Match.objectLike({
@@ -170,6 +194,21 @@ describe("Kin AWS infrastructure", () => {
     expect(policies).toContain("dynamodb:UpdateItem");
     expect(policies).not.toContain("dynamodb:Scan");
     expect(policies).not.toContain("dynamodb:DeleteItem");
+
+    // Evaluate the emitted condition, not a parallel copy of the desired flag logic.
+    const emitted = template.toJSON();
+    const schedulingState = Object.values(template.findResources("AWS::Scheduler::Schedule"))[0]!.Properties.State;
+    for (const worker of ["false", "true"]) {
+      for (const schedule of ["false", "true"]) {
+        const parameters: Record<string, string> = { EscalationWorkerEnabled: worker, EscalationScheduleEnabled: schedule };
+        const conjunction = emitted.Conditions[schedulingState["Fn::If"][0]]["Fn::And"];
+        const enabled = conjunction.every((term: { "Fn::Equals": [{ Ref: string }, string] }) => {
+          const [reference, expected] = term["Fn::Equals"];
+          return parameters[reference.Ref] === expected;
+        });
+        expect(schedulingState["Fn::If"][enabled ? 1 : 2]).toBe(worker === "true" && schedule === "true" ? "ENABLED" : "DISABLED");
+      }
+    }
   });
 
   it("defines a fail-closed public MCP runtime on AWS-managed HTTPS", () => {
@@ -177,6 +216,15 @@ describe("Kin AWS infrastructure", () => {
     const template = Template.fromStack(new KinApiStack(app, "ApiTest", {}));
 
     template.hasParameter("AlexaRedirectUris", { Type: "String", Default: "" });
+    template.hasParameter("EchoRedirectUris", { Type: "String", Default: "" });
+    const echoCallbackPattern = new RegExp(template.toJSON().Parameters.EchoRedirectUris.AllowedPattern);
+    for (const callbacks of ["", "https://pitangui.amazon.com/api/skill/link/synthetic-vendor", "https://pitangui.amazon.com/api/skill/link/synthetic-vendor,https://layla.amazon.com/api/skill/link/synthetic-vendor"]) {
+      expect(echoCallbackPattern.test(callbacks)).toBe(true);
+    }
+    for (const callbacks of ["http://alexa.example/callback", "https://alexa.example/callback#fragment", "https://user:password@alexa.example/callback", "https://alexa.example/*", "https://alexa.example/callback,", "https://alexa.example/callback, https://alexa.example/other"]) {
+      expect(echoCallbackPattern.test(callbacks)).toBe(false);
+    }
+    template.hasParameter("McpAuthMode", { Type: "String", Default: "alexa", AllowedValues: ["alexa", "standard"] });
     for (const parameter of ["FamilyWorkspaceEnabled", "FamilyEnrollmentEnabled", "InvitationIssuingEnabled", "FamilyConversationEnabled"]) {
       template.hasParameter(parameter, { Type: "String", Default: "false", AllowedValues: ["true", "false"] });
     }
@@ -207,6 +255,7 @@ describe("Kin AWS infrastructure", () => {
           KIN_BROWSER_REDIRECT_URI: Match.anyValue(),
           KIN_INVITATION_ISSUING_ENABLED: { Ref: "InvitationIssuingEnabled" },
           KIN_MCP_RESOURCE_PARAMETER: "/kin/mcp/canonical-uri",
+          KIN_MCP_AUTH_MODE: { Ref: "McpAuthMode" },
           KIN_PUBLIC_API_ENABLED: Match.anyValue(),
           KIN_OAUTH_ISSUER: Match.anyValue(),
           KIN_OAUTH_JWKS_URI: Match.anyValue(),
@@ -286,6 +335,11 @@ describe("Kin AWS infrastructure", () => {
       .filter(statement => [statement.Action].flat().includes("dynamodb:DeleteItem"));
     expect(deleteStatements).toEqual([{
       Effect: "Allow", Action: "dynamodb:DeleteItem",
+      Resource: { "Fn::Join": ["", ["arn:", { Ref: "AWS::Partition" }, ":dynamodb:", { Ref: "AWS::Region" }, ":", { Ref: "AWS::AccountId" }, ":table/kin-care-state"]] },
+      Condition: { "ForAnyValue:StringEquals": { "dynamodb:EnclosingOperation": ["TransactWriteItems"] },
+        "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["CIRCLE#demo-family"] } },
+    }, {
+      Effect: "Allow", Action: "dynamodb:DeleteItem",
       Resource: { "Fn::GetAtt": [oauthTableId, "Arn"] },
       Condition: { "ForAnyValue:StringEquals": { "dynamodb:EnclosingOperation": ["TransactWriteItems"] } },
     }]);
@@ -308,6 +362,7 @@ describe("Kin AWS infrastructure", () => {
           KIN_COGNITO_CLIENT_ID: Match.anyValue(),
           KIN_OAUTH_SECRET_ID: Match.anyValue(),
           KIN_ALEXA_REDIRECT_URIS: Match.anyValue(),
+          KIN_ECHO_REDIRECT_URIS: { Ref: "EchoRedirectUris" },
           KIN_PUBLIC_API_ENABLED: Match.anyValue(),
         }),
       },
@@ -336,6 +391,7 @@ describe("Kin AWS infrastructure", () => {
     expect(policies).toContain("secretsmanager:GetSecretValue");
     expect(policies).toContain("secretsmanager:PutSecretValue");
     expect(policies).not.toContain("dynamodb:Scan");
-    // The sole DeleteItem grant is asserted above: OAuth state, transactions only.
+    // Both DeleteItem grants are asserted above: transaction-only OAuth cleanup
+    // and account self-connection limited to the configured care partition.
   });
 });

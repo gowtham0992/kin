@@ -18,7 +18,7 @@ describe("DynamoDB routine changes", () => {
         return { Item: tasks.find(task => sk.endsWith(`#${task.id}`)) };
       }
       if (command instanceof TransactWriteCommand) {
-        receipt = command.input.TransactItems!.at(-1)!.Put!.Item;
+        receipt = command.input.TransactItems!.find(item => item.Put?.Item?.entityType === "RoutineChange")!.Put!.Item;
         throw Object.assign(new Error("concurrent winner"), { name: "TransactionCanceledException" });
       }
       throw new Error("Unexpected command");
@@ -30,14 +30,16 @@ describe("DynamoDB routine changes", () => {
     const writes = send.mock.calls.filter(([command]) => command instanceof TransactWriteCommand);
     expect(writes).toHaveLength(1);
     const items = (writes[0]![0] as TransactWriteCommand).input.TransactItems!;
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
     for (const item of items.slice(0, 2)) {
       expect(item.Update).toMatchObject({
         ConditionExpression: "#state = :scheduled AND lastResponse = :untouched AND title = :oldTitle AND dueAt > :now AND routineId = :routine",
         ExpressionAttributeValues: { ":scheduled": "scheduled", ":untouched": null, ":oldTitle": "Call together", ":value": "cancelled", ":actor": "Maya" },
       });
     }
-    expect(items.at(-1)!.Put!.ConditionExpression).toBe("attribute_not_exists(PK)");
+    expect(items[2]!.Put).toMatchObject({ ConditionExpression: "attribute_not_exists(PK)", Item: { entityType: "RoutineChange", input: change } });
+    expect(items[3]!.Put).toEqual({ TableName: "test", ConditionExpression: "attribute_not_exists(PK)",
+      Item: { PK: "CIRCLE#test", SK: "PLAN_CONTROL", entityType: "PlanControl", version: 1 } });
   });
   it("fails closed when one occurrence is missing", async () => {
     const send = vi.fn(async (command: unknown) => {

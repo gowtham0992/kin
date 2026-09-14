@@ -159,12 +159,13 @@ describe("optional family Bedrock consent", () => {
   });
 
   it.each(["typing", "example", "voice"])("clears transfer consent when %s changes the draft", async change => {
-    const ui = await fixture({ naturalLanguage: true, tasks: [{ id: "water", title: "Drink a glass of water", state: "scheduled" }] });
+    const dueAt = "2026-09-08T15:00:00.000Z";
+    const ui = await fixture({ naturalLanguage: true, tasks: [{ id: "water", title: "Drink a glass of water", state: "scheduled", dueAt }] });
     const input = ui.element("care-request"), consent = ui.element("care-transfer-consent");
     input.value = "Not yet:"; await input.emit("input");
     consent.checked = true; await consent.emit("change");
     if (change === "typing") { input.value = "I drank the water"; await input.emit("input"); }
-    else if (change === "example") await ui.button("Drink a glass of water").click();
+    else if (change === "example") await ui.button(`Drink a glass of water · ${new Date(dueAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`).click();
     else {
       await ui.button("Use voice input").click();
       expect(consent.checked).toBe(false); // Microphone permission cannot carry model consent.

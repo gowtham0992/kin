@@ -47,6 +47,8 @@ declare module "oidc-provider" {
   }
 
   export const errors: {
+    LoginRequired: new (message?: string) => Error;
+    InvalidGrant: new (message?: string) => Error;
     InvalidTarget: new (message?: string) => Error;
     InvalidScope: new (description?: string, scope?: string) => Error;
   };

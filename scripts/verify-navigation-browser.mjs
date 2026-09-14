@@ -1,0 +1,154 @@
+// Local memory APIs and synthetic identities only. No live accounts, AWS, audio, or messages.
+import { spawn } from "node:child_process";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import assert from "node:assert/strict";
+import { chromium, expect } from "playwright/test";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const output = path.resolve(process.argv[2] || "/tmp/kin-navigation-browser");
+const origin = "http://127.0.0.1:3057";
+const child = spawn(process.execPath, ["--import", "tsx", "scripts/preview-invitations.ts", "success", "3057"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+let browser;
+const errors = [], blocked = [], writes = [];
+try {
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Navigation preview startup timed out")), 10000);
+    child.once("error", reject);
+    child.once("exit", code => { clearTimeout(timeout); reject(new Error(`Preview exited: ${code}`)); });
+    child.stdout.on("data", data => { if (String(data).includes("Synthetic invitation preview")) { clearTimeout(timeout); resolve(); } });
+  });
+  browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 375, height: 900 }, serviceWorkers: "block" });
+  await context.route("**/*", route => {
+    if (new URL(route.request().url()).origin === origin) return route.continue();
+    blocked.push(route.request().url()); return route.abort();
+  });
+  const page = await context.newPage();
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("request", request => { if (/\/api\/tasks\/[^/]+\/confirm$/.test(request.url())) writes.push(request.postDataJSON()); });
+  await page.goto(`${origin}/invite.html#today`);
+  const primary = page.getByRole("navigation", { name: "Family workspace", exact: true });
+  await expect(primary).toBeVisible();
+  assert.deepEqual(await primary.getByRole("link").allTextContents(), ["Today", "Plan", "Turns", "Week"]);
+  await expect(page.locator("#workspace-secondary")).toBeVisible();
+  await expect(page.locator("#workspace-management")).not.toHaveAttribute("open", "");
+  await expect(page.locator("#workspace-content")).toContainText("Updates are recorded via Maya’s Kin account");
+  const contrast = (foreground, background) => {
+    const luminance = color => color.match(/\d+/g).slice(0, 3).map(Number).map(value => {
+      const channel = value / 255; return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    }).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+    const a = luminance(foreground), b = luminance(background);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  };
+  const colors = await page.evaluate(() => {
+    const active = getComputedStyle(document.querySelector('#workspace-nav a[aria-current]'));
+    const inactive = getComputedStyle(document.querySelector('#workspace-nav a:not([aria-current])'));
+    return { active: active.color, activeBackground: active.backgroundColor, inactive: inactive.color, background: getComputedStyle(document.body).backgroundColor };
+  });
+  const ratios = { active: contrast(colors.active, colors.activeBackground), inactive: contrast(colors.inactive, colors.background) };
+  assert.ok(ratios.active >= 4.5 && ratios.inactive >= 4.5, "Navigation text meets AA contrast");
+
+  await mkdir(output, { recursive: true });
+  for (const width of [320, 375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Overflow at ${width}px`);
+    const boxes = [];
+    for (const link of await primary.getByRole("link").all()) {
+      const box = await link.boundingBox(); boxes.push(box);
+      assert.ok(box.width >= 44 && box.height >= 44, `Small navigation target at ${width}px`);
+      assert.ok(box.x >= 0 && box.x + box.width <= width, `Clipped navigation target at ${width}px`);
+    }
+    assert.equal(new Set(boxes.map(box => box.y)).size, 1, `Primary navigation wraps at ${width}px`);
+    await page.screenshot({ path: path.join(output, `today-${width}.png`), fullPage: true });
+  }
+  await primary.getByRole("link", { name: "Plan", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#workspace-content")).toBeFocused();
+  await expect(primary.getByRole("link", { name: "Plan", exact: true })).toHaveAttribute("aria-current", "page");
+  await page.locator("#plan-title").fill("A draft for our next call");
+  await primary.getByRole("link", { name: "Turns", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Who’s taking the next turn?" })).toBeVisible();
+  await expect(page).toHaveURL(`${origin}/invite.html#turns`);
+  await page.goBack();
+  await expect(page.locator("#plan-title")).toHaveValue("A draft for our next call");
+  await page.goto(`${origin}/invite.html#circle`);
+  await expect(page.getByRole("heading", { name: "Who’s taking the next turn?" })).toBeVisible();
+  await expect(primary.getByRole("link", { name: "Turns", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page).toHaveURL(`${origin}/invite.html#circle`);
+  await page.reload();
+  await expect(primary.getByRole("link", { name: "Turns", exact: true })).toHaveAttribute("aria-current", "page");
+  await primary.getByRole("link", { name: "Week", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(primary.getByRole("link", { name: "Week", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.locator("#workspace-content h2")).toBeVisible();
+  await expect(page.locator("#workspace-content")).toBeFocused();
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.locator("#workspace-management summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#workspace-invite-link")).toBeVisible();
+  await expect(page.locator("#workspace-access-link")).toBeVisible();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "Expanded organizer menu fits a narrow phone");
+
+  await page.locator("#workspace-ask-link").click();
+  await page.locator("#care-request").fill("Not yet: Drink a glass of water");
+  await primary.getByRole("link", { name: "Today", exact: true }).click();
+  await page.locator("#workspace-ask-link").click();
+  await expect(page.locator("#care-request")).toHaveValue("Not yet: Drink a glass of water");
+  await expect(page.locator("#workspace-content")).toContainText("Updates are recorded via Maya’s Kin account");
+
+  // A failed new-view read remains recoverable from that view, with keyboard focus.
+  await page.route("**/api/plan", route => route.fulfill({ status: 503, json: { error: "unavailable" } }));
+  await primary.getByRole("link", { name: "Plan", exact: true }).click();
+  await expect(page.locator("#workspace-status")).toContainText("Could not refresh");
+  await expect(page.locator("#workspace-content")).toContainText("Plan is temporarily unavailable");
+  await expect(page.locator("#workspace-content")).toBeFocused();
+  await page.unroute("**/api/plan");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.locator("#plan-title")).toBeVisible();
+
+  // Keep an uncertain save bound to its current view and exact retry body.
+  await primary.getByRole("link", { name: "Today", exact: true }).click();
+  let lost = false;
+  await page.route("**/api/tasks/*/confirm", async route => {
+    if (lost) return route.continue();
+    lost = true; const response = await route.fetch(); assert.ok(response.ok());
+    return route.abort("connectionreset");
+  });
+  await page.getByRole("button", { name: "Done", exact: true }).first().click();
+  await expect(page.locator("#workspace-retry-write")).toBeVisible();
+  await primary.getByRole("link", { name: "Turns", exact: true }).click();
+  await expect(page).toHaveURL(`${origin}/invite.html#today`);
+  await expect(primary.getByRole("link", { name: "Today", exact: true })).toHaveAttribute("aria-current", "page");
+  await page.locator("#workspace-retry-write").click();
+  await expect(page.locator("#workspace-retry-write")).toBeHidden();
+  assert.equal(writes.length, 2); assert.deepEqual(writes[0], writes[1]); assert.equal(writes[0].actor, "Maya");
+
+  // Exercise the UI with server-provided role capabilities; API enforcement has separate integration tests.
+  for (const role of ["caregiver", "care_recipient", "viewer"]) {
+    await page.route("**/api/session", async route => {
+      const response = await route.fetch(); const session = await response.json();
+      return route.fulfill({ json: { ...session, role, permissions: { confirm: role !== "viewer", manageDuty: role === "caregiver", manageRoster: false, invite: false } } });
+    });
+    await page.goto(`${origin}/invite.html#turns`);
+    await expect(primary).toBeVisible();
+    await expect(page.locator("#workspace-management")).toBeHidden();
+    await expect(page.locator("#workspace-ask-link"))[role === "viewer" ? "toBeHidden" : "toBeVisible"]();
+    if (role !== "caregiver") await expect(page.locator(".care-roster select").first()).toBeDisabled();
+    await page.goto(`${origin}/invite.html#ask`);
+    if (role === "viewer") await expect(page.locator("#care-request")).toHaveCount(0);
+    else await expect(page.locator("#care-request")).toBeVisible();
+    await page.unroute("**/api/session");
+  }
+  // Fresh access loss clears both navigation levels and private content.
+  await page.goto(`${origin}/invite.html#today`);
+  await expect(primary).toBeVisible();
+  await page.route("**/api/session", route => route.fulfill({ status: 403, json: { error: "forbidden" } }));
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(primary).toBeHidden();
+  await expect(page.locator("#workspace-secondary")).toBeHidden();
+  await expect(page.locator("#workspace-content")).toBeEmpty();
+  assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
+  console.log(JSON.stringify({ passed: true, widths: [320, 375, 768, 1280], contrast: ratios, checks: ["primary-navigation", "secondary-controls", "keyboard-focus", "back-refresh-legacy-circle", "plan-and-conversation-drafts", "read-error-recovery", "uncertain-save-retry", "role-controls", "signed-in-author", "access-loss-clears-content"], output }));
+} finally { await browser?.close(); child.kill("SIGTERM"); }

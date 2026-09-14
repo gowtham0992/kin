@@ -22,6 +22,7 @@ const result = await runEscalationSweep({
   store: repository,
   publisher: createSnsAlertPublisher({ topicArn, region }),
   now,
+  completionClock: process.env.KIN_SWEEP_AS_OF ? () => now : () => new Date(),
   attemptId: randomUUID(),
 });
 
