@@ -3,6 +3,7 @@ import { createBrowserAuth } from "./browser-auth.js";
 import { createWorkspace } from "./workspace.js";
 
 let auth = null;
+let reconnectSilently = false;
 let entryGeneration = 0, suspended = false;
 const ownsEntry = generation => !suspended && generation === entryGeneration;
 const client = createInvitationClient({ request: (...args) => auth ? auth.request(...args) : fetch(...args) });
@@ -23,6 +24,7 @@ const workspace = createWorkspace({
   onInvite: load,
   onLeaveInvite: clearReceipt,
   onAccessLost(code, pending) {
+    reconnectSilently = code === 401 && pending?.outcomeUnknown !== true && auth?.canRenew === true;
     clearReceipt(); $("invitation-area").hidden = true;
     status.textContent = pending?.outcomeUnknown === true && /^[A-Za-z0-9_-]{1,100}$/.test(pending.requestId ?? "")
       ? `Your family access changed. The pending change may have completed. Ask an organizer to check the care plan before trying again. Reference: ${pending.requestId}.`
@@ -115,7 +117,9 @@ $("browser-signin").addEventListener("click", async () => {
   try {
     // Turns uses the existing allowlisted Circle return view through sign-in.
     const view = window.location.hash.slice(1);
-    const target = await owner.start(view === "turns" ? "circle" : view);
+    const silent = reconnectSilently && owner.canRenew;
+    reconnectSilently = false;
+    const target = await owner.start(view === "turns" ? "circle" : view, { silent });
     if (ownsEntry(current) && auth === owner) window.location.assign(target);
   } catch {
     if (!ownsEntry(current)) return;
@@ -123,6 +127,7 @@ $("browser-signin").addEventListener("click", async () => {
   }
 });
 $("browser-disconnect").addEventListener("click", async () => {
+  reconnectSilently = false;
   entryGeneration += 1;
   const current = entryGeneration;
   const closing = auth?.disconnect(); workspace.reset(); clearReceipt(); form.hidden = true; $("invitation-area").hidden = true;
@@ -142,6 +147,7 @@ $("browser-disconnect").addEventListener("click", async () => {
 });
 async function initialize() {
   if (suspended) return;
+  reconnectSilently = false;
   const current = ++entryGeneration;
   auth?.suspend(); auth = null; workspace.reset(); clearReceipt();
   $("browser-signin").disabled = true;

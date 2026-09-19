@@ -18,7 +18,7 @@ class Element {
 beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); vi.spyOn(Date, "now").mockReturnValue(1_000_000); });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-async function fixture(options: { view?: string; callback?: boolean; invalidState?: boolean; callbackHash?: string; tokenResponse?: Promise<Response>; cookie?: boolean; closed?: boolean } = {}) {
+async function fixture(options: { view?: string; callback?: boolean; invalidState?: boolean; callbackHash?: string; tokenResponse?: Promise<Response>; cookie?: boolean; cookieActive?: boolean; closed?: boolean } = {}) {
   const data = new Map<string, string>();
   if (options.closed) data.set("kin.workspace-closed", "1");
   const storage = { setItem: (key: string, value: string) => data.set(key, value), getItem: (key: string) => data.get(key) ?? null, removeItem: (key: string) => data.delete(key) };
@@ -44,7 +44,8 @@ async function fixture(options: { view?: string; callback?: boolean; invalidStat
   vi.stubGlobal("crypto", cryptoApi);
   const request = vi.fn(async (url: string) => {
     if (url === "/family-auth-config") return Response.json({ ...config, ...(options.cookie ? { sessionMode: "cookie" } : {}) });
-    if (url === "/browser-session" && options.cookie) return new Response(null, { status: 401 });
+    if (url === "/browser-session" && options.cookie) return options.cookieActive
+      ? Response.json({ expiresAt: 1_100_000, binding: "a".repeat(64) }) : new Response(null, { status: 401 });
     if (url === "/token") return options.tokenResponse ?? Response.json({ access_token: "synthetic-token", token_type: "Bearer", expires_in: 3600, scope: "mcp:tools" });
     throw new Error(`Unexpected request: ${url}`);
   });
@@ -57,6 +58,27 @@ async function fixture(options: { view?: string; callback?: boolean; invalidStat
 }
 
 describe("parent and family entry through sign-in", () => {
+  it("renews an expired active-page session only after a deliberate reconnect click", async () => {
+    const ui = await fixture({ cookie: true, cookieActive: true, view: "week" });
+    await vi.waitFor(() => expect(workspace.open).toHaveBeenCalledOnce());
+    vi.mocked(Date.now).mockReturnValue(1_100_001);
+    workspace.onAccessLost!(401);
+    expect(ui.location.assign).not.toHaveBeenCalled();
+    await ui.element("browser-signin").listeners.get("click")!();
+    const target = new URL(ui.location.assign.mock.calls[0]![0]);
+    expect(target.searchParams.get("prompt")).toBe("none");
+    expect(JSON.parse(ui.data.get("kin.browser-login")!).returnView).toBe("week");
+    expect(ui.request.mock.calls.map(([url]) => url)).toEqual(["/family-auth-config", "/browser-session"]);
+  });
+  it.each([401, 403])("does not silently reconnect an uncertain save after access status %s", async code => {
+    const ui = await fixture({ cookie: true, cookieActive: true });
+    await vi.waitFor(() => expect(workspace.open).toHaveBeenCalledOnce());
+    workspace.onAccessLost!(code, { outcomeUnknown: true, requestId: "uncertain-save-01" });
+    expect(ui.location.assign).not.toHaveBeenCalled();
+    await ui.element("browser-signin").listeners.get("click")!();
+    expect(new URL(ui.location.assign.mock.calls[0]![0]).searchParams.get("prompt")).toBe("login consent");
+    expect(ui.element("invite-status").textContent).toContain("may have completed");
+  });
   it("tries one silent provider renewal when the cookie session has expired on page entry", async () => {
     const ui = await fixture({ cookie: true, view: "week" });
     await vi.waitFor(() => expect(ui.location.assign).toHaveBeenCalledOnce());
