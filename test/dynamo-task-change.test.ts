@@ -30,6 +30,23 @@ function fixture(mode: "normal" | "lost" | "race" | "conflict" = "normal", store
 }
 
 describe("Dynamo one-off check-in changes", () => {
+  it("guards overdue closure against a concurrent reply and commits the receipt in the same transaction", async () => {
+    const overdue = { ...row, dueAt: "2026-09-08T14:00:00.000Z", routineId: "daily" };
+    overdue.SK = `TASK#${overdue.dueAt}#${overdue.id}`;
+    const send = vi.fn(async (command: unknown) => command instanceof GetCommand
+      ? { Item: command.input.Key!.SK === overdue.SK ? overdue : undefined } : {});
+    const store = new DynamoCareRepository({ client: { send }, tableName: "synthetic", circleId: "family-a", now: () => now });
+    await store.changeTask({ ...input, action: "close_unanswered", expected: { title: overdue.title, dueAt: overdue.dueAt } });
+    const transaction = send.mock.calls.map(([command]) => command).find(command => command instanceof TransactWriteCommand) as TransactWriteCommand;
+    const update = transaction.input.TransactItems![0]!.Update!;
+    expect(update.ConditionExpression).toContain("#state = :scheduled AND lastResponse = :untouched AND confirmedAt = :untouched AND confirmedBy = :untouched");
+    expect(update.ConditionExpression).toContain("dueAt < :now");
+    expect(update.ConditionExpression).not.toContain("attribute_not_exists(routineId)");
+    expect(update.ExpressionAttributeValues?.[":value"]).toBe("closed_unanswered");
+    expect(update.UpdateExpression).toBe("SET #state = :value, changedAt = :now, changedBy = :actor");
+    expect(transaction.input.TransactItems![1]!.Put!.Item!.result.action).toBe("close_unanswered");
+  });
+
   it("atomically cancels the reviewed occurrence, puts a fresh linked replacement, and guards membership", async () => {
     const { store, send } = fixture("normal", { ...row, responseVersion: "private-old-response" } as typeof row);
     const move: TaskChange = { ...input, action: "reschedule", dueAt: "2026-09-09T18:00:00.000Z" };

@@ -132,6 +132,14 @@ describe("weekly responsibility facts", () => {
 });
 
 describe("WeeklyBriefService", () => {
+  it("reports closure attribution without calling it a completion, skip, or open task", async () => {
+    const task = { ...recordedTask("water", "2026-09-02T15:00:00.000Z", "closed_unanswered"), changedBy: "Maya", changedAt: "2026-09-02T17:00:00.000Z" };
+    const brief = await new WeeklyBriefService(new InMemoryCareStore([task], fixedNow)).create(asOf);
+    expect(brief.stats).toMatchObject({ scheduled: 1, completed: 0, skipped: 0, stillOpen: 0 });
+    expect(brief.evidence[0]!.fact).toBe("water was closed by Maya with no reply at 2026-09-02T17:00:00.000Z.");
+    expect(brief.followUps).toEqual([]);
+  });
+
   it("uses correct number agreement for zero, one, and multiple recorded tasks", async () => {
     for (const count of [0, 1, 2]) {
       const tasks = Array.from({ length: count }, (_, index) => recordedTask(`task-${index}`, "2026-09-02T15:00:00.000Z", "done"));
@@ -282,7 +290,8 @@ describe("WeeklyBriefService", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const modelSource = JSON.parse(send.mock.calls[0]![0].input.messages![0]!.content![0]!.text!);
     expect(modelSource.stats).toEqual({ scheduled: 1, completed: 0, skipped: 0, stillOpen: 1, escalations: 0 });
-    expect(modelSource.evidence).toEqual([{ id: evidenceId, kind: "care_task", occurredAt: past.dueAt, fact: "due-task was still open." }]);
+    expect(modelSource.evidence).toEqual([{ id: "e1", kind: "care_task", occurredAt: past.dueAt, fact: "due-task was still open." }]);
+    expect(brief.evidence[0]?.id).toBe(evidenceId);
     expect(JSON.stringify(brief)).not.toContain(future.id);
   });
 

@@ -120,7 +120,9 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
     const current = pendingDuty;
     try {
       const result = await json("/api/circle/duty", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(current) });
-      if (result.requestId !== current.requestId || !result.assignments?.some(day => day.date === current.date && day.memberId === current.memberId)) throw new Error("Receipt mismatch");
+      if (result.requestId !== current.requestId || !Array.isArray(result.assignments) || (current.memberId === null
+        ? result.assignments.some(day => day.date === current.date)
+        : !result.assignments.some(day => day.date === current.date && day.memberId === current.memberId))) throw new Error("Receipt mismatch");
       pendingDuty = null; return result;
     } catch (error) { if (error.definitiveRejection || error.status === 409) pendingDuty = null; throw error; }
   }

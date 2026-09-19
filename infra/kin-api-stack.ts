@@ -12,6 +12,7 @@ import {
 } from "aws-cdk-lib";
 import { AccessLogFormat } from "aws-cdk-lib/aws-apigateway";
 import {
+  CfnRoute,
   HttpApi,
   HttpMethod,
   HttpStage,
@@ -91,12 +92,20 @@ export class KinApiStack extends Stack {
       description: "Select standard for ordinary preregistered MCP OAuth clients; alexa preserves the existing discovery profile. This does not register clients.",
     });
     const canonicalResourceParameterName = "/kin/mcp/canonical-uri";
+    const desktopAuthEnabled = new CfnParameter(this, "DesktopAuthEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Register the fixed public desktop acceptance client only after a separately reviewed OAuth rollout. Use standard MCP discovery for its SDK journey.",
+    });
     const familyWorkspaceEnabled = new CfnParameter(this, "FamilyWorkspaceEnabled", {
       type: "String", default: "false", allowedValues: ["true", "false"],
       description: "Enable authenticated browser care workspace and account access management. Keep false until the family account is provisioned and verified.",
     });
     const familyEnrollmentEnabled = new CfnParameter(this, "FamilyEnrollmentEnabled", {
       type: "String", default: "false", allowedValues: ["true", "false"], description: "Enable explicit invitation acceptance during account linking.",
+    });
+    const browserSessionEnabled = new CfnParameter(this, "BrowserSessionEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Enable refresh-safe HttpOnly workspace sessions after the matching API and browser assets are deployed.",
     });
     const invitationIssuingEnabled = new CfnParameter(this, "InvitationIssuingEnabled", {
       type: "String", default: "false", allowedValues: ["true", "false"], description: "Enable organizer-only invitation creation for existing confirmed accounts.",
@@ -116,6 +125,10 @@ export class KinApiStack extends Stack {
     const rescheduleEnabled = new CfnParameter(this, "RescheduleEnabled", {
       type: "String", default: "false", allowedValues: ["true", "false"],
       description: "Enable reviewed one-off rescheduling only after compatible API and Echo readers are the verified rollback baseline.",
+    });
+    const closeUnansweredEnabled = new CfnParameter(this, "CloseUnansweredEnabled", {
+      type: "String", default: "false", allowedValues: ["true", "false"],
+      description: "Enable overdue closure only after API, Echo, and worker readers accept closed_unanswered. Keep compatible rollback artifacts.",
     });
     const planPauseEnabled = new CfnParameter(this, "PlanPauseEnabled", {
       type: "String", default: "false", allowedValues: ["true", "false"],
@@ -240,17 +253,20 @@ export class KinApiStack extends Stack {
         KIN_TIME_ZONE: "America/Denver",
         KIN_BEDROCK_MODEL_ID: "amazon.nova-micro-v1:0",
         KIN_BEDROCK_TIMEOUT_MS: "300",
+        KIN_WORKSPACE_BEDROCK_TIMEOUT_MS: "5000",
         KIN_MCP_RESOURCE_PARAMETER: canonicalResourceParameterName,
         KIN_MCP_AUTH_MODE: mcpAuthMode.valueAsString,
         KIN_PUBLIC_API_ENABLED: publicApiEnabledParameter.valueAsString,
         KIN_SERVE_SIMULATOR: "false",
         KIN_FAMILY_WORKSPACE_ENABLED: familyWorkspaceEnabled.valueAsString,
+        KIN_BROWSER_SESSION_ENABLED: browserSessionEnabled.valueAsString,
         KIN_WEB_PUSH_ENABLED: webPushEnabled.valueAsString,
         KIN_WEB_PUSH_PUBLIC_KEY: webPushPublicKey.valueAsString,
         KIN_FAMILY_CONVERSATION_ENABLED: familyConversationEnabled.valueAsString,
         KIN_REMINDER_TICKETS_ENABLED: reminderTicketsEnabled.valueAsString,
         KIN_COMPLETION_UNDO_ENABLED: completionUndoEnabled.valueAsString,
         KIN_RESCHEDULE_ENABLED: rescheduleEnabled.valueAsString,
+        KIN_CLOSE_UNANSWERED_ENABLED: closeUnansweredEnabled.valueAsString,
         KIN_PLAN_PAUSE_ENABLED: planPauseEnabled.valueAsString,
         KIN_BROWSER_AUTH_ENABLED: familyWorkspaceEnabled.valueAsString,
         KIN_BROWSER_CLIENT_ID: "kin-family-browser",
@@ -356,6 +372,7 @@ export class KinApiStack extends Stack {
         KIN_BROWSER_AUTH_ENABLED: familyWorkspaceEnabled.valueAsString,
         KIN_BROWSER_CLIENT_ID: "kin-family-browser",
         KIN_BROWSER_REDIRECT_URI: `${httpApi.apiEndpoint}/invite.html`,
+        KIN_DESKTOP_AUTH_ENABLED: desktopAuthEnabled.valueAsString,
         KIN_FAMILY_ENROLLMENT_ENABLED: familyEnrollmentEnabled.valueAsString,
         KIN_DYNAMODB_TABLE: careStateTable.tableName,
         KIN_CIRCLE_ID: "demo-family",
@@ -408,17 +425,34 @@ export class KinApiStack extends Stack {
     const oauthIntegration = new HttpLambdaIntegration("KinOAuthIntegration", oauthFunction, {
       scopePermissionToRoute: false,
     });
+    // These identities were installed by the route-only production repair.
+    // Preserve them so a later CDK release updates rather than recreates routes.
+    const sessionRouteIds: Record<string, string> = {
+      "GET /session/end": "KinOAuthSessionRoute0",
+      "POST /session/end": "KinOAuthSessionRoute1",
+      "POST /session/end/confirm": "KinOAuthSessionRoute2",
+      "GET /session/end/success": "KinOAuthSessionRoute3",
+    };
     for (const route of [
       { path: "/.well-known/oauth-authorization-server", methods: [HttpMethod.GET] },
       { path: "/.well-known/openid-configuration", methods: [HttpMethod.GET] },
       { path: "/auth", methods: [HttpMethod.GET, HttpMethod.POST] },
       { path: "/auth/{proxy+}", methods: [HttpMethod.GET] },
+      // The provider ends the old session before resuming a different account's
+      // login. Keep its CSRF-bound confirmation on OAuth, not the default API.
+      { path: "/session/end", methods: [HttpMethod.GET, HttpMethod.POST] },
+      { path: "/session/end/confirm", methods: [HttpMethod.POST] },
+      { path: "/session/end/success", methods: [HttpMethod.GET] },
       { path: "/token", methods: [HttpMethod.POST] },
       { path: "/jwks", methods: [HttpMethod.GET] },
       { path: "/token/revocation", methods: [HttpMethod.POST] },
       { path: "/interaction/{proxy+}", methods: [HttpMethod.ANY] },
     ]) {
-      httpApi.addRoutes({ ...route, integration: oauthIntegration });
+      for (const added of httpApi.addRoutes({ ...route, integration: oauthIntegration })) {
+        const resource = added.node.defaultChild as CfnRoute;
+        const existingId = sessionRouteIds[resource.routeKey];
+        if (existingId) resource.overrideLogicalId(existingId);
+      }
     }
     const stage = new HttpStage(this, "DefaultStage", {
       httpApi,
@@ -470,7 +504,7 @@ export class KinApiStack extends Stack {
       comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: TreatMissingData.NOT_BREACHING,
     });
-    const apiLatency = new Alarm(this, "ApiP95Latency", {
+    new Alarm(this, "ApiP95Latency", {
       alarmName: "kin-mcp-api-p95-latency",
       alarmDescription: "Kin's p95 API latency exceeds its 450 ms service target. Operator runbook: docs/delivery-operations.md#api-and-reminder-sync-recovery",
       metric: stage.metricLatency({
@@ -483,7 +517,9 @@ export class KinApiStack extends Stack {
       treatMissingData: TreatMissingData.NOT_BREACHING,
     });
 
-    configureOperationsRouting(this, [serverErrors, apiLatency]);
+    // Week includes a bounded model call, so aggregate latency is diagnostic,
+    // not an operator page. Route only actionable server failures.
+    configureOperationsRouting(this, [serverErrors]);
 
     new CfnOutput(this, "CanonicalMcpUri", { value: canonicalMcpUri });
     new CfnOutput(this, "OAuthIssuer", { value: httpApi.apiEndpoint });

@@ -18,6 +18,8 @@ import { InvalidCredentialsError } from "../src/cognito-authenticator.js";
 import { createOAuthInteractionRouter } from "../src/oauth-interactions.js";
 import { createKinOAuthProvider } from "../src/oauth-provider.js";
 import { taskReview } from "../src/task-review.js";
+import { desktopAuthConfig, desktopClientId, desktopRedirectUri } from "../src/desktop-auth-config.js";
+import { createDesktopSession, desktopFetch } from "../scripts/lib/mcp-desktop-session.js";
 
 const issuer = "https://family-release.example";
 const clientId = "kin-family-release-browser";
@@ -69,6 +71,7 @@ async function fixture() {
     cookieKeys: ["a".repeat(32), "b".repeat(32)], adapter: Adapter,
     serviceClient: { clientId: "synthetic-service-client", clientSecret: "synthetic-service-secret" },
     browserClient: { clientId, redirectUri },
+    desktopClient: desktopAuthConfig(),
     findAccount: async accountId => Object.values(accounts).some(account => account.accountId === accountId)
       ? { accountId, claims: async () => ({ sub: accountId }) } : undefined,
   });
@@ -79,7 +82,7 @@ async function fixture() {
     return { accountId: account.accountId, username: account.username };
   });
   oauth.use(createOAuthInteractionRouter({ provider, resourceUri: resource, csrfSecret: "s".repeat(32),
-    browserClientId: clientId, authenticator: { authenticate } }));
+    browserClientId: clientId, desktopClientId, authenticator: { authenticate } }));
   oauth.use(provider.callback());
 
   // Bridge only this exact HTTPS JWKS URL to the real provider's public-key endpoint.
@@ -109,6 +112,8 @@ async function fixture() {
 
   async function completeAuthorization(person: Person, authorizationUrl: URL, decision: "allow" | "deny" = "allow") {
     const account = accounts[person];
+    const desktop = authorizationUrl.searchParams.get("client_id") === desktopClientId;
+    const expectedRedirect = desktop ? desktopRedirectUri : redirectUri;
     const state = authorizationUrl.searchParams.get("state");
     expect(authorizationUrl.origin).toBe(issuer);
     // Each invocation has an independent browser cookie jar, including signed session cookies.
@@ -131,7 +136,7 @@ async function fixture() {
     let response = await visit(authorizationUrl.href);
     for (let step = 0; step < 16; step++) {
       const location = response.headers.location;
-      if (location && new URL(location, issuer).pathname === "/invite.html") {
+      if (location && new URL(location, issuer).origin + new URL(location, issuer).pathname === expectedRedirect) {
         const callback = new URL(location, issuer);
         expect(callback.searchParams.get("state")).toBe(state);
         expect(callback.searchParams.get("iss")).toBe(issuer);
@@ -146,7 +151,7 @@ async function fixture() {
       const isLogin = action!.endsWith("/login");
       expect(isLogin || action!.endsWith("/consent")).toBe(true);
       prompts.push(isLogin ? "login" : "consent");
-      if (!isLogin) expect(response.text).toContain("Open your family workspace");
+      if (!isLogin) expect(response.text).toContain(desktop ? "Connect Kin to the desktop acceptance client" : "Open your family workspace");
       response = await visit(!isLogin && decision === "deny" ? action!.replace(/\/consent$/, "/cancel") : action!,
         { csrf: csrf!, ...(isLogin ? { username: account.username, password: account.password } : {}) });
     }
@@ -292,6 +297,37 @@ async function expectDeniedWrites(f: Fixture, token: string, task: CareTask, sta
 }
 
 describe("two-account local family release journey", () => {
+  it("uses the independent desktop session through actual OAuth and SDK care reads without a care write", async () => {
+    const f = await fixture();
+    const maya = await f.signIn("maya"); await f.schedule(maya.token);
+    const before = await f.store.today();
+    const redirects: URL[] = [];
+    const session = createDesktopSession(new URL(resource), url => { redirects.push(url); });
+    const fetch = desktopFetch(new URL(resource), f.sdkFetch);
+    const initial = new Client({ name: "kin-independent-desktop-test", version: "0.1.0" });
+    const reader = new Client({ name: "kin-independent-desktop-test", version: "0.1.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(resource), { authProvider: session.provider, fetch });
+    try {
+      await expect(initial.connect(transport)).rejects.toBeInstanceOf(UnauthorizedError);
+      expect(redirects).toHaveLength(1);
+      expect(redirects[0]!.searchParams.get("client_id")).toBe(desktopClientId);
+      const { callback } = await f.completeAuthorization("evelyn", redirects[0]!);
+      const code = session.acceptCallback({ method: "GET", host: callback.host, url: callback.pathname + callback.search });
+      await transport.finishAuth(code);
+      expect(decodeJwt((await session.provider.tokens())!.access_token)).toMatchObject({
+        client_id: desktopClientId, sub: accounts.evelyn.accountId, aud: resource, scope: "mcp:tools mcp:resources",
+      });
+      await reader.connect(new StreamableHTTPClientTransport(new URL(resource), { authProvider: session.provider, fetch }));
+      expect((await reader.listTools()).tools.some(tool => tool.name === "show_today")).toBe(true);
+      expect((await reader.listResources()).resources.some(item => item.uri === "ui://kin/today.html")).toBe(true);
+      expect(await reader.callTool({ name: "show_today", arguments: {} })).toMatchObject({ structuredContent: before });
+      expect((await reader.readResource({ uri: "ui://kin/today.html" })).contents[0]).toMatchObject({ uri: "ui://kin/today.html" });
+      expect(await f.store.today()).toEqual(before);
+      expect(f.sdkRequests.some(item => item.path === "/token" && item.status === 200)).toBe(true);
+    } finally {
+      await Promise.allSettled([initial.close(), reader.close()]); session.dispose();
+    }
+  });
   it("discovers OAuth from the MCP challenge and completes SDK PKCE sign-in before reading and saving care", async () => {
     const f = await fixture();
     const maya = await f.signIn("maya");

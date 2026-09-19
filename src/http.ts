@@ -25,6 +25,7 @@ import { FamilyAccessDeniedError, mcpCarePermission, requireMembership, type Fam
 import { authorizeCareWrite, type CareWriteAuthorization } from "./care-write-authorization.js";
 import { InvitationIssueError, issueInvitationBody, type InvitationIssuer } from "./invitation-issuer.js";
 import type { BrowserAuthConfig } from "./browser-auth-config.js";
+import { installBrowserSessions, type BrowserSessionStore } from "./browser-session.js";
 import { familyAssets } from "./family-assets.js";
 import type { PushSubscriptions } from "./push-subscriptions.js";
 import { pushEnrollmentBody, pushRemovalBody, pushConsentVersion } from "./web-push.js";
@@ -52,12 +53,16 @@ const confirmationBody = z.object({
 const authenticatedConfirmationBody = confirmationBody.extend({ expected: taskReviewSchema });
 const dutyBody = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  memberId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
+  memberId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/).nullable(),
   expectedMemberId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/).nullable().optional(),
   requestId: z.string().min(8).max(100).optional(),
-}).strict().refine(input => (input.expectedMemberId !== undefined) === (input.requestId !== undefined));
+}).strict().refine(input => (input.expectedMemberId !== undefined) === (input.requestId !== undefined))
+  .refine(input => input.memberId !== null || (typeof input.expectedMemberId === "string" && input.requestId !== undefined));
 
 export interface HttpAppOptions {
+  browserSessions?: BrowserSessionStore;
+  /** Separate model budget for authenticated REST Week, never for MCP calls. */
+  workspaceWeeklyBrief?: WeeklyBriefService;
   reminderTickets?: import("./reminder-tickets.js").ReminderTickets;
   push?: { subscriptions: PushSubscriptions; publicKey: string };
   /** Optional metadata-only observer for initialize; never receives request data. */
@@ -78,6 +83,8 @@ export interface HttpAppOptions {
   rosterManagement?: RosterManagement;
   /** Enable only after all deployed task readers accept reschedule metadata. */
   rescheduleEnabled?: boolean;
+  /** Activate only after API, Echo, and worker readers accept closed_unanswered. */
+  closeUnansweredEnabled?: boolean;
 }
 
 export function createHttpApp(
@@ -98,6 +105,9 @@ export function createHttpApp(
     standardMcpResource(options.authorizationServer!);
   }
   const familyEnabled = options.serveFamilyWorkspace === true;
+  if (options.workspaceWeeklyBrief && (!familyEnabled || !options.accessAuthorizer || !options.familyAccess || !options.browserAuth)) {
+    throw new Error("Workspace weekly brief requires the authenticated family workspace");
+  }
   if (options.push && (!familyEnabled || !options.accessAuthorizer || !options.familyAccess)) {
     throw new Error("Push requires the authenticated family workspace");
   }
@@ -115,6 +125,11 @@ export function createHttpApp(
   }
   const app = express();
   app.disable("x-powered-by");
+  if (options.browserSessions) {
+    if (!familyEnabled || !options.browserAuth || !options.accessAuthorizer || !options.familyAccess) throw new Error("Browser sessions require authenticated workspace");
+    installBrowserSessions(app, { store: options.browserSessions, config: options.browserAuth,
+      authorizer: options.accessAuthorizer, familyAccess: options.familyAccess });
+  }
   // Origin is a browser boundary, not authentication. Native clients can omit
   // it; their existing token, scope and family checks still apply below.
   // Run before body parsing/auth and cover every method, including preflights.
@@ -153,7 +168,8 @@ export function createHttpApp(
   app.get("/family-auth-config", async (_request, response, next) => {
     response.set("cache-control", "no-store");
     if (!options.browserAuth || !familyEnabled) { response.status(404).json({ error: "not_enabled" }); return; }
-    try { response.json(typeof options.browserAuth === "function" ? await options.browserAuth() : options.browserAuth); }
+    try { response.json({ ...(typeof options.browserAuth === "function" ? await options.browserAuth() : options.browserAuth),
+      ...(options.browserSessions ? { sessionMode: "cookie" } : {}) }); }
     catch (error) { next(error); }
   });
   app.use(express.json({ limit: "128kb" }));
@@ -322,8 +338,12 @@ export function createHttpApp(
   app.get("/api/plan", async (_request, response, next) => {
     try {
       const { date } = await store.today();
-      const plan = await store.activityBetween({ startDate: date, endDate: shiftCalendarDate(date, 30) });
+      // Include recent overdue occurrences so caregivers can retire unanswered
+      // check-ins through the reviewed flow, never by manufacturing a reply.
+      const historyDays = options.closeUnansweredEnabled === true ? 30 : 0;
+      const plan = await store.activityBetween({ startDate: shiftCalendarDate(date, -historyDays), endDate: shiftCalendarDate(date, 30) });
       response.set("cache-control", "no-store").json({ startDate: plan.startDate, endDate: plan.endDate, tasks: plan.tasks,
+        ...(historyDays ? { historyDays } : {}),
         planPause: await store.planControl(),
         features: { reschedule: options.rescheduleEnabled === true, planPause: store.planPauseEnabled === true && response.locals.member?.role !== "viewer" } });
     } catch (error) { next(error); }
@@ -360,6 +380,9 @@ export function createHttpApp(
     if (!member || member.role !== "caregiver") { response.status(403).json({ error: "family_access_denied" }); return; }
     if (parsed.data.action === "reschedule" && options.rescheduleEnabled !== true) {
       response.status(422).json({ error: "reschedule_unavailable" }); return;
+    }
+    if (parsed.data.action === "close_unanswered" && options.closeUnansweredEnabled !== true) {
+      response.status(422).json({ error: "close_unanswered_unavailable" }); return;
     }
     try {
       const result = await store.changeTask({ ...parsed.data, taskId: taskId.data,
@@ -452,6 +475,7 @@ export function createHttpApp(
       ...(options.push && member.role === "caregiver" ? { push: { publicKey: options.push.publicKey, consentVersion: pushConsentVersion } } : {}),
       ...(options.mcpAuthMode === "standard" && member.role !== "viewer" ? { mcpConversation: true } : {}), permissions: {
       confirm: member.role !== "viewer", manageDuty: member.role === "caregiver",
+      ...(options.closeUnansweredEnabled === true && member.role === "caregiver" ? { closeUnanswered: true } : {}),
       pausePlan: member.role !== "viewer",
       invite: member.role === "caregiver" && member.canInvite === true,
       ...(options.rosterManagement ? { manageRoster: member.role === "caregiver" && member.canInvite === true } : {}),
@@ -525,7 +549,11 @@ export function createHttpApp(
 
   app.get("/api/weekly-brief", async (_request, response, next) => {
     try {
-      response.set("cache-control", "no-store").json(await weeklyBrief.create());
+      const brief = await (options.workspaceWeeklyBrief ?? weeklyBrief).create();
+      // A member can be revoked while the model is running. Local demo reads
+      // have no authorization context and retain their existing behavior.
+      await response.locals.writeAuthorization?.assertCurrent();
+      response.set("cache-control", "no-store").json(brief);
     } catch (error) {
       next(error);
     }

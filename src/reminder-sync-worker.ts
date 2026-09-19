@@ -5,10 +5,16 @@ import { createReminderMessagePublisher } from "./reminder-message-publisher.js"
 import { createReminderReconciliation } from "./reminder-reconciliation.js";
 import { createReminderReconciliationStore } from "./reminder-reconciliation-store.js";
 import { createSkillMessagingToken } from "./skill-messaging-token.js";
+import { createSingleReceiptCancellation, runSingleReminderTest, singleReminderTestKind } from "./reminder-single-receipt.js";
 
 export function createReminderSyncWorker(environment: NodeJS.ProcessEnv) {
   // No client construction, secret read, or network request when paused.
   if (environment.KIN_REMINDER_SYNC_WORKER_ENABLED !== "true") return async (_remainingMs: () => number) => ({ enabled: false });
+  if (environment.KIN_REMINDER_SINGLE_TEST_ENABLED === "true") throw new Error("Single reminder testing requires a paused sweep.");
+  return createReminderReconciliation({ enabled: true, ...createReminderSyncDependencies(environment) });
+}
+
+function createReminderSyncDependencies(environment: NodeJS.ProcessEnv) {
   const receiptTable = environment.KIN_ECHO_REMINDER_CLAIMS_TABLE ?? "";
   const queueTable = environment.KIN_ECHO_REMINDER_SYNC_TABLE ?? "";
   const careTable = environment.KIN_DYNAMODB_TABLE ?? "";
@@ -24,12 +30,20 @@ export function createReminderSyncWorker(environment: NodeJS.ProcessEnv) {
     if (!response.SecretString || response.SecretString.length > 8192) throw new Error("Skill messaging credentials unavailable.");
     return JSON.parse(response.SecretString) as unknown;
   } });
-  return createReminderReconciliation({ enabled: true, store, queue, jobs, publisher: createReminderMessagePublisher({ accessToken }) });
+  return { store, queue, jobs, publisher: createReminderMessagePublisher({ accessToken }) };
 }
 
 let worker: ReturnType<typeof createReminderSyncWorker> | undefined;
-export async function handler(_event: unknown, context: { getRemainingTimeInMillis(): number }) {
+export async function handler(event: unknown, context: { getRemainingTimeInMillis(): number }) {
   try {
+    if (typeof event === "object" && event !== null && "kind" in event && event.kind === singleReminderTestKind) {
+      const report = await runSingleReminderTest(event, process.env, () => {
+        const { store, ...dependencies } = createReminderSyncDependencies(process.env);
+        return createSingleReceiptCancellation({ ...dependencies, dispatch: store });
+      });
+      console.info(JSON.stringify({ event: "kin_reminder_single_test", ...report }));
+      return report;
+    }
     worker ??= createReminderSyncWorker(process.env);
     const report = await worker(() => context.getRemainingTimeInMillis());
     console.info(JSON.stringify({ event: "kin_reminder_sync_sweep", ...report }));

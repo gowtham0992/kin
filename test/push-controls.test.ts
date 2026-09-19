@@ -91,6 +91,8 @@ describe("explicit phone opt-in", () => {
     const text = ui.container.children[0]!.children[4]!.textContent;
     expect(text).toContain("connected to this account"); expect(text).toContain("No one is on duty");
     expect(text).toContain("Automatic delivery has not been verified");
+    expect(ui.container.children[0]!.children[1]!.textContent).toContain("Connecting a phone does not activate automatic follow-ups");
+    expect(ui.container.children[0]!.children[1]!.textContent).toContain("Check Today directly");
   });
   it("does not enroll after the account changes while permission is pending", async () => {
     const ui = fixture(); await ui.ready; ui.request.mockClear(); let resolve!: (value: string) => void;

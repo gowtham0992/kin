@@ -7,6 +7,7 @@ import { taskReview } from "./task-review.js";
 import { createEchoTimeFormatter } from "./echo-time.js";
 import { taskReviewSchema } from "./task-review.js";
 import { reminderSyncConsent } from "./reminder-tickets.js";
+import type { CareTask } from "./domain.js";
 
 export const reminderText = "This is your Kin test reminder. Whenever you are ready, say Alexa, open kin family.";
 const permission = "alexa::alerts:reminders:skill:readwrite";
@@ -25,7 +26,10 @@ function validateAccess(endpoint: string, token: string) {
 function reminderBody(requestTime: string, dueAt?: string) {
   if (!z.iso.datetime({ offset: true }).safeParse(requestTime).success ||
       (dueAt !== undefined && (!z.iso.datetime({ offset: true }).safeParse(dueAt).success || Date.parse(dueAt) <= Date.parse(requestTime)))) throw new Error("Invalid reminder time.");
-  return { requestTime, trigger: dueAt ? { type: "SCHEDULED_ABSOLUTE", scheduledTime: dueAt, timeZoneId: "Etc/UTC" } : { type: "SCHEDULED_RELATIVE", offsetInSeconds: 120 },
+  // Alexa's supported scheduledTime formats omit the offset. Normalize the
+  // instant to UTC first, then pair the offset-free clock with its explicit zone.
+  // Keep stored dueAt and requestTime unchanged.
+  return { requestTime, trigger: dueAt ? { type: "SCHEDULED_ABSOLUTE", scheduledTime: new Date(dueAt).toISOString().slice(0, -1), timeZoneId: "Etc/UTC" } : { type: "SCHEDULED_RELATIVE", offsetInSeconds: 120 },
     alertInfo: { spokenInfo: { content: [{ locale: "en-US", text: dueAt ? "It is time for your Kin check-in. Whenever you are ready, say Alexa, open kin family." : reminderText }] } },
     pushNotification: { status: "DISABLED" } };
 }
@@ -48,25 +52,63 @@ async function acceptedToken(response: Response): Promise<{ alertToken: string }
 
 // Bounded, parent-approved one-time reminders, not a recurring plan scheduler.
 // Never retry POST: a timeout can occur after Alexa accepted the reminder.
-export function createEchoReminderClient(fetcher: typeof fetch = fetch): EchoReminderClient {
+export interface ReminderCreateDiagnostic {
+  readonly version: 1;
+  readonly operation: "create";
+  readonly phase: "validation" | "request" | "receipt";
+  readonly outcome: "accepted" | "unverified";
+  readonly reason: "none" | "input" | "http" | "permission" | "network" | "timeout" | "receipt";
+  readonly elapsedMs: number;
+  readonly httpStatus?: number;
+}
+export function createEchoReminderClient(fetcher: typeof fetch = fetch,
+  onDiagnostic?: (record: ReminderCreateDiagnostic) => unknown): EchoReminderClient {
   async function create(endpoint: string, token: string, requestTime: string, dueAt?: string) {
+    const started = performance.now();
+    let phase: ReminderCreateDiagnostic["phase"] = "validation";
+    let reason: ReminderCreateDiagnostic["reason"] = "input";
+    let outcome: ReminderCreateDiagnostic["outcome"] = "unverified";
+    let status: number | undefined, signal: AbortSignal | undefined;
+    try {
       validateAccess(endpoint, token);
+      const body = JSON.stringify(reminderBody(requestTime, dueAt));
+      signal = AbortSignal.timeout(2500);
+      phase = "request"; reason = "network";
       const response = await fetcher(`${endpoint}/v1/alerts/reminders`, {
-        method: "POST", redirect: "error", signal: AbortSignal.timeout(2500),
+        method: "POST", redirect: "error", signal,
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(reminderBody(requestTime, dueAt)),
+        body,
       });
+      status = response.status;
       // No upstream bodies, credentials, or user identifiers enter logs/errors.
       if (response.status === 401 || response.status === 403) {
+        reason = "permission";
         await response.body?.cancel();
         throw new ReminderPermissionError();
       }
       if (response.status !== 201) {
+        reason = "http";
         await response.body?.cancel();
         throw new Error("Reminder outcome unverified.");
       }
-      if (dueAt) return acceptedToken(response);
-      await response.body?.cancel();
+      phase = "receipt"; reason = "receipt";
+      const receipt = dueAt ? await acceptedToken(response) : undefined;
+      if (!dueAt) await response.body?.cancel();
+      outcome = "accepted"; reason = "none";
+      return receipt;
+    } catch (error) {
+      if (signal?.aborted && (reason === "network" || reason === "receipt")) reason = "timeout";
+      throw error;
+    } finally {
+      const elapsed = performance.now() - started;
+      // Only fixed enums and bounded numbers cross the logging boundary.
+      // Never inspect errors, response bodies, headers, tokens, dates or IDs.
+      const record: ReminderCreateDiagnostic = Object.freeze({ version: 1, operation: "create", phase, outcome, reason,
+        elapsedMs: Number.isFinite(elapsed) ? Math.min(60_000, Math.max(0, Math.floor(elapsed))) : 0,
+        ...(Number.isInteger(status) && status! >= 100 && status! <= 599 ? { httpStatus: status } : {}),
+      });
+      try { void Promise.resolve(onDiagnostic?.(record)).catch(() => {}); } catch { /* Logging cannot change the result. */ }
+    }
   }
   async function change(endpoint: string, token: string, alertToken: string, body?: ReturnType<typeof reminderBody>) {
     validateAccess(endpoint, token);
@@ -94,8 +136,23 @@ const pendingSchema = z.object({ binding: z.string().regex(/^[a-f0-9]{64}$/), pr
     syncReview: taskReviewSchema.optional() }).strict().optional() }).strict();
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 function planOffer(when: string, sync = false) {
-  if (sync) return `Your next check-in is ${when}. May I set one discreet reminder? Anyone nearby may hear it. Kin will request cancellation if this check-in is completed, skipped or cancelled. Cancellation can be delayed or fail; you can manage reminders in the Alexa app. Say yes or no.`;
-  return `Your next check-in is ${when}. May I set one discreet reminder for that time? It will say it is time for your Kin check-in. Anyone nearby may hear it. Later plan edits won't cancel this reminder; you can cancel it in the Alexa app. Say yes or no.`;
+  if (sync) return `This check-in is ${when}. May I set one discreet reminder? Anyone nearby may hear it. Kin will request cancellation if this check-in is completed, skipped or cancelled. Cancellation can be delayed or fail; you can manage reminders in the Alexa app. Say yes or no.`;
+  return `This check-in is ${when}. May I set one discreet reminder for that time? It will say it is time for your Kin check-in. Anyone nearby may hear it. Later plan edits won't cancel this reminder; you can cancel it in the Alexa app. Say yes or no.`;
+}
+/** Offer only; the existing Yes handler rechecks membership, the task and consent before creating anything. */
+export function offerCheckInReminder(input: HandlerInput, task: CareTask, time: number, timeZone: string, cancelSync = false): string | undefined {
+  const { request, session, context: { System: system } } = input.requestEnvelope;
+  const requestAt = Date.parse(request.timestamp);
+  if (!session?.sessionId || !system.user.userId || !system.user.accessToken || !system.apiAccessToken || !endpoints.has(system.apiEndpoint) ||
+      !Number.isFinite(requestAt) || requestAt > time + 30_000 || time - requestAt > 90_000 ||
+      task.state !== "scheduled" || Date.parse(task.dueAt) <= time + 60_000) return;
+  const review = taskReview(task);
+  const binding = hash([system.application.applicationId, session.sessionId, system.user.userId]);
+  const plan = { taskId: task.id, dueAt: task.dueAt, fingerprint: hash(review), account: hash(system.user.accessToken),
+    ...(cancelSync ? { syncReview: review } : {}) };
+  const text = planOffer(createEchoTimeFormatter(timeZone)(task.dueAt, time), cancelSync);
+  input.attributesManager.setSessionAttributes({ kinReminder: { binding, preparedAt: time, proposalId: hash([binding, request.requestId]), plan } });
+  return text;
 }
 const offer = "May I set one test reminder for two minutes from now? It will say this is your Kin test reminder. Anyone nearby may hear it. Say yes or no.";
 function say(input: HandlerInput, text: string, keepOpen = false) {

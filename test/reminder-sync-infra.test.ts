@@ -17,6 +17,13 @@ it("creates an isolated, retained and doubly paused worker candidate", () => {
   expect(JSON.stringify(template.toJSON())).toContain("KinReminderSyncRuntimeBoundary");
 }, 30_000);
 
+it("pins worker resource identities so deployment permissions do not need generated-name wildcards", () => {
+  const template = Template.fromStack(new KinReminderSyncStack(new App(), "NamedReminderSync", {
+    careTableName: "kin-care-state", circleId: "test-circle", env: { account: "123456789012", region: "us-east-1" } }));
+  template.hasResourceProperties("AWS::Events::Rule", { Name: "kin-reminder-sync-sweep" });
+  template.hasResourceProperties("AWS::CloudWatch::Alarm", { AlarmName: "kin-reminder-sync-worker-errors" });
+}, 30_000);
+
 it("grants secret-value access to the exact colon-delimited Skill Messaging secret ARN", () => {
   const template = Template.fromStack(new KinReminderSyncStack(new App(), "ReminderSecretTest", {
     careTableName: "kin-care-state", circleId: "test-circle", env: { account: "123456789012", region: "us-east-1" } }));

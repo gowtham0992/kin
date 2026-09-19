@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { createReminderReconciliation, type ReminderReconciliationStore } from "../src/reminder-reconciliation.js";
+import { createReminderMessagePublisher } from "../src/reminder-message-publisher.js";
 import type { ReminderCancellationJob } from "../src/echo-reminder-sync.js";
 
 const id = "a".repeat(64);
@@ -31,6 +32,33 @@ it("does not publish when another dispatch owns the lease", async () => {
   const f = setup(); vi.mocked(f.store.claimDispatch).mockResolvedValue(false);
   expect(await f.run(() => 30_000)).toMatchObject({ accepted: 0 });
   expect(f.publisher.publish).not.toHaveBeenCalled();
+});
+it("keeps the five-minute dispatch cooldown after the shorter delivery window expires", async () => {
+  const f = setup();
+  let time = 100_000, leaseUntil = 0;
+  vi.mocked(f.store.claimDispatch).mockImplementation(async (_id, now, until) => {
+    if (leaseUntil > now) return false;
+    leaseUntil = until;
+    return true;
+  });
+  const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+  const publisher = createReminderMessagePublisher({ accessToken: async () => "skill-token", fetch: request, now: () => time });
+  const run = createReminderReconciliation({ enabled: true, store: f.store, queue: f.queue, jobs: f.jobs, publisher, now: () => time });
+  expect(await run(() => 30_000)).toMatchObject({ accepted: 1, failed: 0 });
+  expect(JSON.parse(String(request.mock.calls[0]![1]!.body)).expiresAfterSeconds).toBe(60);
+  for (const later of [160_001, 399_999]) {
+    time = later;
+    expect(await run(() => 30_000)).toMatchObject({ accepted: 0, failed: 0 });
+    expect(request).toHaveBeenCalledTimes(1);
+  }
+  time = 400_000;
+  expect(await run(() => 30_000)).toMatchObject({ accepted: 1, failed: 0 });
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(f.jobs.complete).not.toHaveBeenCalled();
+  // Expiry still wins over eligibility for a new dispatch after its cooldown.
+  time = job.expiresAt;
+  expect(await run(() => 30_000)).toMatchObject({ accepted: 0, failed: 0 });
+  expect(request).toHaveBeenCalledTimes(2);
 });
 it("advances past failed rows and records failure without logging private errors", async () => {
   const f = setup(); f.queue.enqueue.mockRejectedValue(new Error("private-record"));

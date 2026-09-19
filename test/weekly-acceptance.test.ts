@@ -77,7 +77,8 @@ describe("weekly acceptance facts", () => {
 
     expect(brief.period).toEqual({ startDate: "2026-09-07", endDate: "2026-09-13" });
     expect(brief.stats).toEqual({ scheduled: 4, completed: 1, skipped: 1, stillOpen: 2, escalations: 0 });
-    expect(brief.evidence).toHaveLength(6);
+    expect(brief.evidence).toHaveLength(7);
+    expect(brief.evidence.at(-1)).toMatchObject({ id: "task:old open:2026-09-06T18:00:00.000Z", fact: "Prior comparison period: old open; no reply is recorded." });
     expect(brief.overview).toContain("2 check-ins were cancelled before they were due; cancelled check-ins are excluded from the task counts.");
     expect(brief.highlights.find(point => point.text.startsWith("1 of 4"))?.evidenceIds).toEqual([
       "task:completed:2026-09-13T18:00:00.000Z", "task:skipped:2026-09-13T18:00:00.000Z",
@@ -86,7 +87,8 @@ describe("weekly acceptance facts", () => {
     expect(brief.highlights.find(point => point.text.startsWith("2 check-ins"))?.evidenceIds).toEqual([
       "task:cancelled one:2026-09-13T19:00:00.000Z", "task:cancelled two:2026-09-13T19:00:00.000Z",
     ]);
-    expect(JSON.stringify(brief)).not.toMatch(/old open|future untouched/);
+    expect(brief.overviewEvidenceIds).not.toContain("task:old open:2026-09-06T18:00:00.000Z");
+    expect(JSON.stringify(brief)).not.toContain("future untouched");
   });
 
   it.each(["not-a-date", "2026-09-13T18:00:00.001Z"])("does not claim acknowledgment from an invalid or future timestamp: %s", async acknowledgedAt => {

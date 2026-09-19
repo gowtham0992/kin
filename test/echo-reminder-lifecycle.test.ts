@@ -22,7 +22,7 @@ describe("reminder lifecycle transport", () => {
     expect(url).toBe(`${endpoint}/v1/alerts/reminders/opaque%2Fid%3Fquery`);
     expect(options.method).toBe("PUT"); expect(options.redirect).toBe("error");
     expect(options.signal).toBeInstanceOf(AbortSignal);
-    expect(JSON.parse(options.body as string)).toMatchObject({ trigger: { scheduledTime: dueAt }, pushNotification: { status: "DISABLED" } });
+    expect(JSON.parse(options.body as string)).toMatchObject({ trigger: { scheduledTime: "2026-09-13T13:00:00.000", timeZoneId: "Etc/UTC" }, pushNotification: { status: "DISABLED" } });
   });
   it.each([200, 404])("treats cancellation status %s as complete", async status => {
     const fetcher = vi.fn(async () => new Response(null, { status }));

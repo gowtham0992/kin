@@ -314,7 +314,7 @@ describe("parent-approved plan reminder", () => {
     await createEchoReminderClient(fetcher).createCheckIn!("https://api.amazonalexa.com", "token", new Date(time).toISOString(), "2026-09-12T18:30:00.000Z");
     const [, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
     const body = JSON.parse(options.body as string);
-    expect(body.trigger).toEqual({ type: "SCHEDULED_ABSOLUTE", scheduledTime: "2026-09-12T18:30:00.000Z", timeZoneId: "Etc/UTC" });
+    expect(body.trigger).toEqual({ type: "SCHEDULED_ABSOLUTE", scheduledTime: "2026-09-12T18:30:00.000", timeZoneId: "Etc/UTC" });
     expect(body.alertInfo.spokenInfo.content[0].text).toBe("It is time for your Kin check-in. Whenever you are ready, say Alexa, open kin family.");
     expect(body.pushNotification.status).toBe("DISABLED");
   });

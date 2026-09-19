@@ -12,7 +12,7 @@ const uid = "interaction-123";
 const resourceUri = "https://example.execute-api.us-east-1.amazonaws.com/mcp";
 const csrfSecret = "a-secure-interaction-secret-that-is-long-enough";
 
-function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrollment, browser = false) {
+function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrollment, browser: boolean | "desktop" = false) {
   const details = {
     uid,
     prompt: {
@@ -23,7 +23,7 @@ function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrol
         } as Record<string, string[]>,
       } : {},
     },
-    params: { client_id: browser ? "kin-family-browser" : "alexa-user-client" },
+    params: { client_id: browser === "desktop" ? "kin-desktop-acceptance" : browser ? "kin-family-browser" : "alexa-user-client" },
     session: prompt === "consent" ? { accountId: "family-account" } : undefined,
   };
   const addResourceScope = vi.fn();
@@ -59,6 +59,7 @@ function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrol
     csrfSecret,
     enrollment,
     browserClientId: "kin-family-browser",
+    desktopClientId: "kin-desktop-acceptance",
   }));
   app.use((_error: unknown, _request: Request, response: Response, _next: unknown) => {
     response.status(500).send("Something went wrong");
@@ -108,6 +109,20 @@ function storedEnrollment(rosterBound: boolean) {
 }
 
 describe("OAuth account-linking interaction", () => {
+  it("names the desktop client honestly during ordinary and enrollment consent", async () => {
+    const invitation: Invitation = { circleId: "family-a", circleName: "Synthetic family", memberId: "maya", name: "Maya", role: "viewer", targetKey: "ACCESS#" + "a".repeat(64), expiresAt: 9999999999, status: "pending" };
+    const enrollment = { review: vi.fn(async () => invitation), accept: vi.fn(async () => {}) };
+    const { app, save } = fixture("consent", enrollment, "desktop");
+    const initial = await request(app).get(`/interaction/${uid}`).expect(200);
+    expect(initial.text).toContain("Connect Kin to the desktop acceptance client");
+    expect(initial.text).not.toMatch(/Alexa|voice confirmations|Open your family workspace/);
+    const reviewed = await request(app).post(`/interaction/${uid}/invitation`).type("form")
+      .send({ csrf: csrfFrom(initial.text), invitation: "a".repeat(43) }).expect(200);
+    expect(reviewed.text).toContain("Accepting also connects the desktop acceptance client");
+    expect(reviewed.text).toContain("Join circle and connect desktop client");
+    expect(reviewed.text).not.toMatch(/Alexa|voice confirmations|Open your family workspace/);
+    expect(enrollment.accept).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
+  });
   it("reviews a pasted invitation on Open workspace without granting access until separate consent", async () => {
     const { app, code, rows, accessKey, save, interactionFinished } = storedEnrollment(true);
     const initial = await request(app).get(`/interaction/${uid}`).expect(200);

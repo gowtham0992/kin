@@ -11,39 +11,34 @@ connects the owner's Echo Pop to the same linked family account; it is not a
 native Alexa+ add-on.
 
 For the hackathon, Kin targets the self-hosted MCP route with AWS Builder.
-The owner has reported successful physical linked-plan reads and a test
-reminder. Sustained device reliability and the full family/reminder loop remain
-acceptance work. Skills Store publication is not part of this entry's finish
-line. See the [scope review](docs/hackathon-scope-20260911.md) and
-[current completion checkpoint](docs/completion-current-20260913.md).
+The MCP protocol baseline is deliberately **2025-11-25**, the track's minimum,
+not a claim that Kin uses the newest protocol or has native Alexa+ toolkit access.
+Skills Store publication is not required for this development-skill demonstration.
 
 Standard MCP clients complete
 the tested OAuth sign-in, consent, discovery and reviewed-save journey without
 service credentials. See [MCP interoperability](docs/mcp-interoperability.md)
 for configuration and the limits of that local evidence.
 
-Local browser checks cover the synthetic care story, daily navigation, plan
-editing, responsibility and weekly evidence. Enrollment and invitations are
-enabled; the second caregiver has accepted an invitation and read the shared
-plan. Automatic delivery and paid conversation remain paused. Actual two-account
-handoff/revocation, selected-phone receipt and new-feature deployment remain
-separate from those observations. See the
-[current checkpoint](docs/completion-current-20260913.md) and
-[final acceptance runbook](docs/final-acceptance-runbook.md).
+### What is real, and what remains to verify
 
-The [earlier hardening release](docs/release-hardening-20260911.md) and
-[subsequent care API release](docs/release-outsider-fixes-20260911.md) retain
-dated deployment and monitoring evidence, not a live health guarantee.
-Processing remains paused and operator notification routing is unconfigured.
-Undo, one-off rescheduling, week-pause and reminder-cancellation changes are
-staged local work, not claims about the live service. Their activation gates
-default off; compatible-reader/writer rollback baselines are required. The
-repository remains private. Release inputs and test evidence are recorded in
-[final local verification](docs/final-local-verification-20260913.md); a local
-source-copy check is distinguished from committed-revision and live acceptance.
-The private implementation revision `cecfe25` also passes offline installation,
-build and all 2,237 tests from an actual fresh GitHub clone. That is source
-reproducibility, not verification of the still-pending live release.
+This is a dated checkpoint, not a live health guarantee. Source changes are not
+automatically deployed, and an isolated test is not recurring-service acceptance.
+
+| Capability | Evidence and boundary |
+| --- | --- |
+| Family workspace and classic Echo connection | Deployed; owner has used linked plan reads on an Echo Pop and a second caregiver has joined the shared workspace. |
+| Alexa reminder creation and cancellation | Owner reported a reminder appearing and later disappearing. Automatic reconciliation is now enabled; see the [activation and recovery evidence](docs/reminder-activation-20260918.md). |
+| Missed-check-in phone notification | Owner confirmed isolated test receipt. The general escalation worker and schedule remain disabled; a recurring acceptance run is still required. |
+| Operational alerts | Operator email routing has been tested; these are separate from family notifications. |
+| Alexa+ conversation | Clearly labeled simulation using real MCP calls—not native toolkit access. |
+| Close without a reply | Compatible readers deployed and caregiver gate enabled; live review UI checked. The single synthetic write/reload acceptance remains outstanding. See [rollout evidence](docs/close-unanswered-release-20260918.md). |
+| Release candidate | A matching committed, tagged, fresh-clone release is still outstanding. Historical clone checks do not prove the current working tree reproduces production. |
+
+The repository remains private. Reviewers need separately authorized repository
+access and a dedicated Kin account/invitation; do not share owner credentials.
+The local story below needs neither AWS credentials nor a family account.
+See the [acceptance runbook](docs/final-acceptance-runbook.md) for device checks.
 
 ## Try one complete family-care story
 
@@ -249,9 +244,19 @@ npm run brief:aws
 ```
 
 Without `KIN_BEDROCK_MODEL_ID`, the server deliberately uses the evidence-linked deterministic brief. Model errors, incomplete generations, invalid JSON, schema violations, unknown evidence references, and inapplicable follow-up selections take the same safe fallback path.
-The live model call is aborted after 300 ms by default so the deterministic path
-can preserve Alexa's 500 ms round-trip budget. Override this only for offline
-generation with `KIN_BEDROCK_TIMEOUT_MS`.
+In the current source, MCP's weekly model budget remains 300 ms by default
+(`KIN_BEDROCK_TIMEOUT_MS`). Authenticated REST Week uses a separate 5,000 ms
+budget, configurable with `KIN_WORKSPACE_BEDROCK_TIMEOUT_MS` as a decimal integer
+from 50 to 5000. Browser Ask Kin still uses MCP's shorter budget. These bound
+model waiting, not the entire request; authentication and database reads also
+take time. Weekly model calls make one SDK attempt and abort at their deadline,
+then return the evidence-linked fallback if generation fails.
+
+The offline `brief:aws` command also honors `KIN_BEDROCK_TIMEOUT_MS` (integer
+50–10000 ms; default 300). It reads the configured real family table and can
+incur model charges; do not use it as a synthetic diagnostic. The browser
+budget is deployed; see the [release evidence](docs/finish-api-release-20260916.md)
+and [subsequent weekly validation](docs/weekly-contract-20260918.md).
 
 `npm run infra:synth` bundles the Lambda and produces a reviewable CloudFormation template without deploying it. The table uses on-demand billing, AWS-managed encryption, seven-day point-in-time recovery, deletion protection, and retain-on-delete behavior. Lambda assets require a standard CDK bootstrap before deployment; the exact current account status is documented in `docs/aws-deployment.md`.
 

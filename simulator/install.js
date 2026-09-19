@@ -8,6 +8,7 @@ export function setupInstall({ window, navigator, button, status }) {
     status.textContent = "Kin is open as an app. A connection is needed to load your family plan.";
   };
   if (installed()) showInstalled();
+  else status.textContent = "Kin is open in a browser tab. To use it as an app, add it to your home screen and open the Kin icon. On iPhone, use Share → Add to Home Screen. Installation does not turn on notifications; check Today directly until delivery is verified.";
   window.addEventListener("beforeinstallprompt", event => {
     event.preventDefault();
     if (installed()) return;

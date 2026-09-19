@@ -2,6 +2,7 @@ import { createJwtAccessAuthorizer, parseMcpAuthMode } from "./auth.js";
 import { createDynamoAccessManagement } from "./access-management.js";
 import { createDynamoRosterManagement } from "./roster-management.js";
 import { browserAuthConfig } from "./browser-auth-config.js";
+import { createDynamoBrowserSessions } from "./browser-session.js";
 import { createDynamoMembershipDirectory } from "./membership.js";
 import { createCognitoInvitableAccounts, createDynamoInvitationIssuer } from "./invitation-issuer.js";
 import { createDemoStore } from "./domain.js";
@@ -42,6 +43,12 @@ export function createConfiguredApp(
     : createDemoStore(() => new Date(), timeZone);
   const briefModelId = environment.KIN_BEDROCK_MODEL_ID?.trim();
   const briefTimeoutMs = Number.parseInt(environment.KIN_BEDROCK_TIMEOUT_MS ?? "300", 10);
+  const workspaceBriefTimeout = environment.KIN_WORKSPACE_BEDROCK_TIMEOUT_MS ?? "5000";
+  const workspaceBriefTimeoutMs = Number(workspaceBriefTimeout);
+  if (!Number.isInteger(workspaceBriefTimeoutMs) || String(workspaceBriefTimeoutMs) !== workspaceBriefTimeout ||
+      workspaceBriefTimeoutMs < 50 || workspaceBriefTimeoutMs > 5000) {
+    throw new Error("KIN_WORKSPACE_BEDROCK_TIMEOUT_MS must be a decimal integer from 50 to 5000 milliseconds");
+  }
   const weeklyBrief = new WeeklyBriefService(
     repository,
     briefModelId
@@ -52,6 +59,7 @@ export function createConfiguredApp(
         })
       : null,
     timeZone,
+    event => console.info(JSON.stringify({ event: "kin_weekly_brief_result", surface: "mcp", ...event })),
   );
 
   const canonicalMcpUri = environment.KIN_MCP_CANONICAL_URI?.trim();
@@ -98,6 +106,16 @@ export function createConfiguredApp(
     clientId: environment.KIN_BROWSER_CLIENT_ID ?? "", issuer: oauthIssuer!,
     redirectUri: environment.KIN_BROWSER_REDIRECT_URI ?? "", resource: canonicalMcpUri ?? `${oauthIssuer}/mcp`,
   }) : undefined;
+  // Only REST Week gets the browser budget. MCP (including browser Ask) keeps
+  // the original brief service and its separate Alexa-oriented timeout.
+  const workspaceWeeklyBrief = familyEnabled ? new WeeklyBriefService(
+    repository,
+    briefModelId ? createBedrockBriefGenerator({
+      modelId: briefModelId, region: environment.AWS_REGION, timeoutMs: workspaceBriefTimeoutMs,
+    }) : null,
+    timeZone,
+    event => console.info(JSON.stringify({ event: "kin_weekly_brief_result", surface: "workspace", ...event })),
+  ) : undefined;
   const familyConversationEnabled = environment.KIN_FAMILY_CONVERSATION_ENABLED === "true";
   const pushEnabled = environment.KIN_WEB_PUSH_ENABLED === "true";
   const pushPublicKey = environment.KIN_WEB_PUSH_PUBLIC_KEY ?? "";
@@ -130,7 +148,10 @@ export function createConfiguredApp(
             jwksUri: oauthJwksUri,
           }),
           familyAccess,
+          browserSessions: familyEnabled && environment.KIN_BROWSER_SESSION_ENABLED === "true"
+            ? createDynamoBrowserSessions({ tableName: tableName!, region: environment.AWS_REGION }) : undefined,
           rescheduleEnabled: environment.KIN_RESCHEDULE_ENABLED === "true",
+          closeUnansweredEnabled: environment.KIN_CLOSE_UNANSWERED_ENABLED === "true",
           reminderTickets: reminderTicketsEnabled ? createDynamoReminderTickets({ tableName: tableName!, circleId }) : undefined,
           push: pushEnabled ? { publicKey: pushPublicKey,
             subscriptions: createPushSubscriptions({ tableName: tableName!, circleId: familyAccess!.circleId, region: environment.AWS_REGION }) } : undefined,
@@ -140,6 +161,7 @@ export function createConfiguredApp(
             return browserAuth;
           } : browserAuth,
           serveFamilyWorkspace: familyEnabled,
+          workspaceWeeklyBrief,
           familyAssetDirectory: options.familyAssetDirectory,
           accessManagement: familyEnabled ? createDynamoAccessManagement({ tableName: tableName!, familyAccess: familyAccess!, region: environment.AWS_REGION }) : undefined,
           rosterManagement: familyEnabled ? createDynamoRosterManagement({ tableName: tableName!, familyAccess: familyAccess!, region: environment.AWS_REGION }) : undefined,

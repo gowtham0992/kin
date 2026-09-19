@@ -1,6 +1,7 @@
 import Provider, { errors } from "oidc-provider";
 import { alexaScopes } from "./auth.js";
 import { browserAuthConfig } from "./browser-auth-config.js";
+import { desktopAuthConfig, type DesktopAuthConfig } from "./desktop-auth-config.js";
 
 interface OAuthClientDefinition {
   clientId: string;
@@ -27,6 +28,7 @@ export interface KinOAuthProviderInput {
   userClient?: AlexaUserOAuthClient;
   echoClient?: AlexaUserOAuthClient;
   browserClient?: { clientId: string; redirectUri: string };
+  desktopClient?: DesktopAuthConfig;
   findAccount?: (accountId: string, lookup: OAuthAccountLookup) => Promise<object | undefined>;
 }
 
@@ -78,6 +80,14 @@ export function createKinOAuthProvider(input: KinOAuthProviderInput): Provider {
     if ([serviceClientId, userClientId, echoClientId].includes(browser.clientId)) throw new Error("Browser client must have a separate identity");
     clients.push({ client_id: browser.clientId, grant_types: ["authorization_code"], response_types: ["code"],
       redirect_uris: [browser.redirectUri], token_endpoint_auth_method: "none" });
+  }
+  const desktop = input.desktopClient ? desktopAuthConfig(input.desktopClient) : undefined;
+  if (desktop) {
+    // This fixed-port acceptance harness uses the provider's exact web redirect
+    // matching. application_type native deliberately accepts other loopback ports.
+    clients.push({ client_id: desktop.clientId, client_name: "Kin desktop acceptance client", application_type: "web",
+      grant_types: ["authorization_code"], response_types: ["code"],
+      redirect_uris: [desktop.redirectUri], token_endpoint_auth_method: "none" });
   }
   if (new Set(clients.map(client => client.client_id)).size !== clients.length) {
     throw new Error("Each OAuth client must have a separate identity");
@@ -136,6 +146,11 @@ export function createKinOAuthProvider(input: KinOAuthProviderInput): Provider {
           }).oidc?.params;
           const requestedScope = typeof params?.scope === "string" ? params.scope : "";
           const requestedScopes = requestedScope.split(/\s+/).filter(Boolean);
+          if (desktop && client.clientId === desktop.clientId && requestedScopes.some(
+            scope => scope !== alexaScopes.tools && scope !== alexaScopes.resources,
+          )) {
+            throw new errors.InvalidScope("Desktop authorization permits only user-level MCP scopes", requestedScope);
+          }
           if (echoClientId && client.clientId === echoClientId && (
             requestedScopes.some(scope => scope !== alexaScopes.tools) ||
             (params?.grant_type === undefined && requestedScopes.length === 0)

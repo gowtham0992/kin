@@ -24,40 +24,40 @@ export function assertPauseReceipt(result, current) {
 }
 const node = (tag, text, className) => { const element = document.createElement(tag); if (text != null) element.textContent = text; if (className) element.className = className; return element; };
 const stamp = (value, timeZone) => new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short", ...(timeZone ? { timeZone } : {}) }).format(new Date(value));
-export const pauseSavedMessage = "The reviewed week is paused. Cancelled check-ins will not return or shift to later dates. Old Alexa reminders may still sound until cancellation sync finishes; queued caregiver alerts are not retracted.";
+export const pauseSavedMessage = "The reviewed check-ins were cancelled. New check-ins are blocked during the reviewed seven-day interval. Cancelled check-ins will not return or shift to later dates. Old Alexa reminders may still sound until cancellation sync finishes; queued caregiver alerts are not retracted.";
 
 // A read-only proposal belongs to one rendered view. No care draft is persisted.
 export function renderPlanPause({ control, enabled, propose, onSave, isLocked, onError, now = Date.now }) {
   let alive = true, loading = false, expiryTimer = null;
   const element = node("section", null, "invite-panel care-plan-pause"), review = node("div"), message = node("p", "", "care-note");
   message.setAttribute("role", "status"); review.hidden = true;
-  element.append(node("h3", "Room for a week off."));
+  element.append(node("h3", "Cancel the next seven days’ check-ins."));
   const active = control?.pause && instant(control.pause.endsAt) && Date.parse(control.pause.endsAt) > now();
   if (active) {
-    element.append(node("p", `Check-ins paused from ${stamp(control.pause.startsAt)} until ${stamp(control.pause.endsAt)}.`, "care-pause-active"),
+    element.append(node("p", `New check-ins are blocked from ${stamp(control.pause.startsAt)} until ${stamp(control.pause.endsAt)}.`, "care-pause-active"),
       node("p", "Cancelled check-ins stay in history. They will not catch up or extend the routine. Already-due or answered check-ins remain unchanged. Old Alexa reminders may still sound until cancellation sync finishes; queued caregiver alerts are not retracted.", "care-note"));
-  } else if (control?.pause) element.append(node("p", `The previous pause ended ${stamp(control.pause.endsAt)}. Cancelled check-ins were not restored.`, "care-note"));
-  const start = node("button", "Review a week-long pause", "secondary"); start.type = "button";
-  if (enabled && !active) element.append(node("p", "Pause future, unanswered check-ins for exactly 168 hours. Review the times and affected check-ins before saving."), start, message, review);
-  else if (!active) element.append(node("p", "A new pause is not available for this account right now.", "care-note"));
+  } else if (control?.pause) element.append(node("p", `The previous cancellation interval ended ${stamp(control.pause.endsAt)}. Cancelled check-ins were not restored.`, "care-note"));
+  const start = node("button", "Review seven-day cancellation", "secondary"); start.type = "button";
+  if (enabled && !active) element.append(node("p", "Cancel future, unanswered check-ins in the next 168 hours and block new check-ins in that interval. This is not a reversible pause. Review the times and affected check-ins before saving."), start, message, review);
+  else if (!active) element.append(node("p", "Seven-day cancellation is not available for this account right now.", "care-note"));
   start.addEventListener("click", async () => {
     if (!alive || loading || isLocked() || !enabled || active) return;
     clearTimeout(expiryTimer); loading = true; start.disabled = true; review.hidden = true;
     message.textContent = "Preparing the exact week and check-ins…";
     try {
       const data = await propose(); if (!alive || isLocked()) return;
-      if (data.proposal === null) { message.textContent = "A pause is already active. Refresh to see its dates."; return; }
+      if (data.proposal === null) { message.textContent = "A cancellation interval is already active. Refresh to see its dates."; return; }
       const proposal = data.proposal;
       if (!validPauseProposal(proposal) || Date.parse(proposal.expiresAt) <= now()) throw new Error("Pause review unavailable");
-      const heading = node("h4", "Review this pause"); heading.setAttribute("tabindex", "-1");
+      const heading = node("h4", "Review this cancellation"); heading.setAttribute("tabindex", "-1");
       const dates = node("p", `${stamp(proposal.startsAt, proposal.timeZone)} through ${stamp(proposal.endsAt, proposal.timeZone)} · ${proposal.timeZone} · exactly 168 hours.`);
       const list = node("ul");
       for (const task of proposal.tasks) list.append(node("li", `${task.title} · ${stamp(task.dueAt, proposal.timeZone)}`));
       const count = node("p", proposal.tasks.length ? `${proposal.tasks.length} future unanswered check-in${proposal.tasks.length === 1 ? "" : "s"} will be cancelled:` : "No existing check-ins will be cancelled. New check-ins are still blocked during the reviewed interval.");
-      const next = node("p", proposal.nextTask ? `Next remaining unanswered check-in: ${proposal.nextTask.title} · ${stamp(proposal.nextTask.dueAt, proposal.timeZone)}.` : "No unanswered check-in remains after the pause in the next 30-day plan.");
+      const next = node("p", proposal.nextTask ? `Next remaining unanswered check-in: ${proposal.nextTask.title} · ${stamp(proposal.nextTask.dueAt, proposal.timeZone)}.` : "No unanswered check-in remains after this interval in the next 30-day plan.");
       const consentLabel = node("label", null, "consent-line"), consent = node("input"); consent.type = "checkbox"; consent.required = true;
       consentLabel.append(consent, node("span", "I reviewed these exact dates and check-ins. Cancelled occurrences will not be restored or moved later."));
-      const save = node("button", "Confirm this week-long pause", "primary"); save.type = "button";
+      const save = node("button", "Confirm seven-day cancellation", "primary"); save.type = "button";
       const cancel = node("button", "Keep the plan unchanged", "secondary"); cancel.type = "button";
       const expire = () => { if (!alive) return; consent.checked = false; save.disabled = true; message.textContent = "This review expired. Review a fresh week before confirming."; };
       expiryTimer = setTimeout(expire, Math.max(1, Date.parse(proposal.expiresAt) - now()));
@@ -74,8 +74,8 @@ export function renderPlanPause({ control, enabled, propose, onSave, isLocked, o
       review.hidden = false; heading.focus(); message.textContent = "Nothing has changed yet. Confirm only after reviewing the list.";
     } catch (error) {
       if (!alive) return;
-      message.textContent = error.status === 409 ? "The plan cannot be paused as reviewed. Refresh and try a new review; at most 25 check-ins can be paused together."
-        : error.status === 404 ? "Pausing is not enabled right now. The plan is unchanged." : "Could not prepare a pause. Check your connection and try again.";
+      message.textContent = error.status === 409 ? "The check-ins cannot be cancelled as reviewed. Refresh and try a new review; at most 25 check-ins can be cancelled together."
+        : error.status === 404 ? "Seven-day cancellation is not enabled right now. The plan is unchanged." : "Could not prepare a cancellation. Check your connection and try again.";
       if ([401, 403].includes(error.status)) onError(error);
     } finally { loading = false; if (alive) start.disabled = isLocked(); }
   });

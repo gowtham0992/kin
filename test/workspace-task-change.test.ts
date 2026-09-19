@@ -29,7 +29,7 @@ let close: (() => void) | undefined;
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-08T15:00:00.000Z")); });
 afterEach(() => { close?.(); close = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-async function fixture(tasks = [single()], manageDuty = true, reschedule = false) {
+async function fixture(tasks = [single()], manageDuty = true, reschedule = false, closeUnanswered = false) {
   const ids = new Map<string, Element>();
   const root = (id: string) => { if (!ids.has(id)) ids.set(id, new Element()); return ids.get(id)!; };
   const element = (id: string) => root("workspace-content").descendants().find(child => child.id === id) ?? ids.get(id) ?? null;
@@ -43,7 +43,7 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
   let loseNextSave = false, conflict = false;
   const receipts = new Map<string, unknown>();
   const request = vi.fn(async (url: string, options: { body?: string } = {}) => {
-    if (url === "/api/session") return { ok: true, json: async () => ({ name: "Maya", role: "caregiver", permissions: { confirm: true, manageDuty, invite: false } }) };
+    if (url === "/api/session") return { ok: true, json: async () => ({ name: "Maya", role: "caregiver", permissions: { confirm: true, manageDuty, closeUnanswered: manageDuty && closeUnanswered, invite: false } }) };
     if (url === "/api/plan") return { ok: true, json: async () => ({ tasks: structuredClone(tasks), features: { reschedule } }) };
     if (url === "/api/today") return { ok: true, json: async () => ({ date: "2026-09-08", tasks: [], summary: { total: 0, completed: 0 }, escalations: [], onDuty: null }) };
     const match = /^\/api\/(tasks|routines)\/([^/]+)\/change$/.exec(url);
@@ -54,7 +54,7 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
       const selected = tasks.filter(task => match[1] === "tasks" ? task.id === decodeURIComponent(match[2]!) : task.routineId === decodeURIComponent(match[2]!));
       const replacement = body.action === "reschedule" ? { taskId: `care-${"a".repeat(40)}`, dueAt: body.dueAt } : undefined;
       for (const task of selected) {
-        if (body.action !== "rename") task.state = "cancelled"; else task.title = body.title;
+        if (body.action !== "rename") task.state = body.action === "close_unanswered" ? "closed_unanswered" : "cancelled"; else task.title = body.title;
         if (replacement) { task.rescheduledTo = replacement; tasks.push(single(replacement.taskId, { title: task.title, dueAt: replacement.dueAt, rescheduledFrom: { taskId: task.id, dueAt: task.dueAt } })); }
       }
       receipts.set(body.requestId, { requestId: body.requestId, ...(match[1] === "tasks" ? { taskId: selected[0]!.id, action: body.action } : {}), changed: selected.length,
@@ -89,6 +89,26 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
 }
 
 describe("reviewed one-time check-in editing", () => {
+  it("requires a reviewed caregiver closure, retains its retry identity, and never submits a care reply", async () => {
+    const overdue = single("overdue", { dueAt: "2026-09-08T14:00:00.000Z", routineId: "daily" });
+    const ui = await fixture([overdue], true, false, true), editor = ui.edit("overdue");
+    expect(editor.action.value).toBe("close_unanswered");
+    expect(editor.action.children.map(option => option.value)).toEqual(["close_unanswered"]);
+    expect(editor.form.textContent).toContain("not as done or skipped");
+    await ui.submit(editor); expect(ui.bodies()).toHaveLength(0);
+    editor.consent.checked = true; ui.loseNextSave(); await ui.submit(editor); await ui.retry();
+    expect(ui.bodies()).toHaveLength(2); expect(ui.bodies()[1]).toEqual(ui.bodies()[0]);
+    expect(ui.bodies()[0]).toMatchObject({ action: "close_unanswered", confirm: true, expected: { title: overdue.title, dueAt: overdue.dueAt } });
+    expect(ui.bodies()[0]).not.toHaveProperty("response");
+    expect(ui.tasks[0]!.state).toBe("closed_unanswered");
+    expect(ui.element("task-title-overdue")).toBeNull();
+  });
+
+  it("hides overdue closure unless the server advertises caregiver permission", async () => {
+    const ui = await fixture([single("overdue", { dueAt: "2026-09-08T14:00:00.000Z" })]);
+    expect(ui.element("task-title-overdue")).toBeNull();
+  });
+
   it("hides moving unless the API explicitly advertises it", async () => {
     const ui = await fixture();
     expect(ui.edit().action.children.map(option => option.value)).toEqual(["rename", "cancel"]);

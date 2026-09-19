@@ -8,6 +8,17 @@ const { setupInstall } = await import(new URL("../simulator/install.js", import.
 const read = (file: string) => readFileSync(new URL(`../simulator/${file}`, import.meta.url), "utf8");
 
 describe("caregiver app installation", () => {
+  it.each([false, true])("reports the actual standalone state (%s) without requesting permission", standalone => {
+    const status = { textContent: "" }, button = { hidden: false, addEventListener: vi.fn() };
+    setupInstall({ window: { matchMedia: () => ({ matches: standalone }), addEventListener: vi.fn(), isSecureContext: false }, navigator: {}, button, status });
+    expect(status.textContent).toContain(standalone ? "Kin is open as an app" : "Kin is open in a browser tab");
+    if (!standalone) {
+      expect(status.textContent).toContain("Share → Add to Home Screen");
+      expect(status.textContent).toContain("check Today directly until delivery is verified");
+    }
+    expect(button.hidden).toBe(true);
+  });
+
   it("serves only public app assets with no-store and a stable token-free start URL", async () => {
     const app = createHttpApp(createDemoStore(), undefined, {
       serveSimulator: false, serveFamilyWorkspace: true,

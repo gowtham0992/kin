@@ -67,7 +67,7 @@ function fixture(role: Membership["role"] = "caregiver", undoEnabled = false, pa
         ...(name ? { intent: { name, ...(number ? { slots: { taskNumber: { name: "taskNumber", value: number } } } : {}) } } : {}) } };
   }
   async function review(name = "MarkTaskDoneIntent") {
-    const listed = await handle(event());
+    const listed = await handle(event("ListTasksIntent"));
     expect(speech(listed)).toContain("1. Morning water");
     expect(speech(listed)).toContain("2. Afternoon walk");
     const reviewed = await handle(event(name, listed.sessionAttributes, "2"));
@@ -82,19 +82,51 @@ function fixture(role: Membership["role"] = "caregiver", undoEnabled = false, pa
     advance: (milliseconds: number) => { time += milliseconds; } };
 }
 
+describe("short voice replies through real MCP", () => {
+  it("saves the spoken task once, exposes undo, and restores the prior response", async () => {
+    const f = fixture("caregiver", true);
+    const first = await f.handle(f.event());
+    expect(speech(first)).toContain("Morning water");
+    expect(speech(first)).not.toContain("Afternoon walk");
+    const done = f.event("CurrentTaskDoneIntent", first.sessionAttributes);
+    const saved = await f.handle(done);
+    expect(speech(saved)).toContain("undo last completion");
+    await f.handle(done);
+    expect((await f.store.today()).tasks[0]!.state).toBe("done");
+    const firstReceipt = await f.confirms.mock.results[0]!.value;
+    const replay = await f.confirms.mock.results[1]!.value;
+    expect(replay.replayed).toBe(true);
+    expect(replay.confirmation).toEqual(firstReceipt.confirmation);
+    const undo = await f.handle(f.event("UndoLastCompletionIntent", saved.sessionAttributes));
+    await f.handle(f.event("AMAZON.YesIntent", undo.sessionAttributes));
+    expect((await f.store.today()).tasks[0]!.state).toBe("scheduled");
+    expect((await f.store.today()).tasks[0]!.lastResponse).toBeNull();
+  });
+  it.each(["revoked", "changed"])("refuses a short reply after the task's access or content is %s", async change => {
+    const f = fixture("caregiver", true);
+    const first = await f.handle(f.event());
+    if (change === "revoked") f.membership.status = "revoked";
+    else await f.store.confirm({ taskId: "water", response: "not_yet", actor: "Other caregiver", requestId: "other-response" });
+    const before = (await f.store.today()).tasks;
+    const result = await f.handle(f.event("CurrentTaskDoneIntent", first.sessionAttributes));
+    expect(speech(result)).not.toContain("Saved");
+    expect((await f.store.today()).tasks).toEqual(before);
+  });
+});
+
 describe("real Echo one-week pause journey", () => {
   it("reviews count, end and next remaining occurrence before one atomic replay-safe pause", async () => {
     const f = fixture("care_recipient", false, true);
     await f.store.scheduleTask({ id: "next", title: "Later <check-in>", dueAt: "2026-09-20T17:00:00.000Z" });
     const reviewed = await f.handle(f.event("PausePlanWeekIntent"));
-    expect(speech(reviewed)).toContain("cancels 2 untouched future check-ins");
+    expect(speech(reviewed)).toContain("Cancel 2 unanswered future check-ins");
     expect(speech(reviewed)).toContain("September 18");
     expect(speech(reviewed)).toContain("Later &lt;check-in&gt;");
     expect(speech(reviewed)).toContain("won't be moved or caught up");
     expect(f.pauses).not.toHaveBeenCalled();
     const yes = f.event("AMAZON.YesIntent", reviewed.sessionAttributes);
     const saved = await f.handle(yes);
-    expect(speech(saved)).toContain("Paused until"); expect(saved.sessionAttributes).toEqual({});
+    expect(speech(saved)).toContain("New check-ins are blocked until"); expect(saved.sessionAttributes).toEqual({});
     expect((await f.store.today()).tasks).toHaveLength(0);
     expect((await f.store.planControl()).pause).toMatchObject({ actor: "Maya" });
     await f.handle(yes);
@@ -138,14 +170,14 @@ describe("real Echo one-week pause journey", () => {
     const f = fixture("care_recipient", false, true), reviewed = await f.handle(f.event("PausePlanWeekIntent"));
     await f.store.scheduleTask({ id: "another", title: "Another", dueAt: "2026-09-20T17:00:00.000Z" });
     const result = await f.handle(f.event("AMAZON.YesIntent", reviewed.sessionAttributes));
-    expect(speech(result)).toContain("pause review changed or expired");
+    expect(speech(result)).toContain("cancellation review changed or expired");
     expect((await f.store.today()).tasks).toHaveLength(2); expect((await f.store.planControl()).pause).toBeUndefined();
   });
   it("reports an unknown outcome after a committed response is lost without retrying", async () => {
     const f = fixture("care_recipient", false, true), reviewed = await f.handle(f.event("PausePlanWeekIntent"));
     f.losePauseResponse();
     const result = await f.handle(f.event("AMAZON.YesIntent", reviewed.sessionAttributes));
-    expect(speech(result)).toContain("couldn't verify whether the pause was saved");
+    expect(speech(result)).toContain("couldn't verify whether the cancellation was saved");
     expect(speech(result)).not.toContain("haven't applied"); expect(f.pauses).toHaveBeenCalledTimes(1);
     expect((await f.store.planControl()).pause).toBeDefined(); expect(result.sessionAttributes).toEqual({});
   });
@@ -153,7 +185,7 @@ describe("real Echo one-week pause journey", () => {
     const f = fixture("care_recipient", false, true), reviewed = await f.handle(f.event("PausePlanWeekIntent"));
     await f.handle(f.event("AMAZON.YesIntent", reviewed.sessionAttributes));
     const status = await f.handle(f.event("PausePlanWeekIntent"));
-    expect(speech(status)).toContain("already paused until"); expect(f.pauses).toHaveBeenCalledTimes(1);
+    expect(speech(status)).toContain("already blocked until"); expect(f.pauses).toHaveBeenCalledTimes(1);
     expect(status.sessionAttributes).toEqual({});
   });
 });

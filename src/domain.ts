@@ -23,7 +23,7 @@ import { acceptPlanPause, assertTaskOutsidePause, makePauseWindow, planControlSc
 export const confirmationResponses = ["done", "not_yet", "skipped"] as const;
 
 export type ConfirmationResponse = (typeof confirmationResponses)[number];
-export type TaskState = "scheduled" | "done" | "skipped" | "cancelled";
+export type TaskState = "scheduled" | "done" | "skipped" | "cancelled" | "closed_unanswered";
 
 export interface CareTask {
   routineId?: string;
@@ -342,7 +342,7 @@ export class InMemoryCareStore implements CareRepository {
         total: tasks.length,
         completed,
         skipped,
-        remaining: tasks.length - completed - skipped,
+        remaining: tasks.filter(task => task.state === "scheduled").length,
       },
     };
   }
@@ -402,6 +402,13 @@ export class InMemoryCareStore implements CareRepository {
     if (receipt) return replayDutyChange(receipt, input);
     const current = this.#circleSnapshot();
     if (input.date < current.startDate || input.date > current.endDate) throw new Error("Duty date must be within the visible roster week");
+    if (input.memberId === null) {
+      assertDutyReview(this.#dutyByDate.get(input.date), input);
+      this.#dutyByDate.delete(input.date);
+      const result = { ...this.#circleSnapshot(), requestId: input.requestId };
+      this.#dutyChanges.set(input.requestId!, structuredClone({ input, result }));
+      return result;
+    }
     const member = this.#members.find((candidate) => candidate.id === input.memberId);
     if (!member?.canReceiveAlerts) throw new Error("Caregiver is not eligible for duty");
     const bounds = calendarDayBounds(input.date, this.#timeZone);
@@ -625,7 +632,7 @@ export class InMemoryCareStore implements CareRepository {
     }
 
     const task = this.#tasks.get(input.taskId);
-    if (!task || task.state === "cancelled") throw new TaskNotFoundError(input.taskId);
+    if (!task || task.state === "cancelled" || task.state === "closed_unanswered") throw new TaskNotFoundError(input.taskId);
 
     assertTaskReview(task, input.expected);
 
@@ -747,7 +754,7 @@ function snapshotFor(
       total: tasks.length,
       completed,
       skipped,
-      remaining: tasks.length - completed - skipped,
+      remaining: tasks.filter(task => task.state === "scheduled").length,
     },
   };
 }

@@ -12,7 +12,8 @@ const timeZone = process.env.KIN_TIME_ZONE?.trim() || "UTC";
 const repository = createDynamoCareRepository({ tableName, circleId, region, timeZone });
 const service = new WeeklyBriefService(
   repository,
-  createBedrockBriefGenerator({ modelId, region }),
+  createBedrockBriefGenerator({ modelId, region,
+    timeoutMs: process.env.KIN_BEDROCK_TIMEOUT_MS === undefined ? undefined : Number(process.env.KIN_BEDROCK_TIMEOUT_MS) }),
   timeZone,
 );
 

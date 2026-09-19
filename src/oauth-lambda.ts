@@ -11,6 +11,7 @@ import { createKinOAuthProvider } from "./oauth-provider.js";
 import { loadOAuthSecrets, type OAuthSecrets } from "./oauth-secrets.js";
 import { createUnavailablePublicApp } from "./public-api-gate.js";
 import { createDynamoFamilyEnrollment, type FamilyEnrollment } from "./invitations.js";
+import { configuredDesktopAuth } from "./desktop-auth-config.js";
 
 interface OAuthRuntimeDependencies {
   loadSecrets?: typeof loadOAuthSecrets;
@@ -26,6 +27,7 @@ export async function createConfiguredOAuthApp(
   dependencies: OAuthRuntimeDependencies = {},
 ) {
   if (environment.KIN_PUBLIC_API_ENABLED === "false") return createUnavailablePublicApp();
+  const desktopClient = configuredDesktopAuth(environment);
   const issuer = requiredHttpsUrl(environment.KIN_OAUTH_ISSUER, "KIN_OAUTH_ISSUER");
   const resourceUri = requiredHttpsUrl(environment.KIN_MCP_RESOURCE_URI, "KIN_MCP_RESOURCE_URI");
   const tableName = required(environment.KIN_OAUTH_STATE_TABLE, "KIN_OAUTH_STATE_TABLE");
@@ -58,6 +60,7 @@ export async function createConfiguredOAuthApp(
       region: environment.AWS_REGION,
     }),
     serviceClient: secrets.serviceClient,
+    ...(desktopClient ? { desktopClient } : {}),
     ...(environment.KIN_BROWSER_AUTH_ENABLED === "true" ? { browserClient: {
       clientId: required(environment.KIN_BROWSER_CLIENT_ID, "KIN_BROWSER_CLIENT_ID"),
       redirectUri: required(environment.KIN_BROWSER_REDIRECT_URI, "KIN_BROWSER_REDIRECT_URI"),
@@ -98,6 +101,7 @@ export async function createConfiguredOAuthApp(
     csrfSecret: secrets.csrfSecret,
     browserClientId: environment.KIN_BROWSER_AUTH_ENABLED === "true" ? environment.KIN_BROWSER_CLIENT_ID?.trim() : undefined,
     echoClientId: echoRedirectUris.length ? secrets.echoClient!.clientId.trim() : undefined,
+    desktopClientId: desktopClient?.clientId,
     enrollment: dependencies.enrollment ?? (environment.KIN_FAMILY_ENROLLMENT_ENABLED === "true"
       ? createDynamoFamilyEnrollment({
           tableName: required(environment.KIN_DYNAMODB_TABLE, "KIN_DYNAMODB_TABLE"),

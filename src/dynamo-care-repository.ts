@@ -387,12 +387,13 @@ export class DynamoCareRepository implements CareRepository {
       await this.#writeCare([
         { Update: {
           TableName: this.#tableName, Key: taskKey,
-          ConditionExpression: "id = :id AND #state = :scheduled AND lastResponse = :untouched AND confirmedAt = :untouched AND confirmedBy = :untouched AND title = :oldTitle AND dueAt = :dueAt AND dueAt > :now AND attribute_not_exists(routineId)",
+          ConditionExpression: "id = :id AND #state = :scheduled AND lastResponse = :untouched AND confirmedAt = :untouched AND confirmedBy = :untouched AND title = :oldTitle AND dueAt = :dueAt"
+            + (input.action === "close_unanswered" ? " AND dueAt < :now" : " AND dueAt > :now AND attribute_not_exists(routineId)"),
           UpdateExpression: input.action === "rename" ? "SET title = :value, changedAt = :now, changedBy = :actor"
             : `SET #state = :value, changedAt = :now, changedBy = :actor${replacement ? ", rescheduledTo = :replacement" : ""}`,
           ExpressionAttributeNames: { "#state": "state" },
           ExpressionAttributeValues: { ":id": task.id, ":scheduled": "scheduled", ":untouched": null, ":oldTitle": task.title,
-            ":dueAt": task.dueAt, ":now": now.toISOString(), ":value": input.action === "rename" ? input.title! : "cancelled", ":actor": input.actor,
+            ":dueAt": task.dueAt, ":now": now.toISOString(), ":value": input.action === "rename" ? input.title! : input.action === "close_unanswered" ? "closed_unanswered" : "cancelled", ":actor": input.actor,
             ...(replacement ? { ":replacement": result.replacement } : {}) },
         } },
         ...(replacement ? [{ Put: { TableName: this.#tableName,
@@ -711,10 +712,10 @@ export class DynamoCareRepository implements CareRepository {
       throw new Error("Duty date must be within the visible roster week");
     }
     const member = current.members.find((candidate) => candidate.id === input.memberId);
-    if (!member?.canReceiveAlerts) throw new Error("Caregiver is not eligible for duty");
-    const assignment: DutyAssignment = {
-      memberId: member.id,
-      memberName: member.name,
+    if (input.memberId !== null && !member?.canReceiveAlerts) throw new Error("Caregiver is not eligible for duty");
+    const assignment: DutyAssignment | null = input.memberId === null ? null : {
+      memberId: member!.id,
+      memberName: member!.name,
       ...calendarDayBounds(input.date, this.#timeZone),
       ...(input.requestId ? { changedAt: this.#now().toISOString(), ...(input.actor ? { changedBy: input.actor } : {}) } : {}),
     };
@@ -728,15 +729,20 @@ export class DynamoCareRepository implements CareRepository {
       const result = appliedDutySnapshot(current, input, assignment);
       try {
         await this.#writeCare([
-          { Put: {
+          ...(assignment ? [{ Put: {
             TableName: this.#tableName,
             Item: { ...assignment, PK: this.#partitionKey(), SK: `DUTY#${input.date}`, entityType: "DutyAssignment" },
             ConditionExpression: input.expectedMemberId === null ? "attribute_not_exists(PK)" : "memberId = :expectedMember",
             ...(input.expectedMemberId === null ? {} : { ExpressionAttributeValues: { ":expectedMember": input.expectedMemberId } }),
-          } },
+          } }] : [{ Delete: {
+            TableName: this.#tableName, Key: { PK: this.#partitionKey(), SK: `DUTY#${input.date}` },
+            ConditionExpression: "memberId = :expectedMember",
+            ExpressionAttributeValues: { ":expectedMember": input.expectedMemberId },
+          } }]),
           { Put: {
             TableName: this.#tableName,
-            Item: { ...receiptKey, input, result, entityType: "DutyChange" },
+            Item: { ...receiptKey, input, result, entityType: "DutyChange",
+              ...(assignment === null ? { previousAssignment: current.assignments.find(day => day.date === input.date), changedAt: this.#now().toISOString() } : {}) },
             ConditionExpression: "attribute_not_exists(PK)",
           } },
         ], authorization);
@@ -751,6 +757,7 @@ export class DynamoCareRepository implements CareRepository {
       }
       return result;
     }
+    if (!assignment) throw new Error("Invalid duty removal");
     const put = {
       TableName: this.#tableName,
       Item: {
@@ -872,7 +879,7 @@ export class DynamoCareRepository implements CareRepository {
     if (existing) return this.#replayed(existing, input);
 
     const task = await this.#findTask(input.taskId);
-    if (!task || task.state === "cancelled") throw new TaskNotFoundError(input.taskId);
+    if (!task || task.state === "cancelled" || task.state === "closed_unanswered") throw new TaskNotFoundError(input.taskId);
 
     assertTaskReview(task, input.expected);
 
@@ -927,10 +934,10 @@ export class DynamoCareRepository implements CareRepository {
                   SK: taskSortKey(updatedTask),
                   entityType: "CareTask",
                 } satisfies StoredTask,
-                ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND title = :title"
+                ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND #state <> :closedUnanswered AND title = :title"
                   + (input.expected ? " AND #state = :reviewState AND dueAt = :reviewDue AND lastResponse = :reviewResponse AND confirmedAt = :reviewAt AND confirmedBy = :reviewBy" : ""),
                 ExpressionAttributeNames: { "#state": "state" },
-                ExpressionAttributeValues: { ":cancelled": "cancelled", ":title": task.title,
+                ExpressionAttributeValues: { ":cancelled": "cancelled", ":closedUnanswered": "closed_unanswered", ":title": task.title,
                   ...(input.expected ? { ":reviewState": input.expected.state, ":reviewDue": input.expected.dueAt,
                     ":reviewResponse": input.expected.lastResponse, ":reviewAt": input.expected.confirmedAt,
                     ":reviewBy": input.expected.confirmedBy } : {}) },
@@ -1357,7 +1364,7 @@ function snapshotFor(
       total: tasks.length,
       completed,
       skipped,
-      remaining: tasks.length - completed - skipped,
+      remaining: tasks.filter(task => task.state === "scheduled").length,
     },
   };
 }

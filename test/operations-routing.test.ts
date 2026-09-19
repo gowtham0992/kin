@@ -20,7 +20,13 @@ it.each(["api", "reminder"])("allows optional operator routing for %s without cr
   const alarms = Object.values(template.findResources("AWS::CloudWatch::Alarm"));
   expect(alarms).toHaveLength(kind === "api" ? 2 : 1);
   for (const alarm of alarms) {
-    expect(alarm.Properties.AlarmActions).toEqual({ "Fn::If": ["OperationsAlarmDestinationConfigured", [{ Ref: "OperationsAlarmTopicArn" }], { Ref: "AWS::NoValue" }] });
+    if (alarm.Properties.AlarmName === "kin-mcp-api-p95-latency") {
+      // Aggregate latency includes deliberately slower model-backed Week reads.
+      expect(alarm.Properties.AlarmActions).toBeUndefined();
+      expect(alarm.Properties.Threshold).toBe(450);
+    } else {
+      expect(alarm.Properties.AlarmActions).toEqual({ "Fn::If": ["OperationsAlarmDestinationConfigured", [{ Ref: "OperationsAlarmTopicArn" }], { Ref: "AWS::NoValue" }] });
+    }
     expect(alarm.Properties.AlarmDescription).toContain("docs/delivery-operations.md");
   }
   template.hasOutput("OperationsAlarmRouting", { Value: { "Fn::If": ["OperationsAlarmDestinationConfigured", { Ref: "OperationsAlarmTopicArn" }, "NOT_CONFIGURED"] } });

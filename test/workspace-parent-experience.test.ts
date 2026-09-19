@@ -42,8 +42,11 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
   };
   const recognitionStart = vi.fn(), recognitionAbort = vi.fn();
   const windowListeners = new Map<string, Array<() => void>>();
+  const documentListeners = new Map<string, Array<() => void>>();
   class Recognition { start = recognitionStart; stop() {} abort = recognitionAbort; }
-  vi.stubGlobal("document", { getElementById: get, createElement: (tag: string) => new Element(tag), querySelector: () => get("main"), querySelectorAll: () => [], addEventListener() {}, hidden: false });
+  const pageDocument = { getElementById: get, createElement: (tag: string) => new Element(tag), querySelector: () => get("main"), querySelectorAll: () => [],
+    addEventListener(name: string, action: () => void) { documentListeners.set(name, [...documentListeners.get(name) ?? [], action]); }, hidden: false };
+  vi.stubGlobal("document", pageDocument);
   vi.stubGlobal("window", { SpeechRecognition: Recognition, addEventListener(name: string, action: () => void) { windowListeners.set(name, [...windowListeners.get(name) ?? [], action]); } });
   const pageLocation = { hash: initialHash, origin: "http://localhost" };
   const replaceState = vi.fn((_data: unknown, _title: string, hash: string) => { pageLocation.hash = hash; });
@@ -75,6 +78,7 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
   const descendants = () => get("workspace-content").descendants();
   const button = (label: string) => descendants().find(child => child.tagName === "BUTTON" && child.textContent === label)!;
   return { get, descendants, request, button, recognitionStart, recognitionAbort, pageLocation, replaceState, onAccessLost, reopen: workspace.open, reset: workspace.reset,
+    setHidden(hidden: boolean) { pageDocument.hidden = hidden; documentListeners.get("visibilitychange")?.forEach(listener => listener()); },
     clarifyNextRequest() { clarify = true; },
     loseNextConfirmationResponse() { loseConfirmationResponse = true; return confirmationWrites; },
     navigate(hash: string) { pageLocation.hash = hash; windowListeners.get("hashchange")?.forEach(listener => listener()); },
@@ -88,6 +92,49 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
 }
 
 describe("parent-first conversation", () => {
+  it("pauses hidden Today reads and refreshes changed care state when the tab returns", async () => {
+    const tasks = [{ ...water }], ui = await fixture(tasks, false, false, "#today");
+    ui.request.mockClear(); ui.setHidden(true);
+    tasks[0]!.state = "done";
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(ui.request).not.toHaveBeenCalled();
+    ui.setHidden(false);
+    await vi.waitFor(() => expect(ui.get("workspace-content").textContent).toContain("1 of 1 check-ins completed"));
+    expect(ui.request.mock.calls.filter(([url]) => url === "/api/today")).toHaveLength(1);
+  });
+
+  it("does not let an old in-flight poll restart polling after a new session opens", async () => {
+    const ui = await fixture([{ ...water }], false, false, "#today");
+    const normalRequest = ui.request.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    ui.request.mockImplementationOnce(async (...args) => { await held; return normalRequest(...args); });
+    vi.advanceTimersByTime(5000);
+    await ui.reopen();
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
+    ui.request.mockClear();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(ui.request.mock.calls.filter(([url]) => url === "/api/today")).toHaveLength(3);
+    ui.reset();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not schedule an opening session's poll after that session closes", async () => {
+    const ui = await fixture([{ ...water }], false, false, "#today");
+    const normalRequest = ui.request.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    ui.request.mockImplementationOnce(normalRequest).mockImplementationOnce(async (...args) => {
+      await held; return normalRequest(...args);
+    });
+    const opening = ui.reopen();
+    await vi.waitFor(() => expect(ui.request.mock.calls.filter(([url]) => url === "/api/session")).toHaveLength(4));
+    ui.reset(); release(); await opening;
+    expect(vi.getTimerCount()).toBe(0);
+    expect(ui.get("workspace-content").childElementCount).toBe(0);
+  });
   it("clears private UI on uncertain MCP access loss while handing off only the original receipt reference", async () => {
     const confirm = vi.fn(async (input: { requestId: string }) => { throw Object.assign(new Error("Access changed"), {
       status: 403, definitiveRejection: false, outcomeUnknown: true, requestId: input.requestId,

@@ -1,5 +1,10 @@
 import { reminderCancellationJobSchema, ReminderSyncUnavailable, type ReminderCancellationJob } from "./echo-reminder-sync.js";
 
+// Fit within the receiver's unchanged 90-second freshness check, leaving 30
+// seconds of combined clock/transit margin. This is not a delivery guarantee.
+// The separate 300-second dispatch lease remains a republication cooldown.
+const messageDeliveryLifetimeSeconds = 60;
+
 /** Sends only a durable job reference. A 202 is queue acceptance, never cancellation proof.
  * The token supplier must use this skill's LWA skill-messaging credentials, not a family token.
  * This initial rollout deliberately supports the configured US region only.
@@ -24,7 +29,7 @@ export function createReminderMessagePublisher(options: {
         method: "POST", redirect: "error", signal: AbortSignal.timeout(2500),
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ data: { kind: "kin.reminder.cancel.v1", jobId: job.jobId },
-          expiresAfterSeconds: Math.min(300, remaining) }),
+          expiresAfterSeconds: Math.min(messageDeliveryLifetimeSeconds, remaining) }),
       });
       // The response body is not needed, and must not leak provider diagnostics or identifiers.
       await response.body?.cancel();

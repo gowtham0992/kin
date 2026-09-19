@@ -261,7 +261,8 @@ describe("isolated Echo development infrastructure", () => {
       expect(result.frames).toEqual([
         { method: "initialize" }, { method: "notifications/initialized" }, { method: "tools/call", name: "show_today" },
       ]);
-      expect(result.response.response.outputSpeech.ssml).toContain("1. Bundled water check-in");
+      expect(result.response.response.outputSpeech.ssml).toContain("Bundled water check-in");
+      expect(result.response.response.outputSpeech.ssml).toContain("Say done, not yet, or skip");
       expect(result.response.response.shouldEndSession).toBe(false);
       expect(result.response.response.card).toBeUndefined();
     } else {

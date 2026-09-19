@@ -10,6 +10,47 @@ const future: CareTask = { id: "single-water", title: "Drink water", dueAt: "202
 const change = (task = future): TaskChange => ({ taskId: task.id, action: "rename", title: "Bring a glass of water", expected: { title: task.title, dueAt: task.dueAt }, requestId: "one-off-change-1", actor: "Maya", confirm: true });
 
 describe("reviewed one-off check-in changes", () => {
+  it("gates overdue closure until compatible readers are deployed and requires a caregiver", async () => {
+    const task = { ...future, dueAt: "2026-09-08T14:00:00.000Z" };
+    const store = new InMemoryCareStore([task], () => now);
+    let role = "caregiver";
+    const options = { accessAuthorizer: { async authorize() { return { subject: "account-maya", scopes: new Set(["mcp:tools"]), claims: { iss: "https://kin.example" } }; } },
+      familyAccess: { circleId: "family-a", directory: { async find() { return { circleId: "family-a", memberId: "maya", name: "Maya", role, status: "active" }; } } } };
+    const body = { action: "close_unanswered", expected: { title: task.title, dueAt: task.dueAt }, requestId: "close-overdue-1", confirm: true };
+    const send = (enabled: boolean, patch = {}) => request(createHttpApp(store, undefined, { ...options, closeUnansweredEnabled: enabled }))
+      .post(`/api/tasks/${task.id}/change`).set("authorization", "Bearer synthetic").send({ ...body, ...patch });
+    await send(false).expect(422);
+    role = "care_recipient"; await send(true).expect(403);
+    role = "viewer"; await send(true).expect(403);
+    role = "caregiver"; await send(true, { confirm: false }).expect(400);
+    await send(true, { expected: { ...body.expected, title: "Stale title" } }).expect(409);
+    await send(true).expect(200); await send(true).expect(200);
+    expect((await store.today()).tasks[0]!.changedBy).toBe("Maya");
+  });
+
+  it("closes an overdue unanswered occurrence without recording a care response", async () => {
+    const task = { ...future, dueAt: "2026-09-08T14:00:00.000Z", routineId: "daily-water" };
+    const store = new InMemoryCareStore([task], () => now);
+    const input: TaskChange = { ...change(task), action: "close_unanswered", title: undefined };
+    const result = await store.changeTask(input);
+    expect(await store.changeTask(input)).toEqual(result);
+    const today = await store.today();
+    expect(today.tasks[0]).toMatchObject({ state: "closed_unanswered", changedBy: "Maya", changedAt: now.toISOString(), lastResponse: null, confirmedAt: null, confirmedBy: null });
+    expect(today.summary).toEqual({ total: 1, completed: 0, skipped: 0, remaining: 0 });
+    expect(planMissedTaskEscalations({ snapshot: today, now })).toEqual({ events: [], blocked: [] });
+    await expect(store.confirm({ taskId: task.id, response: "done", actor: "Evelyn", requestId: "cannot-reopen" })).rejects.toThrow("Care task not found");
+  });
+
+  it.each([
+    { dueAt: future.dueAt }, { dueAt: now.toISOString() }, { lastResponse: "not_yet" },
+    { state: "done" }, { state: "skipped" }, { state: "cancelled" }, { state: "closed_unanswered" },
+    { confirmedAt: now.toISOString() }, { confirmedBy: "Evelyn" },
+  ])("does not close an ineligible occurrence %j", async fields => {
+    const task = { ...future, dueAt: "2026-09-08T14:00:00.000Z", ...fields } as CareTask;
+    const store = new InMemoryCareStore([task], () => now);
+    await expect(store.changeTask({ ...change(task), action: "close_unanswered", title: undefined })).rejects.toBeInstanceOf(TaskChangeConflict);
+  });
+
   it("replays the original creation after a later rename without restoring the old task", async () => {
     const store = new InMemoryCareStore([], () => now);
     const scheduled = { id: future.id, title: future.title, dueAt: future.dueAt };

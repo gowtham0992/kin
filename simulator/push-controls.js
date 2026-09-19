@@ -13,7 +13,7 @@ export function createPushControls({ request, container }) {
     const enable = make("button", "Enable on this phone"), disable = make("button", "Turn off on this phone");
     const check = make("button", "Check connection");
     for (const button of [enable, disable, check]) { button.type = "button"; button.className = "secondary"; }
-    details.append(heading, make("p", "Choosing Enable replaces your previously selected phone. Lock-screen notices contain no care details. Push is best-effort, not an emergency service."), enable, disable, status, check);
+    details.append(heading, make("p", "Connecting a phone does not activate automatic follow-ups. Check Today directly while delivery is unverified. Choosing Enable replaces your previously selected phone. Lock-screen notices contain no care details. Push is best-effort, not an emergency service."), enable, disable, status, check);
     container.append(details);
     if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
       enable.hidden = disable.hidden = check.hidden = true;

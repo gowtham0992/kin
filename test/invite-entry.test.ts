@@ -18,8 +18,9 @@ class Element {
 beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); vi.spyOn(Date, "now").mockReturnValue(1_000_000); });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-async function fixture(options: { view?: string; callback?: boolean; invalidState?: boolean; callbackHash?: string; tokenResponse?: Promise<Response> } = {}) {
+async function fixture(options: { view?: string; callback?: boolean; invalidState?: boolean; callbackHash?: string; tokenResponse?: Promise<Response>; cookie?: boolean; closed?: boolean } = {}) {
   const data = new Map<string, string>();
+  if (options.closed) data.set("kin.workspace-closed", "1");
   const storage = { setItem: (key: string, value: string) => data.set(key, value), getItem: (key: string) => data.get(key) ?? null, removeItem: (key: string) => data.delete(key) };
   const cryptoApi = { subtle: webcrypto.subtle, getRandomValues: (array: Uint8Array) => array.fill(1) };
   let currentUrl = new URL(`${config.redirectUri}#${options.view ?? "today"}`);
@@ -42,7 +43,8 @@ async function fixture(options: { view?: string; callback?: boolean; invalidStat
     addEventListener(name: string, action: (event: { persisted: boolean }) => void) { lifecycle.set(name, action); } });
   vi.stubGlobal("crypto", cryptoApi);
   const request = vi.fn(async (url: string) => {
-    if (url === "/family-auth-config") return Response.json(config);
+    if (url === "/family-auth-config") return Response.json({ ...config, ...(options.cookie ? { sessionMode: "cookie" } : {}) });
+    if (url === "/browser-session" && options.cookie) return new Response(null, { status: 401 });
     if (url === "/token") return options.tokenResponse ?? Response.json({ access_token: "synthetic-token", token_type: "Bearer", expires_in: 3600, scope: "mcp:tools" });
     throw new Error(`Unexpected request: ${url}`);
   });
@@ -55,6 +57,19 @@ async function fixture(options: { view?: string; callback?: boolean; invalidStat
 }
 
 describe("parent and family entry through sign-in", () => {
+  it("tries one silent provider renewal when the cookie session has expired on page entry", async () => {
+    const ui = await fixture({ cookie: true, view: "week" });
+    await vi.waitFor(() => expect(ui.location.assign).toHaveBeenCalledOnce());
+    expect(new URL(ui.location.assign.mock.calls[0]![0]).searchParams.get("prompt")).toBe("none");
+    expect(JSON.parse(ui.data.get("kin.browser-login")!).returnView).toBe("week");
+    expect(workspace.open).not.toHaveBeenCalled();
+  });
+  it("keeps a deliberately closed workspace closed on reload", async () => {
+    const ui = await fixture({ cookie: true, closed: true });
+    await vi.waitFor(() => expect(ui.element("browser-signin").disabled).toBe(false));
+    expect(ui.location.assign).not.toHaveBeenCalled(); expect(workspace.open).not.toHaveBeenCalled();
+  });
+
   it("preserves Turns through the existing Circle sign-in return contract", async () => {
     const ui = await fixture({ view: "turns" });
     await vi.waitFor(() => expect(ui.element("browser-signin").hidden).toBe(false));

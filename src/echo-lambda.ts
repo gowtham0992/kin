@@ -3,7 +3,7 @@ import type { RequestEnvelope, ResponseEnvelope } from "ask-sdk-model";
 import { z } from "zod";
 import { createEchoCareClient, type EchoCareClient } from "./echo-care-client.js";
 import { createEchoCareVoice } from "./echo-care-voice.js";
-import { createEchoReminderClient, createEchoReminderVoice, type EchoReminderClient } from "./echo-reminders.js";
+import { createEchoReminderClient, createEchoReminderVoice, offerCheckInReminder, type EchoReminderClient } from "./echo-reminders.js";
 import { createDynamoReminderClaims, type ReminderClaims } from "./echo-reminder-claims.js";
 import { createDynamoReminderCancellationJobs, createReminderCancellationReceiver, reminderSyncMessageSchema, type ReminderCancellationJobs } from "./echo-reminder-sync.js";
 
@@ -58,9 +58,11 @@ export function createEchoHandler(environment: NodeJS.ProcessEnv, dependencies: 
   const careEnabled = enabled && environment.KIN_ECHO_CARE_ENABLED === "true";
   const reminderTestEnabled = enabled && environment.KIN_ECHO_REMINDER_TEST_ENABLED === "true";
   const syncEnabled = enabled && environment.KIN_ECHO_REMINDER_SYNC_ENABLED === "true";
+  const reminders = dependencies.reminders ?? createEchoReminderClient(fetch, record =>
+    console.info(JSON.stringify({ event: "kin_echo_reminder_create_result", ...record })));
   if (syncEnabled && !dependencies.reminderCancellationJobs) throw new Error("Kin reminder synchronization requires an authorized job store.");
   const cancelReminder = syncEnabled ? createReminderCancellationReceiver(dependencies.reminderCancellationJobs!,
-    dependencies.reminders ?? createEchoReminderClient(), dependencies.now) : undefined;
+    reminders, dependencies.now) : undefined;
   const reminderClaims = reminderTestEnabled ? dependencies.reminderClaims ?? createDynamoReminderClaims(environment.KIN_ECHO_REMINDER_CLAIMS_TABLE ?? "") : undefined;
   const care = careEnabled ? dependencies.care ?? createEchoCareClient(environment.KIN_ECHO_MCP_ENDPOINT ?? "", {
     onDiagnostic: diagnostic => console.info(JSON.stringify({ event: "kin_echo_care_result", ...diagnostic })),
@@ -84,7 +86,7 @@ export function createEchoHandler(environment: NodeJS.ProcessEnv, dependencies: 
         return speak(input, "This Kin voice test currently supports English, United States. Please check your Alexa language settings.");
       },
     },
-    ...(reminderClaims ? [createEchoReminderVoice(dependencies.reminders ?? createEchoReminderClient(), reminderClaims, dependencies.now,
+    ...(reminderClaims ? [createEchoReminderVoice(reminders, reminderClaims, dependencies.now,
       careEnabled ? dependencies.care ?? createEchoCareClient(environment.KIN_ECHO_MCP_ENDPOINT ?? "", {
         timeoutMs: 5000,
         onDiagnostic: diagnostic => console.info(JSON.stringify({ event: "kin_echo_reminder_plan_result", stage: "offer", ...diagnostic })),
@@ -94,7 +96,11 @@ export function createEchoHandler(environment: NodeJS.ProcessEnv, dependencies: 
         timeoutMs: 2000,
         onDiagnostic: diagnostic => console.info(JSON.stringify({ event: "kin_echo_reminder_plan_result", stage: "confirmation", ...diagnostic })),
       }) : undefined, environment.KIN_ECHO_TIME_ZONE ?? "UTC", environment.KIN_ECHO_PLAN_CANCEL_SYNC_ENABLED === "true")] : []),
-    ...(care ? [createEchoCareVoice(care, dependencies.now, environment.KIN_ECHO_UNDO_ENABLED === "true", environment.KIN_ECHO_PLAN_PAUSE_ENABLED === "true")] : []),
+    ...(care ? [createEchoCareVoice(care, dependencies.now, environment.KIN_ECHO_UNDO_ENABLED === "true", environment.KIN_ECHO_PLAN_PAUSE_ENABLED === "true", environment.KIN_ECHO_TIME_ZONE ?? "UTC",
+      reminderClaims && (!dependencies.reminders || dependencies.reminders.createCheckIn) &&
+        (environment.KIN_ECHO_PLAN_CANCEL_SYNC_ENABLED !== "true" || (care.prepareReminder && reminderClaims.recordAccepted))
+        ? (input, task, time) => offerCheckInReminder(input, task, time, environment.KIN_ECHO_TIME_ZONE ?? "UTC", environment.KIN_ECHO_PLAN_CANCEL_SYNC_ENABLED === "true")
+        : undefined)] : []),
     {
       canHandle: input => input.requestEnvelope.request.type === "LaunchRequest",
       handle: input => speak(input, "Welcome to Kin. This is a voice connection test. Your family account is not connected yet. You can say hello, help, or stop.", true),

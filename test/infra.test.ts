@@ -8,7 +8,9 @@ import path from "node:path";
 import { exportJWK, generateKeyPair, jwtVerify } from "jose";
 import request from "supertest";
 
-describe("Kin AWS infrastructure", () => {
+// These tests bundle deployable assets as well as synthesize templates. Keep
+// their budget local: ordinary unit tests must retain the default timeout.
+describe("Kin AWS infrastructure", { timeout: 20_000 }, () => {
   it("limits care membership transaction grants to the API and OAuth roles on one table", () => {
     const template = Template.fromStack(new KinApiStack(new App(), "MembershipPolicyTest", {
       env: { account: "123456789012", region: "us-east-1" },
@@ -247,6 +249,7 @@ describe("Kin AWS infrastructure", () => {
         Variables: Match.objectLike({
           KIN_CIRCLE_ID: "demo-family",
           KIN_BEDROCK_TIMEOUT_MS: "300",
+          KIN_WORKSPACE_BEDROCK_TIMEOUT_MS: "5000",
           KIN_SERVE_SIMULATOR: "false",
           KIN_FAMILY_WORKSPACE_ENABLED: { Ref: "FamilyWorkspaceEnabled" },
           KIN_FAMILY_CONVERSATION_ENABLED: { Ref: "FamilyConversationEnabled" },
@@ -284,6 +287,19 @@ describe("Kin AWS infrastructure", () => {
     const routes = Object.values(template.findResources("AWS::ApiGatewayV2::Route"));
     expect(routes.find(route => route.Properties.RouteKey === "GET /auth/{proxy+}")?.Properties.Target)
       .toEqual(routes.find(route => route.Properties.RouteKey === "GET /auth")?.Properties.Target);
+    // Account switching automatically posts the provider's CSRF-bound logout
+    // form before resuming authorization for the new account.
+    for (const routeKey of ["GET /session/end", "POST /session/end", "POST /session/end/confirm", "GET /session/end/success"]) {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+        RouteKey: routeKey,
+        Target: routes.find(route => route.Properties.RouteKey === "GET /auth")!.Properties.Target,
+      });
+    }
+    expect(routes.some(route => ["ANY /session/{proxy+}", "ANY /session/end/{proxy+}"].includes(route.Properties.RouteKey))).toBe(false);
+    // Preserve the identities already installed by the narrow live route release.
+    for (const [index, routeKey] of ["GET /session/end", "POST /session/end", "POST /session/end/confirm", "GET /session/end/success"].entries()) {
+      expect(template.toJSON().Resources[`KinOAuthSessionRoute${index}`]?.Properties.RouteKey).toBe(routeKey);
+    }
     template.hasResourceProperties("AWS::SSM::Parameter", {
       Name: "/kin/mcp/canonical-uri",
       Type: "String",

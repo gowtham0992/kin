@@ -9,3 +9,7 @@ it("requires isolated configuration before activation", () => {
   expect(() => createReminderSyncWorker({ KIN_REMINDER_SYNC_WORKER_ENABLED: "true", KIN_DYNAMODB_TABLE: "care", KIN_CIRCLE_ID: "circle",
     KIN_SKILL_MESSAGING_SECRET_ID: "kin/oauth" })).toThrow("configuration incomplete");
 });
+it("refuses to activate the sweep during single-receipt testing", () => {
+  expect(() => createReminderSyncWorker({ KIN_REMINDER_SYNC_WORKER_ENABLED: "true", KIN_REMINDER_SINGLE_TEST_ENABLED: "true" }))
+    .toThrow("Single reminder testing requires a paused sweep.");
+});

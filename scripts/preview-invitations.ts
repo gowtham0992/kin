@@ -18,7 +18,10 @@ const rosterMembers: RosterMemberRecord[] = mode === "roster-empty" ? [] : [
   { id: "maya", name: "Maya", relationship: "daughter", canReceiveAlerts: true },
   { id: "theo", name: "Theo", relationship: "son", canReceiveAlerts: true },
 ];
-const store = mode === "coverage-empty" || mode === "duty-uncertain"
+const store = process.env.KIN_PREVIEW_CLOSE_UNANSWERED === "true"
+  ? new InMemoryCareStore([{ id: "close-test", title: "Synthetic unanswered call", dueAt: new Date(Date.now() - 86400000).toISOString(),
+      state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null }], () => new Date(), null, "America/Denver", [], rosterMembers)
+  : mode === "coverage-empty" || mode === "duty-uncertain"
   ? new InMemoryCareStore([], () => new Date(), null, "America/Denver", [], rosterMembers)
   : createDemoStore(mode === "mcp-family" ? () => new Date("2026-09-08T15:00:00.000Z") : undefined, undefined, rosterMembers);
 if (process.env.KIN_PREVIEW_PAUSE_FIXTURE === "true") {
@@ -123,6 +126,7 @@ if (mode === "mcp-family") {
 }
 app.use(createHttpApp(store, undefined, {
   rescheduleEnabled: process.env.KIN_PREVIEW_RESCHEDULE === "true",
+  closeUnansweredEnabled: process.env.KIN_PREVIEW_CLOSE_UNANSWERED === "true",
   // No canonical HTTPS resource belongs to this loopback-only synthetic
   // account proxy. The real socket's origin guard and bearer checks apply.
   rosterManagement: mode.startsWith("roster") ? rosterManagement : undefined,

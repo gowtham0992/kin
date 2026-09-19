@@ -3,7 +3,7 @@ import type { CareTask } from "./domain.js";
 
 export const taskReviewSchema = z.object({
   title: z.string().min(1).max(120), dueAt: z.string().datetime(),
-  state: z.enum(["scheduled", "done", "skipped", "cancelled"]),
+  state: z.enum(["scheduled", "done", "skipped", "cancelled", "closed_unanswered"]),
   lastResponse: z.enum(["done", "not_yet", "skipped"]).nullable(),
   confirmedAt: z.string().datetime().nullable(), confirmedBy: z.string().nullable(),
 }).strict();

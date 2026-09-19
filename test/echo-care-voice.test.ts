@@ -13,6 +13,9 @@ const snapshot: TodaySnapshot = {
   tasks: [1, 2].map(n => ({ id: `task-${n}`, title: n === 1 ? "Morning water" : "Evening water", dueAt: `2026-09-11T${n === 1 ? "16" : "23"}:00:00.000Z`, state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null })),
 };
 function request(name?: string, attrs: object = {}, number?: string, token: string | undefined = "linked-token") {
+  // This suite exercises the retained, explicit numbered-list conversation.
+  // Default launch and short replies are covered by echo-short-replies.test.ts.
+  name ??= "ListTasksIntent";
   return { version: "1.0", session: { new: !name, sessionId: "session-one", application: { applicationId: skillId }, attributes: attrs },
     context: { System: { application: { applicationId: skillId }, user: { userId: "alexa-user", accessToken: token }, apiAccessToken: "not-a-kin-token" } },
     request: { type: name ? "IntentRequest" : "LaunchRequest", requestId: `request-${name ?? "launch"}`, timestamp: new Date(now).toISOString(), locale: "en-US",
@@ -66,7 +69,7 @@ describe("linked Echo care conversation", () => {
     const result = await handle(request("AMAZON.HelpIntent"));
     expect(speech(result)).toContain("Anyone using this Echo can use the linked Kin account");
     expect(speech(result)).toContain("I can't identify who's speaking");
-    expect(speech(result)).toContain("I'll ask before saving");
+    expect(speech(result)).toContain("I'll ask before skipping");
     expect(care.today).not.toHaveBeenCalled();
     expect(care.confirm).not.toHaveBeenCalled();
   });
@@ -221,7 +224,7 @@ describe("linked Echo care conversation", () => {
     expect(care.confirm).not.toHaveBeenCalled();
 
     const refreshed = await handle(request("TodayPlanIntent", next.sessionAttributes));
-    expect(speech(refreshed)).toContain(`1. ${remaining[0]!.title}`);
+    expect(speech(refreshed)).toContain(remaining[0]!.title);
     const reviewed = await handle(request("MarkTaskDoneIntent", refreshed.sessionAttributes, "1"));
     await handle(request("AMAZON.YesIntent", reviewed.sessionAttributes));
     expect(care.confirm).toHaveBeenCalledExactlyOnceWith("linked-token", expect.objectContaining({ taskId: remaining[0]!.id }));
@@ -267,15 +270,15 @@ describe("linked Echo care conversation", () => {
     const { handle, care } = setup();
     care.today.mockResolvedValue({ ...snapshot, tasks: snapshot.tasks.map(task => ({ ...task, title: "Water" })) });
     const result = await handle(request());
-    expect(speech(result)).toContain("September 11 at 4:00 PM UTC");
-    expect(speech(result)).toContain("September 11 at 11:00 PM UTC");
+    expect(speech(result)).toContain("today at 4:00 PM UTC");
+    expect(speech(result)).toContain("today at 11:00 PM UTC");
   });
   it("repeats the selected duplicate title's due time before asking to save", async () => {
     const { handle, care } = setup();
     care.today.mockResolvedValue({ ...snapshot, tasks: snapshot.tasks.map(task => ({ ...task, title: "Water" })) });
     const listed = await handle(request());
     const review = await handle(request("MarkTaskDoneIntent", listed.sessionAttributes, "2"));
-    expect(speech(review)).toContain("Record done for check-in 2, Water, scheduled for September 11 at 11:00 PM UTC?");
+    expect(speech(review)).toContain("Record done for check-in 2, Water, scheduled for today at 11:00 PM UTC?");
     expect(speech(review)).not.toContain("4:00 PM");
     expect(speech(review)).toContain("Say yes or no");
     expect(care.confirm).not.toHaveBeenCalled();
@@ -424,7 +427,7 @@ describe("repeating a linked Echo conversation", () => {
     const repeated = await handle(request("AMAZON.RepeatIntent", previous.sessionAttributes));
     expect(speech(repeated)).toContain("Water &amp; &lt;audio");
     expect(speech(repeated)).not.toContain("<audio");
-    if (mode === "review") expect(speech(repeated)).toContain("September 11 at 11:00 PM UTC");
+    if (mode === "review") expect(speech(repeated)).toContain("today at 11:00 PM UTC");
     expect(care.confirm).not.toHaveBeenCalled();
   });
 });

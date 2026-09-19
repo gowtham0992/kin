@@ -44,14 +44,15 @@ const mixedBrief = await new WeeklyBriefService(mixedStore, new BedrockBriefGene
 } })).create(at);
 assert.equal(mixedBrief.generatedBy, "deterministic");
 assert.deepEqual(mixedBrief.stats, { scheduled: 4, completed: 1, skipped: 1, stillOpen: 2, escalations: 2 });
-assert.equal(mixedBrief.evidence.length, 7);
+assert.equal(mixedBrief.evidence.length, 8);
 assert.equal(mixedBrief.responsibility.acknowledgment.withinWindow, 1);
 assert.equal(mixedBrief.responsibility.acknowledgment.pending, 1);
 assert.ok(!JSON.stringify(mixedBrief).includes("Untouched future check-in"));
-assert.ok(!JSON.stringify(mixedBrief).includes("Outside the seven-day window"));
+assert.ok(!JSON.stringify(mixedBrief.overview).includes("Outside the seven-day window"));
+assert.ok(mixedBrief.evidence.some(fact => fact.fact.includes("Prior comparison period") && fact.fact.includes("Outside the seven-day window")));
 const selectedBrief = await new WeeklyBriefService(mixedStore, new BedrockBriefGenerator({ modelId: "synthetic-model", client: {
   send: async () => ({ stopReason: "end_turn", usage: { inputTokens: 100, outputTokens: 30 }, output: { message: { role: "assistant", content: [{ text: JSON.stringify({
-    overviewEvidenceIds: mixedBrief.evidence.map(fact => fact.id),
+    overviewEvidenceIds: mixedBrief.evidence.filter(fact => !fact.fact.startsWith("Prior comparison period:")).map(fact => fact.id),
     highlightEvidenceIds: ["task:open:2026-09-13T18:00:00.000Z", "escalation:pending-receipt"],
     followUps: [{ kind: "check_open_task", evidenceId: "task:open:2026-09-13T18:00:00.000Z" }],
   }) }] } } }),
@@ -173,7 +174,8 @@ try {
     await expect(page.locator(`#brief-source-${index + 1} code`)).toHaveText(fact.id);
     await expect(page.locator(`#brief-source-${index + 1}`)).toContainText(fact.fact);
   }
-  await expect(page.locator("#workspace-content")).not.toContainText("Outside the seven-day window");
+  await expect(page.locator(".care-brief-evidence")).toContainText("Prior comparison period: Outside the seven-day window");
+  await expect(page.getByRole("heading", { name: "Patterns in recorded replies" })).toBeVisible();
   await expect(page.locator("#workspace-content")).not.toContainText("Untouched future check-in");
   await page.evaluate(() => {
     window.__kinActualPrintEvents = [];

@@ -122,9 +122,21 @@ $("browser-signin").addEventListener("click", async () => {
     status.textContent = "Kin could not start sign-in. Check that this browser allows session storage and try again."; $("browser-signin").disabled = false;
   }
 });
-$("browser-disconnect").addEventListener("click", () => {
+$("browser-disconnect").addEventListener("click", async () => {
   entryGeneration += 1;
-  auth?.disconnect(); workspace.reset(); clearReceipt(); form.hidden = true; $("invitation-area").hidden = true;
+  const current = entryGeneration;
+  const closing = auth?.disconnect(); workspace.reset(); clearReceipt(); form.hidden = true; $("invitation-area").hidden = true;
+  $("browser-signin").disabled = true; $("browser-disconnect").disabled = true;
+  status.textContent = "Closing workspace session…";
+  try { await closing; }
+  catch {
+    if (!ownsEntry(current)) return;
+    status.textContent = "Kin could not confirm sign-out. Check your connection and try closing the session again.";
+    $("browser-disconnect").disabled = false;
+    return;
+  }
+  if (!ownsEntry(current)) return;
+  $("browser-disconnect").disabled = false;
   $("browser-disconnect").hidden = true; $("browser-signin").hidden = false; $("browser-signin").disabled = false;
   status.textContent = "Workspace session closed. This does not sign you out of the account provider or remove family access.";
 });
@@ -145,6 +157,14 @@ async function initialize() {
       auth = owner;
       const completed = await owner.complete(callbackUrl);
       if (!ownsEntry(current)) return;
+      if (!owner.connected && owner.canRenew) {
+        // One top-level same-origin renewal on page entry. Do not redirect an
+        // active editor or automatically retry an uncertain care mutation.
+        const view = new URL(callbackUrl).hash.slice(1);
+        const target = await owner.start(view === "turns" ? "circle" : view, { silent: true });
+        if (ownsEntry(current) && auth === owner) window.location.assign(target);
+        return;
+      }
       if (completed) window.history.replaceState(null, "", `/invite.html#${owner.returnView === "circle" ? "turns" : owner.returnView}`);
       $("browser-disconnect").hidden = !auth.connected;
     } else if (response.status !== 404) throw new Error("Unavailable");

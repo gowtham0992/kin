@@ -4,7 +4,7 @@ import type { CareTask } from "./domain.js";
 import { scheduledTask } from "./care-plan.js";
 
 export const taskChangeBody = z.object({
-  action: z.enum(["rename", "cancel", "reschedule"]),
+  action: z.enum(["rename", "cancel", "reschedule", "close_unanswered"]),
   title: z.string().trim().min(1).max(120).optional(),
   dueAt: z.iso.datetime().refine(value => new Date(value).toISOString() === value).optional(),
   expected: z.object({ title: z.string().min(1).max(120), dueAt: z.iso.datetime() }).strict(),
@@ -15,7 +15,7 @@ export const taskChangeBody = z.object({
   : input.title === undefined && input.dueAt === undefined);
 
 export type TaskChange = z.infer<typeof taskChangeBody> & { taskId: string; actor: string };
-export interface TaskChangeResult { requestId: string; taskId: string; action: "rename" | "cancel" | "reschedule"; changed: 1;
+export interface TaskChangeResult { requestId: string; taskId: string; action: TaskChange["action"]; changed: 1;
   replacement?: { taskId: string; dueAt: string } }
 export interface TaskChangeReceipt { input: TaskChange; result: TaskChangeResult }
 export class TaskChangeConflict extends Error {
@@ -23,16 +23,18 @@ export class TaskChangeConflict extends Error {
 }
 
 export function assertEditableTask(task: CareTask | undefined, input: TaskChange, now: Date): asserts task is CareTask {
-  if (!task || task.id !== input.taskId || task.routineId !== undefined || task.state !== "scheduled" ||
+  const closing = input.action === "close_unanswered";
+  if (!task || task.id !== input.taskId || (!closing && task.routineId !== undefined) || task.state !== "scheduled" ||
       task.lastResponse !== null || task.confirmedAt !== null || task.confirmedBy !== null ||
       task.title !== input.expected.title || task.dueAt !== input.expected.dueAt ||
-      !Number.isFinite(Date.parse(task.dueAt)) || Date.parse(task.dueAt) <= now.getTime()) {
+      !Number.isFinite(Date.parse(task.dueAt)) ||
+      (closing ? Date.parse(task.dueAt) >= now.getTime() : Date.parse(task.dueAt) <= now.getTime())) {
     throw new TaskChangeConflict();
   }
 }
 
 export function changedTask(task: CareTask, input: TaskChange, at: string): CareTask {
-  return { ...task, ...(input.action !== "rename" ? { state: "cancelled" as const } : { title: input.title! }),
+  return { ...task, ...(input.action !== "rename" ? { state: input.action === "close_unanswered" ? "closed_unanswered" as const : "cancelled" as const } : { title: input.title! }),
     ...(input.action === "reschedule" ? { rescheduledTo: { taskId: replacementTaskId(input), dueAt: input.dueAt! } } : {}),
     changedAt: at, changedBy: input.actor };
 }

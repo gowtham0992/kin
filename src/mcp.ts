@@ -43,18 +43,18 @@ export function createMcpServer(
       throw error;
     };
     server.registerTool("review_plan_pause", {
-      description: "Read a fresh review for pausing untouched future check-ins for exactly 168 hours. No write. Show the cancellation list, end and next remaining task; occurrences are omitted, never shifted or caught up. Active pause returns a null proposal.", inputSchema: {},
+      description: "Read a fresh review for cancelling untouched future check-ins in the next 168 hours and blocking new check-ins in that interval. Not a reversible pause. No write. Show the cancellation list, end and next remaining task; occurrences never return, shift or catch up. Active cancellation interval returns a null proposal.", inputSchema: {},
     }, async () => {
       try { await authorization.assertCurrent(); const proposal = await store.proposePlanPause(), control = await store.planControl();
         await authorization.assertCurrent();
-        return { content: [{ type: "text", text: "Review this pause before asking for explicit confirmation. No change was submitted." }], structuredContent: { proposal, control } };
+        return { content: [{ type: "text", text: "Review this cancellation before asking for explicit confirmation. No change was submitted." }], structuredContent: { proposal, control } };
       } catch (error) { return failure(error); }
     });
     server.registerTool("pause_care_plan", {
-      description: "Apply exactly the freshly reviewed one-week pause only after explicit Yes. Cancels selected untouched future occurrences atomically; never creates reminders or moves/catches up tasks. Keep the request ID when retrying an uncertain write.", inputSchema: planPauseBody.shape,
+      description: "Apply exactly the freshly reviewed seven-day cancellation only after explicit Yes. Cancels selected untouched future occurrences atomically and blocks new check-ins in that interval; never restores them, creates reminders or moves/catches up tasks. Keep the request ID when retrying an uncertain write.", inputSchema: planPauseBody.shape,
     }, async input => {
       try { const result = await pausePlanWithReceipt(store, input, member, authorization);
-        return { content: [{ type: "text", text: "The reviewed pause was saved. Selected occurrences were canceled, not moved." }], structuredContent: { ...result } };
+        return { content: [{ type: "text", text: "The reviewed cancellation was saved. Selected occurrences were canceled, not moved or temporarily hidden." }], structuredContent: { ...result } };
       } catch (error) { return failure(error); }
     });
   }

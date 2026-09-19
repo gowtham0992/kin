@@ -10,6 +10,8 @@ import {
 } from "./escalation.js";
 import { createSnsAlertPublisher } from "./sns-alert-publisher.js";
 import { createConfiguredPushPublisher } from "./push-runtime.js";
+import { runConfiguredPushTest } from "./push-test-runtime.js";
+import { runConfiguredCareLoopTest } from "./care-loop-test-runtime.js";
 
 const scheduledEventSchema = z.object({
   source: z.literal("kin.scheduler"),
@@ -137,7 +139,13 @@ export function createConfiguredEscalationWorker(environment: NodeJS.ProcessEnv,
 
 let productionWorker: ReturnType<typeof createConfiguredEscalationWorker> | undefined;
 
-export const handler: Handler<unknown, EscalationSweepResult | EscalationPausedResult> = async (event, context: Context) => {
+export const handler: Handler<unknown, EscalationSweepResult | EscalationPausedResult | Awaited<ReturnType<typeof runConfiguredPushTest>> | Awaited<ReturnType<typeof runConfiguredCareLoopTest>>> = async (event, context: Context) => {
+  if (event && typeof event === "object" && "source" in event && event.source === "kin.care-loop-test") {
+    return runConfiguredCareLoopTest(process.env, event);
+  }
+  if (event && typeof event === "object" && "source" in event && event.source === "kin.push-test") {
+    return runConfiguredPushTest(process.env, event);
+  }
   productionWorker ??= createConfiguredEscalationWorker(process.env);
   return productionWorker(event, context.awsRequestId);
 };

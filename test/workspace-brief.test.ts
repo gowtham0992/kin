@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { InMemoryCareStore, type CareTask } from "../src/domain.js";
+import { WeeklyBriefService } from "../src/weekly-brief.js";
 const { createWorkspace } = await import(new URL("../simulator/workspace.js", import.meta.url).href);
 
 class Element {
@@ -53,6 +55,45 @@ async function fixture(data = brief()) {
 }
 
 describe("weekly source evidence and visit notes", () => {
+  it("renders complete overview and completion citations from the real service when only the ninth task is done", async () => {
+    const asOf = new Date("2026-09-08T17:00:00.000Z");
+    const tasks: CareTask[] = Array.from({ length: 9 }, (_, index) => ({
+      id: `synthetic-check-in-${index + 1}`, title: `Synthetic check-in ${index + 1}`,
+      dueAt: `2026-09-08T08:${String(index).padStart(2, "0")}:00.000Z`,
+      state: index === 8 ? "done" : "scheduled", lastResponse: index === 8 ? "done" : null,
+      confirmedAt: index === 8 ? asOf.toISOString() : null,
+      confirmedBy: index === 8 ? "Synthetic account" : null,
+    }));
+    const data = await new WeeklyBriefService(new InMemoryCareStore(tasks, () => asOf)).create(asOf);
+    const ui = await fixture(data);
+    const overview = ui.content.children.find(element => element.textContent.includes(data.overview));
+    const completion = ui.content.descendants().find(element => element.tagName === "LI" &&
+      element.textContent.startsWith("1 of 9 recorded care tasks were completed."));
+    expect(overview).toBeDefined(); expect(completion).toBeDefined();
+    expect(ui.content.textContent).toContain("1 completed, 8 still open");
+    expect(ui.details().children[0]?.textContent).toBe("Based on 9 recorded events");
+
+    for (const group of [overview!, completion!]) {
+      const buttons = group.descendants().filter(element => element.tagName === "BUTTON" && element.attributes.has("aria-controls"));
+      expect(buttons.map(button => button.textContent)).toEqual(tasks.map((_, index) => `Source ${index + 1}`));
+      for (const [index, button] of buttons.entries()) {
+        const target = `brief-source-${index + 1}`, record = tasks[index]!;
+        const source = ui.get(target);
+        expect(button.attributes.get("aria-controls")).toBe(target);
+        expect(source.children.find(element => element.tagName === "CODE")?.textContent).toBe(`task:${record.id}:${record.dueAt}`);
+        expect(source.textContent).toContain(`${record.title} was ${index === 8 ? "completed" : "still open"}.`);
+        for (const sourceIndex of tasks.keys()) {
+          ui.get(`brief-source-${sourceIndex + 1}`).focused = false;
+          ui.get(`brief-source-${sourceIndex + 1}`).scrolled = false;
+        }
+        ui.details().open = false;
+        await button.click();
+        expect(ui.details().open).toBe(true); expect(source.focused).toBe(true); expect(source.scrolled).toBe(true);
+        expect(location.hash).toBe("#week");
+      }
+    }
+  });
+
   it("renders source-linked responsibility facts without computing a delivery or effort score", async () => {
     const data = Object.assign(brief(), { responsibility: { points: [{ text: "Follow-ups routed: Theo 1.", evidenceIds: ["escalation:water"] }],
       notice: "Routing does not confirm delivery or measure caregiving effort." } });

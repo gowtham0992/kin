@@ -56,9 +56,10 @@ export class KinReminderSyncStack extends Stack {
       environment: { KIN_REMINDER_SYNC_WORKER_ENABLED: workerEnabled.valueAsString, KIN_DYNAMODB_TABLE: props.careTableName, KIN_CIRCLE_ID: props.circleId,
         KIN_ECHO_REMINDER_CLAIMS_TABLE: "kin-echo-reminder-claims", KIN_ECHO_REMINDER_SYNC_TABLE: queue.tableName,
         KIN_SKILL_MESSAGING_SECRET_ID: "kin/alexa-skill-messaging" }, bundling: { bundleAwsSDK: true, minify: true, target: "node22" } });
-    const schedule = new Rule(this, "Schedule", { schedule: Schedule.rate(Duration.minutes(1)), enabled: false, targets: [new LambdaFunction(worker, { retryAttempts: 0 })] });
+    const schedule = new Rule(this, "Schedule", { ruleName: "kin-reminder-sync-sweep", schedule: Schedule.rate(Duration.minutes(1)), enabled: false, targets: [new LambdaFunction(worker, { retryAttempts: 0 })] });
     (schedule.node.defaultChild as EventRule).state = Fn.conditionIf(scheduleActive.logicalId, "ENABLED", "DISABLED").toString();
     const errors = worker.metricErrors({ period: Duration.minutes(5) }).createAlarm(this, "WorkerErrors", {
+      alarmName: "kin-reminder-sync-worker-errors",
       alarmDescription: "A reminder cancellation sweep failed; stale reminders may remain. Operator runbook: docs/delivery-operations.md#api-and-reminder-sync-recovery",
       threshold: 1, evaluationPeriods: 1, treatMissingData: TreatMissingData.NOT_BREACHING,
     });

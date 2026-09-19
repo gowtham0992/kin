@@ -114,7 +114,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   async function mutate(action, success, onSaved = () => {}, kind = "plan") {
     if (busy || voice?.active) return;
     if (rotationEditor?.loading) { status.textContent = "Wait for the rotation proposal before saving another change."; return; }
-    if (pauseEditor?.loading) { status.textContent = "Wait for the pause review before saving another change."; return; }
+    if (pauseEditor?.loading) { status.textContent = "Wait for the cancellation review before saving another change."; return; }
     const current = ++revision; busy = true; loading = false;
     lockControls(true);
     status.textContent = "Saving…";
@@ -139,7 +139,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         pauseEditor?.destroy(); pauseEditor = null; lastRender = ""; await refresh(true);
         if (current === revision) status.textContent = error.status === 404
           ? "Pausing is no longer available. The plan was not changed by this request."
-          : "The plan changed or the pause review expired. Nothing was paused by this request. Review the current plan again.";
+          : "The plan changed or the cancellation review expired. Nothing was cancelled by this request. Review the current plan again.";
       }
       if (kind === "undo" && !client.pending && ![401, 403].includes(error.status)) {
         client.cancelUndoReview(); clearTimeout(undoReviewTimer); lastRender = "";
@@ -395,7 +395,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const list = node("ul", null, "care-plan");
     for (const task of data.tasks) {
       const item = node("li"), copy = node("div");
-      copy.append(node("p", `${time(task.dueAt)} · ${task.state === "scheduled" ? task.lastResponse === "not_yet" ? "Not yet" : "Awaiting check-in" : task.state}`, "kicker"), node("h3", task.title));
+      copy.append(node("p", `${time(task.dueAt)} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state === "scheduled" ? task.lastResponse === "not_yet" ? "Not yet" : "Awaiting check-in" : task.state}`, "kicker"), node("h3", task.title));
+      if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
+      if (canCloseUnanswered(task)) copy.append(taskChangeEditor(task, false, true));
       if (task.confirmedBy) copy.append(node("p", `Via ${task.confirmedBy}’s Kin account · ${time(task.confirmedAt)}`, "care-note"));
       item.append(copy);
       if (member.permissions.confirm && task.state === "scheduled") {
@@ -448,26 +450,28 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       const select = node("select"); select.id = `duty-${day.date}`; label.htmlFor = select.id;
       const placeholder = new Option(caregivers.length ? "Choose a caregiver" : "No eligible caregivers", ""); placeholder.disabled = true; select.add(placeholder);
       for (const person of caregivers) select.add(new Option(person.name, person.id));
+      if (day.assignment) select.add(new Option("Leave this day uncovered", "__clear__"));
       select.value = day.assignment?.memberId ?? ""; select.required = true;
-      select.disabled = !member.permissions.manageDuty || !caregivers.length;
+      select.disabled = !member.permissions.manageDuty || (!caregivers.length && !day.assignment);
       const assignedName = data.members.find(person => person.id === day.assignment?.memberId)?.name ?? day.assignment?.memberName;
       const dayCopy = node("div"); dayCopy.append(label, node("p", day.assignment ? `Assigned to ${assignedName}` : "Uncovered", "care-note"));
       if (day.assignment?.changedBy) dayCopy.append(node("p", `Updated by ${day.assignment.changedBy}`, "care-note"));
       row.append(dayCopy, select);
-      if (member.permissions.manageDuty && caregivers.length) {
+      if (member.permissions.manageDuty && (caregivers.length || day.assignment)) {
         const save = node("button", day.assignment ? "Review handoff" : "Review assignment", "secondary"); save.type = "submit"; row.append(save);
         const review = node("section", null, "duty-review care-alerts"); review.hidden = true; row.append(review);
         select.addEventListener("change", () => { review.hidden = true; });
         row.addEventListener("submit", event => {
           event.preventDefault(); if (busy || client.pending || !row.reportValidity()) return;
           const person = caregivers.find(candidate => candidate.id === select.value);
-          if (!person || person.id === day.assignment?.memberId) { status.textContent = "That caregiver is already assigned. Choose someone else for a handoff."; return; }
-          const change = { date: day.date, memberId: person.id, expectedMemberId: day.assignment?.memberId ?? null };
-          review.replaceChildren(node("h3", day.assignment ? "Review the handoff" : "Cover this day"),
-            node("p", `${date(day.date)}: ${assignedName ?? "Uncovered"} → ${person.name}`),
-            node("p", "This changes the day's duty assignment. It does not redirect alerts already queued or confirm SMS delivery.", "care-note"));
+          const clearing = select.value === "__clear__" && !!day.assignment;
+          if (!clearing && (!person || person.id === day.assignment?.memberId)) { status.textContent = "That caregiver is already assigned. Choose someone else for a handoff."; return; }
+          const change = { date: day.date, memberId: clearing ? null : person.id, expectedMemberId: day.assignment?.memberId ?? null };
+          review.replaceChildren(node("h3", clearing ? "Clear this assignment?" : day.assignment ? "Review the handoff" : "Cover this day"),
+            node("p", `${date(day.date)}: ${assignedName ?? "Uncovered"} → ${clearing ? "Uncovered" : person.name}`),
+            node("p", clearing ? "Nobody will be assigned for new follow-ups on this day. Alerts already queued keep their original recipient. The change is recorded." : "This changes the day's duty assignment. It does not redirect alerts already queued or confirm SMS delivery.", "care-note"));
           const actions = node("div", null, "care-actions");
-          const confirm = button("Confirm duty assignment", () => void mutate(() => client.assignDuty(change), "Duty assignment saved.", () => {}, "duty"), false);
+          const confirm = button(clearing ? "Confirm clear assignment" : "Confirm duty assignment", () => void mutate(() => client.assignDuty(change), clearing ? "Assignment cleared. This day is uncovered." : "Duty assignment saved.", () => {}, "duty"), false);
           actions.append(confirm, button("Keep unchanged", () => { review.hidden = true; select.focus(); })); review.append(actions); review.hidden = false; confirm.focus();
         });
       }
@@ -490,20 +494,28 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   }
   function clearRosterDraft() { rosterDraft.clear(); rosterEditor?.clear(); }
   const rescheduleSaved = "Check-in moved. The old Alexa reminder may still sound until cancellation sync finishes. A reminder for the new time requires a fresh, explicit request on Alexa; none was created here.";
-  function taskChangeEditor(task, canReschedule = false) {
-    const draft = taskChangeDrafts.get(task.id) ?? { title: task.title, action: "rename", due: "" };
-    const details = node("details"), summary = node("summary", "Edit this check-in");
+  function canCloseUnanswered(task) {
+    return member.permissions.closeUnanswered === true && task.state === "scheduled" && task.lastResponse === null &&
+      task.confirmedAt === null && task.confirmedBy === null && Date.parse(task.dueAt) < Date.now();
+  }
+  function taskChangeEditor(task, canReschedule = false, closing = false) {
+    const draft = taskChangeDrafts.get(task.id) ?? { title: task.title, action: closing ? "close_unanswered" : "rename", due: "" };
+    const details = node("details"), summary = node("summary", closing ? "Close without a reply" : "Edit this check-in");
     const form = node("form", null, "invite-panel"), label = node("label", "Check-in wording");
     const title = node("input"); title.id = `task-title-${task.id}`; title.value = draft.title; title.maxLength = 120; label.htmlFor = title.id;
     const actionLabel = node("label", "Change"), action = node("select"); action.id = `task-action-${task.id}`; actionLabel.htmlFor = action.id;
-    action.add(new Option("Rename this check-in", "rename")); action.add(new Option("Cancel this check-in", "cancel"));
+    if (closing) action.add(new Option("Close without a reply", "close_unanswered"));
+    else { action.add(new Option("Rename this check-in", "rename")); action.add(new Option("Cancel this check-in", "cancel")); }
     if (canReschedule) action.add(new Option("Move to a new time", "reschedule"));
-    action.value = draft.action === "reschedule" && !canReschedule ? "rename" : draft.action;
+    action.value = closing ? "close_unanswered" : draft.action === "reschedule" && !canReschedule ? "rename" : draft.action;
+    label.hidden = title.hidden = actionLabel.hidden = action.hidden = closing;
     const dueLabel = node("label", `New time (${Intl.DateTimeFormat().resolvedOptions().timeZone})`), due = node("input");
     due.id = `task-due-${task.id}`; due.type = "datetime-local"; due.value = draft.due ?? ""; dueLabel.htmlFor = due.id;
     const review = node("p", "", "care-note"); review.setAttribute("aria-live", "polite");
     const confirmation = node("label", null, "consent-line"), consent = node("input"); consent.type = "checkbox"; consent.required = true;
-    confirmation.append(consent, node("span", `I reviewed this change to “${task.title}”, due ${timestamp(task.dueAt)}. Cancellation keeps a record and cannot be undone here.`));
+    confirmation.append(consent, node("span", closing
+      ? `I reviewed “${task.title}”, due ${timestamp(task.dueAt)}. Close it with no reply, not as done or skipped. This cannot be undone here.`
+      : `I reviewed this change to “${task.title}”, due ${timestamp(task.dueAt)}. Cancellation keeps a record and cannot be undone here.`));
     function newTime() {
       const value = new Date(due.value);
       const local = `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}T${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
@@ -515,6 +527,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       const moving = action.value === "reschedule";
       title.disabled = action.value !== "rename"; title.required = action.value === "rename";
       due.hidden = dueLabel.hidden = !moving; due.disabled = !moving; due.required = moving;
+      if (closing) { review.textContent = "Records who closed this overdue check-in and when. It will no longer qualify for a new missed-check-in alert. This does not retract queued notifications or verify anyone’s safety."; return; }
       if (!moving) { review.textContent = "Only this future, unanswered check-in will change. Its scheduled time stays the same."; return; }
       let when = "Choose the new time above.";
       try { when = `New time: ${timestamp(newTime())}.`; } catch (error) { when = error.message; }
@@ -528,7 +541,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     due.addEventListener("input", remember); due.addEventListener("change", remember);
     action.addEventListener("change", remember); updateReview();
     const save = node("button", "Apply reviewed change", "secondary"); save.type = "submit";
-    form.append(node("p", "Your wording, action, and new time stay while switching Kin tabs; always review again before saving.", "care-note"), label, title, actionLabel, action, dueLabel, due, review, confirmation, save);
+    form.append(node("p", closing ? "No reply has been recorded for this overdue check-in. Closing it preserves that fact in your family history."
+      : "Your wording, action, and new time stay while switching Kin tabs; always review again before saving.", "care-note"), label, title, actionLabel, action, dueLabel, due, review, confirmation, save);
     form.addEventListener("submit", event => {
       event.preventDefault(); if (busy || client.pending || !consent.checked || !form.reportValidity()) return;
       consent.checked = false;
@@ -544,7 +558,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   }
   function renderPlan(data) {
     pauseEditor?.destroy(); pauseEditor = null;
-    const heading = node("div"); heading.append(node("p", "The next 30 days", "kicker"), node("h2", "Make space for the small things."), node("p", "Agree on an ordinary check-in, once or as a short daily routine. This is care coordination, not a medication recommendation."));
+    const heading = node("div"); heading.append(node("p", data.historyDays === 30 ? "Recent check-ins and the next 30 days" : "The next 30 days", "kicker"), node("h2", "Make space for the small things."), node("p", "Agree on an ordinary check-in, once or as a short daily routine. This is care coordination, not a medication recommendation."));
     const form = node("form", null, "invite-panel");
     if (member.permissions.manageDuty) {
       const draft = planDraft.read();
@@ -596,7 +610,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     } else form.append(node("p", "Your role can view the plan. A caregiver can schedule new check-ins."));
     const list = node("ul", null, "care-plan");
     for (const task of data.tasks) {
-      const row = node("li"), copy = node("div"); copy.append(node("h3", task.title), node("p", `${new Date(task.dueAt).toLocaleString()} · ${task.state}`, "care-note"));
+      const row = node("li"), copy = node("div"); copy.append(node("h3", task.title), node("p", `${new Date(task.dueAt).toLocaleString()} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state}`, "care-note"));
+      if (canCloseUnanswered(task)) copy.append(taskChangeEditor(task, false, true));
+      if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
       if (member.permissions.manageDuty && !task.routineId && task.state === "scheduled" && task.lastResponse === null &&
           task.confirmedAt === null && task.confirmedBy === null && new Date(task.dueAt) > new Date()) copy.append(taskChangeEditor(task, data.features?.reschedule === true));
       if (task.rescheduledFrom) copy.append(node("p", `Moved from ${timestamp(task.rescheduledFrom.dueAt)}. A new Alexa reminder requires a fresh request.`, "care-note"));
@@ -675,6 +691,12 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       for (const point of rows) { const item = node("li"); item.append(node("p", point.text), references(point.evidenceIds)); list.append(item); }
       if (!rows.length) list.append(node("li", "No additional points in the recorded activity.")); points.append(list);
     }
+    if (data.patterns) {
+      points.append(node("h3", "Patterns in recorded replies"));
+      const list = node("ul");
+      for (const point of data.patterns.points) { const item = node("li"); item.append(node("p", point.text), references(point.evidenceIds)); list.append(item); }
+      points.append(list, node("p", data.patterns.notice, "care-note"));
+    }
     if (data.responsibility) {
       points.append(node("h3", "Sharing the follow-up"));
       const list = node("ul");
@@ -737,7 +759,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         (view === "ask" ? renderConversation : view === "plan" ? renderPlan : view === "access" ? renderAccess : view === "week" ? renderBrief : isTurns(view) ? renderCircle : renderToday)(data);
         lastRender = serialized;
       }
-      status.textContent = `Checked at ${time(new Date())}${view === "today" ? " · updates every 5 seconds" : ""}.`;
+      status.textContent = `Checked at ${time(new Date())}${view === "today" ? " · checks about every 5 seconds while this tab is visible" : ""}.`;
       if (client.pending) lockControls(true);
       return true;
     } catch (error) { if (current === revision) failure(error); }
@@ -769,10 +791,10 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     await refresh();
     if (focus && member && current === revision && view === tab()) content.focus();
   }
-  async function poll() {
-    if (!member) return;
+  async function poll(generation) {
+    if (!member || generation !== sessionGeneration) return;
     if (!document.hidden && tab() === "today") await refresh();
-    timer = setTimeout(poll, 5000);
+    if (member && generation === sessionGeneration) timer = setTimeout(() => poll(generation), 5000);
   }
   // Keep a signed-out parent deep link intact for the subsequent sign-in flow.
   $("workspace-skip")?.addEventListener("click", event => { event.preventDefault(); $("workspace-main")?.focus(); });
@@ -798,14 +820,15 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   document.addEventListener("visibilitychange", () => { if (document.hidden) voice?.cancel(); else void refresh(); });
   window.addEventListener("pagehide", () => voice?.cancel());
   return { reset, async open() {
-    reset(); const current = revision;
+    reset(); const current = revision, generation = sessionGeneration;
     try {
       const identity = await client.session(); if (current !== revision) return;
       member = identity; $("workspace-identity").textContent = `${member.name} · ${member.permissions.invite ? "organizer" : member.role.replaceAll("_", " ")}`;
       pushControls.open(member.push);
       document.querySelector("main").classList.add("workspace-ready");
       $("workspace-navigation").hidden = false; $("workspace-nav").hidden = false; syncNavigation();
-      await navigate(); timer = setTimeout(poll, 5000);
+      await navigate();
+      if (member && generation === sessionGeneration) timer = setTimeout(() => poll(generation), 5000);
     } catch (error) { failure(error); if (!error.stale && ![401, 403].includes(error.status)) onAccessLost(0); }
   } };
 }

@@ -119,7 +119,7 @@ describe("Kin's isolated Echo voice connection", () => {
     expect(model.interactionModel.languageModel.invocationName).toBe("kin family");
     expect(development.invocationName).toBe(model.interactionModel.languageModel.invocationName);
     expect(model.interactionModel.languageModel.intents.map((item: { name: string }) => item.name)).toEqual([
-      "TestReminderIntent", "NextCheckInReminderIntent", "HelloKinIntent", "TodayPlanIntent", "NextTasksIntent", "MarkTaskDoneIntent", "MarkTaskNotYetIntent", "SkipTaskIntent", "UndoLastCompletionIntent", "PausePlanWeekIntent",
+      "TestReminderIntent", "NextCheckInReminderIntent", "HelloKinIntent", "TodayPlanIntent", "NextTasksIntent", "ListTasksIntent", "CurrentTaskDoneIntent", "CurrentTaskNotYetIntent", "CurrentTaskSkipIntent", "MarkTaskDoneIntent", "MarkTaskNotYetIntent", "SkipTaskIntent", "UndoLastCompletionIntent", "PausePlanWeekIntent",
       "AMAZON.YesIntent", "AMAZON.NoIntent", "AMAZON.HelpIntent", "AMAZON.RepeatIntent", "AMAZON.CancelIntent", "AMAZON.StopIntent", "AMAZON.FallbackIntent",
     ]);
   });

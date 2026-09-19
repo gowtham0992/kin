@@ -50,6 +50,33 @@ const storedDuty = { PK: "CIRCLE#family-1", SK: "DUTY#2026-09-02", entityType: "
 const reviewedDuty = { date: "2026-09-02", memberId: "maya", expectedMemberId: "theo", requestId: "handoff-review-1", actor: "Gowtham" };
 
 describe("DynamoDB reviewed duty handoffs", () => {
+  it("clears only a reviewed day atomically with a recoverable previous assignment", async () => {
+    const client = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [storedDuty] }, {}]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    const input = { ...reviewedDuty, memberId: null };
+    const result = await repository.assignDuty(input);
+    expect(result.assignments).toEqual([]);
+    expect(client.commands[3]).toBeInstanceOf(TransactWriteCommand);
+    expect(client.commands[3]?.input).toMatchObject({ TransactItems: [
+      { Delete: { TableName: "kin-test", Key: { PK: "CIRCLE#family-1", SK: "DUTY#2026-09-02" },
+        ConditionExpression: "memberId = :expectedMember", ExpressionAttributeValues: { ":expectedMember": "theo" } } },
+      { Put: { Item: { input, result, previousAssignment: { memberId: "theo", date: "2026-09-02" }, changedAt: fixedNow().toISOString() },
+        ConditionExpression: "attribute_not_exists(PK)" } },
+    ] });
+    const receipt = (client.commands[3]?.input as { TransactItems: { Put?: { Item: DutyChangeReceipt } }[] }).TransactItems[1]!.Put!.Item;
+    const replay = new FakeDynamoSender([{ Item: receipt }]);
+    expect(await new DynamoCareRepository({ client: replay, tableName: "kin-test", circleId: "family-1", now: fixedNow }).assignDuty(input)).toEqual(result);
+    expect(replay.commands).toHaveLength(1);
+  });
+
+  it("rejects a concurrent handoff during removal rather than deleting the new caregiver", async () => {
+    const conflict = Object.assign(new Error("changed"), { name: "TransactionCanceledException", CancellationReasons: [{ Code: "ConditionalCheckFailed" }] });
+    const client = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [storedDuty] }, conflict, {}]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
+    await expect(repository.assignDuty({ ...reviewedDuty, memberId: null })).rejects.toThrow(DutyConflict);
+    expect(client.commands.filter(command => command instanceof TransactWriteCommand)).toHaveLength(1);
+  });
+
   it("atomically binds the reviewed assignment and permanent receipt", async () => {
     const client = new FakeDynamoSender([{}, { Items: dutyMembers }, { Items: [storedDuty] }, {}]);
     const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", now: fixedNow });
@@ -469,7 +496,7 @@ describe("DynamoCareRepository", () => {
         },
         {
           Put: {
-            ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND title = :title",
+            ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND #state <> :closedUnanswered AND title = :title",
             ExpressionAttributeNames: { "#state": "state" },
             ExpressionAttributeValues: { ":cancelled": "cancelled" },
           },
@@ -485,7 +512,7 @@ describe("DynamoCareRepository", () => {
     await repository.confirm({ taskId: "morning-water", response: "done", actor: "Evelyn", requestId: "reviewed-turn-1",
       expected: { title: storedTask.title, dueAt: storedTask.dueAt, state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null } });
     expect(client.commands.find(command => command instanceof TransactWriteCommand)?.input).toMatchObject({ TransactItems: [expect.anything(), { Put: {
-      ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND title = :title AND #state = :reviewState AND dueAt = :reviewDue AND lastResponse = :reviewResponse AND confirmedAt = :reviewAt AND confirmedBy = :reviewBy",
+        ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK) AND #state <> :cancelled AND #state <> :closedUnanswered AND title = :title AND #state = :reviewState AND dueAt = :reviewDue AND lastResponse = :reviewResponse AND confirmedAt = :reviewAt AND confirmedBy = :reviewBy",
       ExpressionAttributeValues: { ":title": storedTask.title, ":reviewState": "scheduled", ":reviewDue": storedTask.dueAt, ":reviewResponse": null, ":reviewAt": null, ":reviewBy": null },
     } }, { Put: { Item: { SK: "PLAN_CONTROL", version: 1 }, ConditionExpression: "attribute_not_exists(PK)" } }] });
   });
