@@ -53,13 +53,24 @@ export interface EchoCareDiagnostic {
 function careDiagnostic(operation: EchoCareDiagnostic["operation"], sink: EchoCareClientOptions["onDiagnostic"]) {
   const started = performance.now();
   let phase: EchoCareDiagnostic["phase"] = "input", phaseStarted = started, finished = false;
+  let streamFailure: { phase: EchoCareDiagnostic["phase"]; phaseStarted: number } | undefined;
   const duration = (value: number) => Number.isFinite(value) ? Math.min(60_000, Math.max(0, Math.floor(value))) : 0;
   return {
-    phase(next: EchoCareDiagnostic["phase"]) { if (!finished) { phase = next; phaseStarted = performance.now(); } },
+    phase(next: EchoCareDiagnostic["phase"]) {
+      if (!finished) { phase = next; phaseStarted = performance.now(); streamFailure = undefined; }
+    },
+    noteStreamFailure() {
+      // A completed SSE response can disconnect while the next POST succeeds.
+      // Retain a failure hint, but let the operation's validated result decide.
+      if (!finished && !streamFailure) streamFailure = { phase, phaseStarted };
+    },
     finish(reason: EchoCareDiagnostic["reason"], httpStatus?: number) {
       if (finished) return;
       finished = true;
       const now = performance.now();
+      if (streamFailure && (reason === "protocol" || reason === "deadline")) {
+        reason = "network"; phase = streamFailure.phase; phaseStarted = streamFailure.phaseStarted;
+      }
       // Construct only allowlisted primitives; never spread upstream objects or
       // inspect error messages, schema issues, bodies, identifiers, or headers.
       const record: EchoCareDiagnostic = Object.freeze({ version: 1, operation, phase,
@@ -158,7 +169,7 @@ function boundedResponse(upstream: Response, signal: AbortSignal, diagnostic: Ca
       } catch {
         // An aborted body can be normal cleanup after the complete SSE result.
         // Deadlines/errors are recorded before abort; validation owns success.
-        if (!signal.aborted) diagnostic.finish("network");
+        if (!signal.aborted) diagnostic.noteStreamFailure();
         signal.removeEventListener("abort", cancel); controller.error(new EchoCareError("unavailable"));
       }
     },

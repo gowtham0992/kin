@@ -68,6 +68,28 @@ describe("privacy-safe Echo care diagnostics", () => {
     await vi.advanceTimersByTimeAsync(5001); expect(await result).toMatchObject({ code: "unavailable" });
     expect(f.events).toHaveLength(1); expect(f.events[0]).toMatchObject({ phase: "tool", outcome: "failure", reason: "network" }); safeEvent(f.events[0]!);
   });
+  it.each([true, false])("lets plan validation decide after a completed initialize stream disconnect (valid: %s)", async valid => {
+    const f = fixture(), original = f.fetch.getMockImplementation()!;
+    let disconnect!: () => void;
+    f.fetch.mockImplementation(async (url, init) => {
+      const frame = JSON.parse(String(init?.body));
+      if (frame.method === "initialize") return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: frame.id,
+          result: { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "kin", version: "1" } } })}\n\n`));
+        disconnect = () => controller.error(new Error("PRIVATE INITIALIZE STREAM DISCONNECT"));
+      } }), { headers: { "content-type": "text/event-stream" } });
+      if (frame.method === "notifications/initialized") disconnect();
+      if (!valid && frame.method === "tools/call") return Response.json({ jsonrpc: "2.0", id: frame.id,
+        result: { content: [], structuredContent: { ...snapshot, date: "PRIVATE INVALID DATE" } } });
+      return original(url, init);
+    });
+    if (valid) await expect(f.client.today(secret)).resolves.toEqual(snapshot);
+    else await expect(f.client.today(secret)).rejects.toMatchObject({ code: "unavailable" });
+    expect(f.events).toHaveLength(1);
+    expect(f.events[0]).toMatchObject({ phase: "validation", outcome: valid ? "success" : "failure",
+      reason: valid ? "none" : "result_validation" });
+    safeEvent(f.events[0]!);
+  });
   it.each(methods)("records the exact deadline phase at %s once, even after a late response", async stalled => {
     vi.useFakeTimers(); const f = fixture(), original = f.fetch.getMockImplementation()!;
     let release!: (response: Response) => void, late!: Response;
