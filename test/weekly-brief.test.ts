@@ -138,6 +138,9 @@ describe("WeeklyBriefService", () => {
     expect(brief.stats).toMatchObject({ scheduled: 1, completed: 0, skipped: 0, stillOpen: 0 });
     expect(brief.evidence[0]!.fact).toBe("water was closed by Maya with no reply at 2026-09-02T17:00:00.000Z.");
     expect(brief.followUps).toEqual([]);
+    expect(brief.stats).toMatchObject({ closedUnanswered: 1 });
+    expect(brief.overview).toContain("1 closed without a reply");
+    expect(brief.stats.completed + brief.stats.skipped + brief.stats.stillOpen + (brief.stats.closedUnanswered ?? 0)).toBe(brief.stats.scheduled);
   });
 
   it("uses correct number agreement for zero, one, and multiple recorded tasks", async () => {

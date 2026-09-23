@@ -17,6 +17,7 @@ export interface McpTraceEvent {
     scheduled?: number;
     skipped?: number;
     stillOpen?: number;
+    closedUnanswered?: number;
     escalations?: number;
     refreshRequired?: boolean;
     generatedBy?: "bedrock" | "deterministic";
@@ -41,7 +42,7 @@ function traceSummary(tool: string, result: Record<string, unknown>): NonNullabl
   const summary: NonNullable<McpTraceEvent["result"]> = {};
   const counts = record(tool === "show_weekly_brief" ? result.stats : result.summary);
   const keys = tool === "show_weekly_brief"
-    ? ["completed", "scheduled", "skipped", "stillOpen", "escalations"] as const
+    ? ["completed", "scheduled", "skipped", "stillOpen", "closedUnanswered", "escalations"] as const
     : ["completed", "total"] as const;
   for (const key of keys) {
     const value = counts[key];

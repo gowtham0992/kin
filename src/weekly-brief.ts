@@ -34,6 +34,8 @@ export interface WeeklyBriefSource {
     completed: number;
     skipped: number;
     stillOpen: number;
+    /** Omitted when zero for compatibility with earlier brief readers. */
+    closedUnanswered?: number;
     escalations: number;
   };
   evidence: BriefEvidence[];
@@ -370,6 +372,7 @@ function sourceFrom(activity: CareActivityWindow, asOfTimestamp: number): Weekly
     ...tasks.map(taskEvidence),
     ...activity.escalations.map(record => escalationEvidence(record, asOfTimestamp)),
   ];
+  const closedUnanswered = tasks.filter(task => task.state === "closed_unanswered").length;
   return {
     period: { startDate: activity.startDate, endDate: activity.endDate },
     stats: {
@@ -377,6 +380,7 @@ function sourceFrom(activity: CareActivityWindow, asOfTimestamp: number): Weekly
       completed: tasks.filter((task) => task.state === "done").length,
       skipped: tasks.filter((task) => task.state === "skipped").length,
       stillOpen: tasks.filter((task) => task.state === "scheduled").length,
+      ...(closedUnanswered > 0 ? { closedUnanswered } : {}),
       escalations: activity.escalations.length,
     },
     evidence,
@@ -471,7 +475,7 @@ function deterministicNarrative(source: WeeklyBriefSource): BriefNarrative {
 }
 
 function factualOverview(source: WeeklyBriefSource): string {
-  const taskSummary = `${source.stats.completed} completed, ${source.stats.stillOpen} still open, and ${source.stats.skipped} skipped`;
+  const taskSummary = `${source.stats.completed} completed, ${source.stats.stillOpen} still open, and ${source.stats.skipped} skipped${source.stats.closedUnanswered ? `; ${source.stats.closedUnanswered} closed without a reply` : ""}`;
   const cancelled = source.evidence.filter(item => item.kind === "care_task" && item.cancelled).length;
   return `Kin recorded ${source.stats.scheduled} care task${source.stats.scheduled === 1 ? "" : "s"} (${taskSummary}) and ${source.stats.escalations} family follow-up${source.stats.escalations === 1 ? "" : "s"} during this seven-day period.${cancelled ? ` ${cancellationSummary(cancelled)}; cancelled check-ins are excluded from the task counts.` : ""}`;
 }

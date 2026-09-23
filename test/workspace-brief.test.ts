@@ -54,6 +54,13 @@ async function fixture(data = brief()) {
     sourceButtons: () => content.descendants().filter(element => element.tagName === "BUTTON" && element.textContent.startsWith("Source ")) };
 }
 
+it("includes unanswered closures in the visible weekly count line", async () => {
+  const data = brief();
+  Object.assign(data.stats, { closedUnanswered: 1 });
+  const ui = await fixture(data);
+  expect(ui.content.textContent).toContain("1 completed · 0 skipped · 0 still open · 1 closed without a reply");
+});
+
 describe("weekly source evidence and visit notes", () => {
   it("renders complete overview and completion citations from the real service when only the ninth task is done", async () => {
     const asOf = new Date("2026-09-08T17:00:00.000Z");

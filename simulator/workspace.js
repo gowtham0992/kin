@@ -684,7 +684,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     }
     const heading = node("div"); heading.append(node("p", `${date(data.period.startDate)} – ${date(data.period.endDate)}`, "kicker"), node("h2", data.headline), node("p", data.overview));
     heading.append(references(data.overviewEvidenceIds));
-    const facts = node("p", `${data.stats.completed} completed · ${data.stats.skipped} skipped · ${data.stats.stillOpen} still open`, "care-count");
+    const facts = node("p", `${data.stats.completed} completed · ${data.stats.skipped} skipped · ${data.stats.stillOpen} still open${data.stats.closedUnanswered ? ` · ${data.stats.closedUnanswered} closed without a reply` : ""}`, "care-count");
     const points = node("div");
     for (const [title, rows] of [["What stood out", data.highlights], ["For your next conversation", data.followUps]]) {
       points.append(node("h3", title)); const list = node("ul");

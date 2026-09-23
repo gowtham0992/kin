@@ -215,6 +215,7 @@ function renderBrief(brief) {
   briefStats.replaceChildren(
     createStat(brief.stats.completed, "completed"),
     createStat(brief.stats.stillOpen, "still open"),
+    ...(brief.stats.closedUnanswered ? [createStat(brief.stats.closedUnanswered, "closed without a reply")] : []),
     createStat(brief.stats.escalations, "alerts"),
   );
   const points = [...brief.highlights, ...brief.followUps.map((point) => ({ ...point, followUp: true }))];
