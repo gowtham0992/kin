@@ -32,7 +32,7 @@ automatically deployed, and an isolated test is not recurring-service acceptance
 | Missed-check-in phone notification | Owner confirmed isolated test receipt. The general escalation worker and schedule remain disabled; a recurring acceptance run is still required. |
 | Operational alerts | Operator email routing has been tested; these are separate from family notifications. |
 | Alexa+ conversation | Clearly labeled simulation using real MCP calls—not native toolkit access. |
-| Close without a reply | Compatible readers deployed and caregiver gate enabled; live review UI checked. The single synthetic write/reload acceptance remains outstanding. See [rollout evidence](docs/close-unanswered-release-20260918.md). |
+| Close without a reply | Synthetic closure, attribution and reload passed September 20; corrected weekly totals were deployed and read back by the caregiver September 22. Organizer readback remains. See [current status](STATUS.md). |
 | Release candidate | A matching committed, tagged, fresh-clone release is still outstanding. Historical clone checks do not prove the current working tree reproduces production. |
 
 The repository remains private. Reviewers need separately authorized repository

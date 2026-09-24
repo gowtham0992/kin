@@ -469,7 +469,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
           const change = { date: day.date, memberId: clearing ? null : person.id, expectedMemberId: day.assignment?.memberId ?? null };
           review.replaceChildren(node("h3", clearing ? "Clear this assignment?" : day.assignment ? "Review the handoff" : "Cover this day"),
             node("p", `${date(day.date)}: ${assignedName ?? "Uncovered"} → ${clearing ? "Uncovered" : person.name}`),
-            node("p", clearing ? "Nobody will be assigned for new follow-ups on this day. Alerts already queued keep their original recipient. The change is recorded." : "This changes the day's duty assignment. It does not redirect alerts already queued or confirm SMS delivery.", "care-note"));
+            node("p", clearing ? "Nobody will be assigned for new follow-ups on this day. Alerts already queued keep their original recipient. The change is recorded." : "This changes the day's duty assignment. It does not redirect alerts already queued or confirm notification delivery.", "care-note"));
           const actions = node("div", null, "care-actions");
           const confirm = button(clearing ? "Confirm clear assignment" : "Confirm duty assignment", () => void mutate(() => client.assignDuty(change), clearing ? "Assignment cleared. This day is uncovered." : "Duty assignment saved.", () => {}, "duty"), false);
           actions.append(confirm, button("Keep unchanged", () => { review.hidden = true; select.focus(); })); review.append(actions); review.hidden = false; confirm.focus();

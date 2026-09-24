@@ -201,7 +201,7 @@ function responsibilityFrom(escalations: EscalationSummary[], asOf: number): Wee
   const result: WeeklyResponsibility = { routed: [], routedTotal: 0, unroutedTotal: 0, unattributedTotal: 0,
     providerAccepted: 0, acceptanceNotRecorded: 0,
     acknowledgment: { withinMinutes: 15, withinWindow: 0, eligible: 0, pending: 0, timingUnavailable: 0, evidenceIds: [] },
-    points: [], notice: "Routing and acknowledgment are coordination records, not confirmed SMS delivery or caregiving effort. Any caregiver may acknowledge a follow-up; the counts do not credit the routed person with that acknowledgment." };
+    points: [], notice: "Routing and acknowledgment are coordination records, not confirmed notification delivery or caregiving effort. Any caregiver may acknowledge a follow-up; the counts do not credit the routed person with that acknowledgment." };
   const acceptedIds: string[] = [], unknownTimingIds: string[] = [], pendingIds: string[] = [], unattributedIds: string[] = [];
   for (const record of records) {
     const id = `escalation:${record.id}`;

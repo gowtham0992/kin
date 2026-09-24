@@ -48,6 +48,7 @@ describe("weekly responsibility facts", () => {
     expect(brief.responsibility.points[0]).toEqual({ text: "Alerts routed: Theo 2 · Maya 1.",
       evidenceIds: ["escalation:theo-failed", "escalation:theo-queued", "escalation:maya-sent"] });
     expect(brief.responsibility.notice).toMatch(/not.*delivery.*caregiving effort/i);
+    expect(brief.responsibility.notice).not.toMatch(/SMS/);
     expect(brief.evidence.find(item => item.id === "escalation:maya-sent")?.fact).toContain("Recorded recipient: Maya.");
     expect(brief.evidence.find(item => item.id === "escalation:maya-sent")?.fact).toContain("Messaging service accepted it at 2026-09-02T16:00:00.000Z");
   });
