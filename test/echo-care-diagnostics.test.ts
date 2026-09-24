@@ -24,10 +24,14 @@ function fixture(onDiagnostic?: (event: EchoCareDiagnostic) => unknown) {
   return { client, fetch, events, frames };
 }
 function safeEvent(event: EchoCareDiagnostic) {
-  expect(Object.keys(event).sort()).toEqual(["elapsedMs", "operation", "outcome", "phase", "phaseElapsedMs", "reason", "version",
+  expect(Object.keys(event).sort()).toEqual(["elapsedMs", "operation", "outcome", "phase", "phaseElapsedMs", "phases", "reason", "version",
     ...(event.httpStatus === undefined ? [] : ["httpStatus"])].sort());
   for (const key of ["elapsedMs", "phaseElapsedMs"] as const) {
     expect(Number.isInteger(event[key])).toBe(true); expect(event[key]).toBeGreaterThanOrEqual(0); expect(event[key]).toBeLessThanOrEqual(60_000);
+  }
+  for (const [phase, ms] of Object.entries(event.phases)) {
+    expect(["input", "initialize", "initialized", "tool", "validation"]).toContain(phase);
+    expect(Number.isInteger(ms)).toBe(true); expect(ms).toBeGreaterThanOrEqual(0); expect(ms).toBeLessThanOrEqual(60_000);
   }
   expect(JSON.stringify(event)).not.toMatch(/PRIVATE|private-|kin\.example|Bearer|stack|issues/);
 }
@@ -36,6 +40,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 describe("privacy-safe Echo care diagnostics", () => {
   it("emits one allowlisted success only after snapshot validation, without recording optional GET", async () => {
     const f = fixture(); await expect(f.client.today(secret)).resolves.toEqual(snapshot);
+    expect(Object.isFrozen(f.events[0]!.phases)).toBe(true);
     expect(f.frames).toEqual(methods); expect(f.events).toHaveLength(1);
     expect(f.events[0]).toMatchObject({ version: 1, operation: "read", outcome: "success", reason: "none", phase: "validation" }); safeEvent(f.events[0]!);
   });
@@ -104,6 +109,11 @@ describe("privacy-safe Echo care diagnostics", () => {
     await vi.advanceTimersByTimeAsync(2);
     expect(await result).toMatchObject({ code: "unavailable" }); expect(f.events).toHaveLength(1);
     expect(f.events[0]).toMatchObject({ reason: "deadline", outcome: "failure", phase: ["initialize", "initialized", "tool"][methods.indexOf(stalled)], elapsedMs: 5000 });
+    const stalledPhase = ["initialize", "initialized", "tool"][methods.indexOf(stalled)]!;
+    expect(f.events[0]!.phases).toEqual(Object.fromEntries([
+      ["input", 0], ...["initialize", "initialized", "tool"].slice(0, methods.indexOf(stalled) + 1)
+        .map(phase => [phase, phase === stalledPhase ? 5000 : 0]),
+    ]));
     release(late); await vi.advanceTimersByTimeAsync(50); expect(f.events).toHaveLength(1); safeEvent(f.events[0]!);
   });
   it.each([401, 403, 500])("reports HTTP %s without response text and preserves public errors", async status => {
@@ -152,7 +162,8 @@ describe("privacy-safe Echo care diagnostics", () => {
     const f = fixture(); vi.spyOn(Date, "now").mockReturnValueOnce(1000).mockReturnValue(-999999);
     let tick = 90; vi.spyOn(performance, "now").mockImplementation(() => tick += 10);
     await f.client.today(secret); expect(f.events).toHaveLength(1); safeEvent(f.events[0]!);
-    expect(f.events[0]).toMatchObject({ elapsedMs: 50, phaseElapsedMs: 10 });
+    expect(f.events[0]).toMatchObject({ elapsedMs: 50, phaseElapsedMs: 10,
+      phases: { input: 10, initialize: 10, initialized: 10, tool: 10, validation: 10 } });
   });
   it("wires the default Lambda care reader to a safe structured log, retaining generic speech", async () => {
     const f = fixture(); const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(f.fetch);

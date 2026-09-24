@@ -47,17 +47,25 @@ export interface EchoCareDiagnostic {
   readonly reason: "none" | "input" | "deadline" | "network" | "http" | "tool_error" | "result_validation" | "protocol" | "response_limit";
   readonly elapsedMs: number;
   readonly phaseElapsedMs: number;
+  /** Sequential client phases, including transport/body processing and cleanup.
+   * Not server-only timings; rounded down separately, so sums can differ slightly. */
+  readonly phases: Readonly<Partial<Record<EchoCareDiagnostic["phase"], number>>>;
   readonly httpStatus?: number;
 }
 
 function careDiagnostic(operation: EchoCareDiagnostic["operation"], sink: EchoCareClientOptions["onDiagnostic"]) {
   const started = performance.now();
   let phase: EchoCareDiagnostic["phase"] = "input", phaseStarted = started, finished = false;
+  const phases: Partial<Record<EchoCareDiagnostic["phase"], number>> = {};
   let streamFailure: { phase: EchoCareDiagnostic["phase"]; phaseStarted: number } | undefined;
   const duration = (value: number) => Number.isFinite(value) ? Math.min(60_000, Math.max(0, Math.floor(value))) : 0;
   return {
     phase(next: EchoCareDiagnostic["phase"]) {
-      if (!finished) { phase = next; phaseStarted = performance.now(); streamFailure = undefined; }
+      if (!finished) {
+        const now = performance.now();
+        phases[phase] = duration((phases[phase] ?? 0) + duration(now - phaseStarted));
+        phase = next; phaseStarted = now; streamFailure = undefined;
+      }
     },
     noteStreamFailure() {
       // A completed SSE response can disconnect while the next POST succeeds.
@@ -68,6 +76,7 @@ function careDiagnostic(operation: EchoCareDiagnostic["operation"], sink: EchoCa
       if (finished) return;
       finished = true;
       const now = performance.now();
+      phases[phase] = duration((phases[phase] ?? 0) + duration(now - phaseStarted));
       if (streamFailure && (reason === "protocol" || reason === "deadline")) {
         reason = "network"; phase = streamFailure.phase; phaseStarted = streamFailure.phaseStarted;
       }
@@ -76,6 +85,7 @@ function careDiagnostic(operation: EchoCareDiagnostic["operation"], sink: EchoCa
       const record: EchoCareDiagnostic = Object.freeze({ version: 1, operation, phase,
         outcome: reason === "none" ? "success" : "failure", reason,
         elapsedMs: duration(now - started), phaseElapsedMs: duration(now - phaseStarted),
+        phases: Object.freeze({ ...phases }),
         ...(Number.isInteger(httpStatus) && httpStatus! >= 100 && httpStatus! <= 599 ? { httpStatus } : {}),
       });
       try { void Promise.resolve(sink?.(record)).catch(() => {}); } catch { /* Diagnostics cannot change the care outcome. */ }
