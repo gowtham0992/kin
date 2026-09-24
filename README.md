@@ -29,16 +29,17 @@ automatically deployed, and an isolated test is not recurring-service acceptance
 | --- | --- |
 | Family workspace and classic Echo connection | Deployed; owner has used linked plan reads on an Echo Pop and a second caregiver has joined the shared workspace. |
 | Alexa reminder creation and cancellation | Owner reported a reminder appearing and later disappearing. Automatic reconciliation is now enabled; see the [activation and recovery evidence](docs/reminder-activation-20260918.md). |
-| Missed-check-in phone notification | Owner confirmed isolated test receipt. The general escalation worker and schedule remain disabled; a recurring acceptance run is still required. |
+| Missed-check-in phone notification | September 23 bounded recurring acceptance passed: two real scheduled sweeps, one delivery attempt, owner-confirmed receipt, and stored acknowledgment without completing the check-in. Worker and schedule were restored off. See [acceptance evidence](docs/recurring-acceptance-20260923.md). |
 | Operational alerts | Operator email routing has been tested; these are separate from family notifications. |
 | Alexa+ conversation | Clearly labeled simulation using real MCP calls—not native toolkit access. |
-| Close without a reply | Synthetic closure, attribution and reload passed September 20; corrected weekly totals were deployed and read back by the caregiver September 22. Organizer readback remains. See [current status](STATUS.md). |
+| Close without a reply | Synthetic closure, attribution and reload passed September 20; corrected weekly totals were deployed and read back by the caregiver September 22 and organizer September 23. See [current status](STATUS.md). |
 | Release candidate | A matching committed, tagged, fresh-clone release is still outstanding. Historical clone checks do not prove the current working tree reproduces production. |
 
 The repository remains private. Reviewers need separately authorized repository
 access and a dedicated Kin account/invitation; do not share owner credentials.
 The local story below needs neither AWS credentials nor a family account.
 See the [acceptance runbook](docs/final-acceptance-runbook.md) for device checks.
+Start an independent review with the [reviewer guide](docs/reviewer-guide.md).
 
 ## Try one complete family-care story
 
