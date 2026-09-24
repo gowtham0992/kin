@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 const workspace = vi.hoisted(() => ({ open: vi.fn(async () => {}), reset: vi.fn(),
   onAccessLost: undefined as ((status: number, pending?: { outcomeUnknown: boolean; requestId: string }) => void) | undefined }));
@@ -58,6 +59,13 @@ async function fixture(options: { view?: string; callback?: boolean; invalidStat
 }
 
 describe("parent and family entry through sign-in", () => {
+  it("makes sign-out discoverable before opening the account menu and explains its scope", () => {
+    const html = readFileSync(new URL("../simulator/invite.html", import.meta.url), "utf8");
+    expect(html).toContain("<summary>Account &amp; sign out</summary>");
+    expect(html).toMatch(/id="browser-disconnect"[^>]*>Sign out of this workspace<\/button>/);
+    expect(html).toContain("Your family membership stays the same. This does not sign you out of the account provider.");
+  });
+
   it("renews an expired active-page session only after a deliberate reconnect click", async () => {
     const ui = await fixture({ cookie: true, cookieActive: true, view: "week" });
     await vi.waitFor(() => expect(workspace.open).toHaveBeenCalledOnce());
