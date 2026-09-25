@@ -8,14 +8,26 @@ const { setupInstall } = await import(new URL("../simulator/install.js", import.
 const read = (file: string) => readFileSync(new URL(`../simulator/${file}`, import.meta.url), "utf8");
 
 describe("caregiver app installation", () => {
+  it.each([false, true])("does not confuse installation with launching the app (during prompt: %s)", async duringPrompt => {
+    const events: Record<string, (event?: unknown) => unknown> = {};
+    const button = { hidden: false, disabled: false, addEventListener: (name: string, cb: () => unknown) => { events[name] = cb; } };
+    const status = { textContent: "" };
+    setupInstall({ window: { isSecureContext: false, matchMedia: () => ({ matches: false }), addEventListener: (name: string, cb: () => unknown) => { events[name] = cb; } }, navigator: {}, button, status });
+    if (duringPrompt) {
+      events.beforeinstallprompt!({ preventDefault() {}, prompt: async () => { events.appinstalled!(); }, userChoice: Promise.resolve({ outcome: "accepted" }) });
+      await events.click!();
+    } else events.appinstalled!();
+    expect(status.textContent).toContain("Kin is installed");
+    expect(status.textContent).toContain("open the Kin icon");
+    expect(status.textContent).not.toContain("open as an app");
+    expect(button.hidden).toBe(true);
+  });
+
   it.each([false, true])("reports the actual standalone state (%s) without requesting permission", standalone => {
     const status = { textContent: "" }, button = { hidden: false, addEventListener: vi.fn() };
     setupInstall({ window: { matchMedia: () => ({ matches: standalone }), addEventListener: vi.fn(), isSecureContext: false }, navigator: {}, button, status });
     expect(status.textContent).toContain(standalone ? "Kin is open as an app" : "Kin is open in a browser tab");
-    if (!standalone) {
-      expect(status.textContent).toContain("Share → Add to Home Screen");
-      expect(status.textContent).toContain("check Today directly until delivery is verified");
-    }
+    if (!standalone) expect(status.textContent).toContain("keep using it here");
     expect(button.hidden).toBe(true);
   });
 
@@ -34,6 +46,8 @@ describe("caregiver app installation", () => {
     const page = await request(app).get("/invite.html").expect(200);
     expect(page.text).toContain('rel="manifest"');
     expect(page.text).toContain("Installation does not turn on notifications");
+    expect(page.text).toContain("Share → Add to Home Screen");
+    expect(page.text).toContain("check Today directly until delivery is verified");
   });
 
   it("does not intercept API, OAuth callbacks, other origins, or mutations", () => {

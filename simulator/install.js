@@ -1,20 +1,22 @@
 // Installation is optional and must never block sign-in or request push permission.
 export function setupInstall({ window, navigator, button, status }) {
-  let pending;
+  let pending, installationObserved = false;
   const installed = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
   button.hidden = true;
   const showInstalled = () => {
     pending = undefined; button.hidden = true;
-    status.textContent = "Kin is open as an app. A connection is needed to load your family plan.";
+    status.textContent = installed()
+      ? "Kin is open as an app. A connection is needed to load your family plan."
+      : "Kin is installed. To use it as an app, open the Kin icon from your home screen or apps.";
   };
   if (installed()) showInstalled();
-  else status.textContent = "Kin is open in a browser tab. To use it as an app, add it to your home screen and open the Kin icon. On iPhone, use Share → Add to Home Screen. Installation does not turn on notifications; check Today directly until delivery is verified.";
+  else status.textContent = "Kin is open in a browser tab. You can keep using it here, or add it to your home screen.";
   window.addEventListener("beforeinstallprompt", event => {
     event.preventDefault();
     if (installed()) return;
     pending = event; button.hidden = false;
   });
-  window.addEventListener("appinstalled", showInstalled);
+  window.addEventListener("appinstalled", () => { installationObserved = true; showInstalled(); });
   button.addEventListener("click", async () => {
     const prompt = pending;
     if (!prompt || button.disabled) return;
@@ -22,7 +24,8 @@ export function setupInstall({ window, navigator, button, status }) {
     try {
       await prompt.prompt();
       const choice = await prompt.userChoice;
-      status.textContent = choice.outcome === "accepted"
+      if (installationObserved || installed()) showInstalled();
+      else status.textContent = choice.outcome === "accepted"
         ? "Installation requested. Look for Kin on your home screen or in your apps."
         : "You can keep using Kin in this browser.";
     } catch {
