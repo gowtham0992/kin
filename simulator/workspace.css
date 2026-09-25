@@ -63,6 +63,8 @@
 .kin-trust-lead { color: var(--muted); font-size: 20px; }
 .kin-trust section { margin-top: 40px; }
 .kin-trust h2 { font: 400 28px/1.3 Georgia, serif; }
+.kin-trust ol { display: grid; gap: 16px; padding-left: 24px; }
+.kin-trust li::marker { color: var(--sage); font-weight: 700; }
 .kin-trust-link, .kin-trust-boundary { margin-top: 48px; border-top: 1px solid var(--line); padding-top: 24px; }
 .kin-trust a, .kin-trust-link a { color: var(--sage); }
 .kin-trust a:focus-visible, .kin-trust-link a:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }

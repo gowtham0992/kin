@@ -31,4 +31,14 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Overflow at ${width}px`);
   }
   console.log('MCP conversation boundary text is separate at five viewport widths.');
+  await page.goto(origin + '/how-kin-works.html');
+  await expect(page.getByRole('heading', { name: 'Start with one small check-in.' })).toBeVisible();
+  for (const [name, fragment] of [['Plan', 'plan'], ['Turns', 'turns'], ['Ask Kin', 'ask'], ['Today', 'today']]) {
+    await expect(page.getByRole('link', { name, exact: true })).toHaveAttribute('href', '/invite.html#' + fragment);
+  }
+  for (const width of [375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Family guide overflow at ${width}px`);
+  }
+  console.log('Family first-use guide links and responsive widths verified.');
 } finally { await browser?.close(); child.kill('SIGTERM'); }
