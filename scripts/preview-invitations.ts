@@ -27,9 +27,9 @@ const store = process.env.KIN_PREVIEW_CLOSE_UNANSWERED === "true"
       state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null }], () => new Date(), null, "America/Denver", [], rosterMembers)
   : mode === "coverage-empty" || mode === "duty-uncertain"
   ? new InMemoryCareStore([], () => new Date(), null, "America/Denver", [], rosterMembers)
-  : createDemoStore(mode === "mcp-family" ? () => new Date("2026-09-08T15:00:00.000Z") : undefined, undefined, rosterMembers);
+  : createDemoStore(["mcp-family", "long-content"].includes(mode) ? () => new Date("2026-09-08T15:00:00.000Z") : undefined, undefined, rosterMembers);
 if (mode === "long-content") {
-  await store.scheduleTask({ id: "long-content-test", title: "CheckInWithoutAnySpaces".repeat(5), dueAt: new Date(Date.now() + 60_000).toISOString() });
+  await store.scheduleTask({ id: "long-content-test", title: "CheckInWithoutAnySpaces".repeat(5), dueAt: "2026-09-08T15:01:00.000Z" });
   for (const assignment of (await store.circle()).assignments) {
     await store.assignDuty({ date: assignment.date, memberId: assignment.memberId });
   }
