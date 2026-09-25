@@ -18,7 +18,7 @@ class Element {
   descendants(): Element[] { return this.children.flatMap(child => [child, ...child.descendants()]); }
   querySelectorAll() { return this.descendants().filter(child => ["BUTTON", "INPUT", "SELECT", "TEXTAREA"].includes(child.tagName)); }
   addEventListener(name: string, action: (event: { preventDefault(): void }) => unknown) { this.listeners.set(name, [...this.listeners.get(name) ?? [], action]); }
-  setAttribute() {} removeAttribute() {} focus() {} reportValidity() { return true; }
+  setAttribute() {} removeAttribute() {} focus = vi.fn(); reportValidity() { return true; }
   async emit(name: string) { await Promise.all((this.listeners.get(name) ?? []).map(action => action({ preventDefault() {} }))); }
   async click() { if (!this.disabled) await this.emit("click"); }
 }
@@ -49,11 +49,23 @@ async function fixture() {
   firstForm.descendants().find(item => item.tagName === "SELECT")!.value = "maya";
   await firstForm.emit("submit");
   const button = (label: string) => content.descendants().find(item => item.tagName === "BUTTON" && item.textContent === label)!;
-  return { get, request, button, resolveProposal, rejectProposal,
+  return { get, request, button, resolveProposal, rejectProposal, firstForm, store,
     writes: () => request.mock.calls.filter(([url]) => url === "/api/circle/duty") };
 }
 
 describe("rotation proposal loading and workspace mutation locking", () => {
+  it.each(["maya", "__clear__"])("discarding duty proposal %s restores the saved choice without a write", async proposed => {
+    const ui = await fixture();
+    const select = ui.firstForm.descendants().find(item => item.tagName === "SELECT")!;
+    const original = (await ui.store.circle()).assignments.find(day => `duty-${day.date}` === select.id)!.memberId;
+    select.value = proposed;
+    await ui.firstForm.emit("submit");
+    await ui.button("Keep unchanged").click();
+    expect(select.value).toBe(original);
+    expect(select.focus).toHaveBeenCalled();
+    expect(ui.firstForm.descendants().find(item => item.className.includes("duty-review"))!.hidden).toBe(true);
+    expect(ui.writes()).toHaveLength(0);
+  });
   it.each(["success", "failure"])("waits for a slow proposal %s before dispatching another save and keeps Propose usable afterward", async outcome => {
     const ui = await fixture(), propose = ui.button("Propose next week"), confirm = ui.button("Confirm duty assignment");
     const reading = propose.click();

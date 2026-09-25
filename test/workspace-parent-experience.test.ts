@@ -59,7 +59,7 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
   let heldConversation: Promise<typeof conversationResult> | undefined;
   let loseConfirmationResponse = false;
   const confirmationWrites: Array<Record<string, unknown>> = [];
-  const request = vi.fn(async (url: string, options?: { body?: string }) => {
+  const request = vi.fn(async (url: string, options?: { body?: string; method?: string }) => {
     if (loseConfirmationResponse && url === `/api/tasks/${water.id}/confirm`) {
       const body = JSON.parse(options!.body!);
       confirmationWrites.push(body);
@@ -92,6 +92,17 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
 }
 
 describe("parent-first conversation", () => {
+  it("separates unassigned coverage from check-in progress without implying safety", async () => {
+    const ui = await fixture([], false, false, "#today");
+    const coverage = ui.descendants().find(element => element.attributes["aria-label"] === "Today’s coverage");
+    expect(coverage?.textContent).toContain("A turn to fill");
+    expect(coverage?.textContent).toContain("Nobody is assigned today");
+    expect(coverage?.descendants().find(element => element.tagName === "A")?.textContent).toBe("See family turns");
+    expect(ui.get("workspace-content").textContent).toContain("Room for one small check-in.");
+    expect(ui.get("workspace-content").textContent).toContain("This is not a safety check.");
+    expect(ui.request.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+  });
+
   it("pauses hidden Today reads and refreshes changed care state when the tab returns", async () => {
     const tasks = [{ ...water }], ui = await fixture(tasks, false, false, "#today");
     ui.request.mockClear(); ui.setHidden(true);

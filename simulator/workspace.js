@@ -388,9 +388,16 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   }
   function renderToday(data) {
     const header = node("div", null, "care-summary");
-    header.append(node("p", date(data.date), "kicker"), node("h2", "A little care, shared."),
-      node("p", data.summary.total ? `${data.summary.completed} of ${data.summary.total} check-ins completed` : "Room for one small check-in.", "care-count"),
-      node("p", data.onDuty ? `${data.onDuty.memberName} is on duty until ${time(data.onDuty.endsAt)}.` : "Nobody is assigned today. A caregiver can arrange coverage in Turns."));
+    const introduction = node("div", null, "care-summary-intro");
+    introduction.append(node("p", date(data.date), "kicker"), node("h2", "A little care, shared."),
+      node("p", data.summary.total ? `${data.summary.completed} of ${data.summary.total} check-ins completed` : "Room for one small check-in.", "care-count"));
+    const duty = node("section", null, "care-duty-card");
+    duty.setAttribute("aria-label", "Today’s coverage");
+    duty.append(node("p", "Today’s coverage", "kicker"),
+      node("h3", data.onDuty ? data.onDuty.memberName : "A turn to fill"),
+      node("p", data.onDuty ? `${data.onDuty.memberName} is on duty until ${time(data.onDuty.endsAt)}.` : "Nobody is assigned today. A caregiver can arrange coverage in Turns.", "care-note"));
+    const dutyLink = node("a", "See family turns", "care-duty-link"); dutyLink.href = "#turns";
+    duty.append(dutyLink); header.append(introduction, duty);
     if (member.permissions.confirm) header.append(authorNote());
     const list = node("ul", null, "care-plan");
     for (const task of data.tasks) {
@@ -444,7 +451,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       const count = days.filter(day => day.assignment?.memberId === person.id).length;
       return `${person.name}: ${count} ${count === 1 ? "day" : "days"}`;
     }).join(" · "), "care-note");
-    const roster = node("div", null, "care-roster");
+    const roster = node("div", null, "care-roster care-duty-week");
     for (const day of days) {
       const row = node("form", null, "care-roster-row"), label = node("label", date(day.date));
       const select = node("select"); select.id = `duty-${day.date}`; label.htmlFor = select.id;
@@ -472,7 +479,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
             node("p", clearing ? "Nobody will be assigned for new follow-ups on this day. Alerts already queued keep their original recipient. The change is recorded." : "This changes the day's duty assignment. It does not redirect alerts already queued or confirm notification delivery.", "care-note"));
           const actions = node("div", null, "care-actions");
           const confirm = button(clearing ? "Confirm clear assignment" : "Confirm duty assignment", () => void mutate(() => client.assignDuty(change), clearing ? "Assignment cleared. This day is uncovered." : "Duty assignment saved.", () => {}, "duty"), false);
-          actions.append(confirm, button("Keep unchanged", () => { review.hidden = true; select.focus(); })); review.append(actions); review.hidden = false; confirm.focus();
+          actions.append(confirm, button("Keep unchanged", () => { review.hidden = true; select.value = day.assignment?.memberId ?? ""; select.focus(); })); review.append(actions); review.hidden = false; confirm.focus();
         });
       }
       roster.append(row);
@@ -559,8 +566,10 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   function renderPlan(data) {
     pauseEditor?.destroy(); pauseEditor = null;
     const heading = node("div"); heading.append(node("p", data.historyDays === 30 ? "Recent check-ins and the next 30 days" : "The next 30 days", "kicker"), node("h2", "Make space for the small things."), node("p", "Agree on an ordinary check-in, once or as a short daily routine. This is care coordination, not a medication recommendation."));
-    const form = node("form", null, "invite-panel");
+    const form = node("form", null, "invite-panel care-plan-create");
+    form.setAttribute("aria-label", "Schedule a check-in");
     if (member.permissions.manageDuty) {
+      form.append(node("h3", "Add a check-in."));
       const draft = planDraft.read();
       const titleLabel = node("label", "What is the check-in?"); titleLabel.htmlFor = "plan-title";
       const title = node("input"); title.id = "plan-title"; title.required = true; title.maxLength = 120; title.placeholder = "A glass of water, a walk, a call…";
@@ -655,7 +664,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         propose: () => client.proposePlanPause(), isLocked: () => busy || !!client.pending || !member?.permissions.pausePlan,
         onError: failure, onSave: proposal => mutate(() => client.pausePlan(proposal), pauseSavedMessage, () => {}, "pause") });
     }
-    content.replaceChildren(heading, ...(pauseEditor ? [pauseEditor.element] : []), form, routines, list);
+    const activePause = data.planPause?.pause && new Date(data.planPause.pause.endsAt) > new Date();
+    content.replaceChildren(heading, ...(pauseEditor && activePause ? [pauseEditor.element] : []), form, routines, list,
+      ...(pauseEditor && !activePause ? [pauseEditor.element] : []));
   }
   function renderBrief(data) {
     restorePrintedEvidence();
@@ -682,26 +693,30 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       }
       return links;
     }
-    const heading = node("div"); heading.append(node("p", `${date(data.period.startDate)} – ${date(data.period.endDate)}`, "kicker"), node("h2", data.headline), node("p", data.overview));
+    const heading = node("div", null, "care-brief-heading"); heading.append(node("p", `${date(data.period.startDate)} – ${date(data.period.endDate)}`, "kicker"), node("h2", data.headline), node("p", data.overview));
     heading.append(references(data.overviewEvidenceIds));
     const facts = node("p", `${data.stats.completed} completed · ${data.stats.skipped} skipped · ${data.stats.stillOpen} still open${data.stats.closedUnanswered ? ` · ${data.stats.closedUnanswered} closed without a reply` : ""}`, "care-count");
-    const points = node("div");
+    const points = node("div", null, "care-brief-sections");
     for (const [title, rows] of [["What stood out", data.highlights], ["For your next conversation", data.followUps]]) {
-      points.append(node("h3", title)); const list = node("ul");
+      const section = node("section", null, "care-brief-section");
+      section.append(node("h3", title)); const list = node("ul");
       for (const point of rows) { const item = node("li"); item.append(node("p", point.text), references(point.evidenceIds)); list.append(item); }
-      if (!rows.length) list.append(node("li", "No additional points in the recorded activity.")); points.append(list);
+      if (!rows.length) list.append(node("li", "No additional points in the recorded activity.")); section.append(list); points.append(section);
     }
     if (data.patterns) {
-      points.append(node("h3", "Patterns in recorded replies"));
+      const section = node("section", null, "care-brief-section");
+      section.append(node("h3", "Patterns in recorded replies"));
       const list = node("ul");
       for (const point of data.patterns.points) { const item = node("li"); item.append(node("p", point.text), references(point.evidenceIds)); list.append(item); }
-      points.append(list, node("p", data.patterns.notice, "care-note"));
+      section.append(list, node("p", data.patterns.notice, "care-note")); points.append(section);
     }
     if (data.responsibility) {
-      points.append(node("h3", "Sharing the follow-up"));
+      const section = node("section", null, "care-brief-section");
+      section.append(node("h3", "Sharing the follow-up"));
       const list = node("ul");
       for (const point of data.responsibility.points) { const item = node("li"); item.append(node("p", point.text), references(point.evidenceIds)); list.append(item); }
-      points.append(list, node("p", data.responsibility.notice, "care-note"));
+      if (!data.responsibility.points.length) list.append(node("li", "No follow-up sharing summary is available for this period."));
+      section.append(list, node("p", data.responsibility.notice, "care-note")); points.append(section);
     }
     const print = button("Print visit notes", () => window.print()); print.classList.add("no-print");
     content.replaceChildren(heading, facts, points, evidence, node("p", data.generatedBy === "bedrock" ? "Evidence selected with Amazon Bedrock; wording comes from recorded facts." : "Prepared directly from recorded activity; no generated interpretation.", "care-note"), node("p", data.safetyNotice, "care-note"), print);
