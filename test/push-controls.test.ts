@@ -4,16 +4,22 @@ import { runInNewContext } from "node:vm";
 import { createHash } from "node:crypto";
 const { createPushControls } = await import(new URL("../simulator/push-controls.js", import.meta.url).href);
 class Element {
-  textContent = ""; hidden = false; disabled = false; type = ""; className = ""; children: Element[] = [];
+  private text = "";
+  get textContent(): string { return this.text + this.children.map(child => child.textContent).join(" "); }
+  set textContent(value: string) { this.text = value; this.children = []; }
+  hidden = false; disabled = false; type = ""; className = ""; children: Element[] = [];
   listeners: Record<string, () => Promise<void>> = {};
   constructor(public tag: string) {}
   append(...elements: Element[]) { this.children.push(...elements); }
-  replaceChildren() { this.children = []; }
+  replaceChildren() { this.text = ""; this.children = []; }
   setAttribute() {}
   addEventListener(name: string, cb: () => Promise<void>) { this.listeners[name] = cb; }
   async click() { if (!this.disabled) await this.listeners.click?.(); }
 }
 afterEach(() => vi.unstubAllGlobals());
+const descendants = (element: Element): Element[] => [element, ...element.children.flatMap(descendants)];
+const control = (container: Element, text: string) => descendants(container).find(e => e.tag === "button" && e.textContent === text)!;
+const statusOf = (container: Element) => descendants(container).find(e => e.className === "kin-push-status")!;
 function fixture(permission = "granted") {
   const requestPermission = vi.fn(async () => permission), unsubscribe = vi.fn(async () => true);
   const json = { endpoint: "https://fcm.googleapis.com/fcm/send/synthetic", keys: { p256dh: "synthetic-key", auth: "synthetic-auth" } };
@@ -35,10 +41,9 @@ function fixture(permission = "granted") {
   const controls = createPushControls({ container, request });
   const config = { publicKey: Buffer.alloc(65, 1).toString("base64url"), consentVersion: "test-version" };
   const ready = controls.open(config);
-  const children = container.children[0]!.children;
   return { controls, request, requestPermission, subscribe, unsubscribe, getSubscription, subscription,
     ready, config, savedId, setEnrollment: (value: typeof enrollment) => { enrollment = value; },
-    enable: children[2]!, disable: children[3]!, status: children[4]!, container };
+    enable: control(container, "Enable on this phone"), disable: control(container, "Turn off on this phone"), status: statusOf(container), container };
 }
 describe("explicit phone opt-in", () => {
   it("does nothing until the caregiver chooses Enable", async () => {
@@ -72,25 +77,37 @@ describe("explicit phone opt-in", () => {
     const ui = fixture(); await ui.ready;
     ui.getSubscription.mockResolvedValue(ui.subscription); ui.setEnrollment({ state: "saved", id: ui.savedId });
     await ui.controls.open(ui.config);
-    const children = ui.container.children[0]!.children;
-    ui.request.mockRejectedValueOnce(new Error("offline")); await children[2]!.click();
+    ui.request.mockRejectedValueOnce(new Error("offline")); await control(ui.container, "Reconnect this phone").click();
     expect(ui.unsubscribe).not.toHaveBeenCalled(); expect(ui.subscribe).not.toHaveBeenCalled();
+  });
+  it("clears the retry state when readback verifies the pending connection", async () => {
+    const ui = fixture(); await ui.ready;
+    ui.request.mockRejectedValueOnce(new Error("lost save response")); await ui.enable.click();
+    expect(ui.enable.textContent).toBe("Retry connection");
+    ui.setEnrollment({ state: "saved", id: ui.savedId });
+    ui.request.mockClear();
+    await control(ui.container, "Check connection").click();
+    expect(ui.status.textContent).toContain("This phone is connected");
+    expect(ui.enable.textContent).toBe("Reconnect this phone");
+    expect(ui.request.mock.calls.every(([, options]) => options.method === "GET")).toBe(true);
+    expect(ui.unsubscribe).not.toHaveBeenCalled();
   });
   it("does not silently reuse or delete an existing connection that is not bound to this account", async () => {
     const ui = fixture(); await ui.ready;
     ui.getSubscription.mockResolvedValue(ui.subscription);
-    await ui.controls.open(ui.config); await ui.container.children[0]!.children[2]!.click();
+    await ui.controls.open(ui.config); await control(ui.container, "Enable on this phone").click();
     expect(ui.unsubscribe).not.toHaveBeenCalled(); expect(ui.subscribe).not.toHaveBeenCalled();
     expect(ui.request.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
-    expect(ui.container.children[0]!.children[4]!.textContent).toContain("Turn off");
+    expect(statusOf(ui.container).textContent).toContain("Turn off");
   });
   it("shows verified enrollment separately from missing duty and unknown automatic delivery", async () => {
     const ui = fixture(); await ui.ready;
     ui.getSubscription.mockResolvedValue(ui.subscription); ui.setEnrollment({ state: "saved", id: ui.savedId });
     await ui.controls.open(ui.config);
-    const text = ui.container.children[0]!.children[4]!.textContent;
+    const text = statusOf(ui.container).textContent;
     expect(text).toContain("connected to this account"); expect(text).toContain("No one is on duty");
     expect(text).toContain("Automatic delivery has not been verified");
+    expect(descendants(statusOf(ui.container)).filter(e => e.tag === "dt").map(e => e.textContent)).toEqual(["This phone", "Your turn", "Delivery"]);
     expect(ui.container.children[0]!.children[1]!.textContent).toContain("Connecting a phone does not activate automatic follow-ups");
     expect(ui.container.children[0]!.children[1]!.textContent).toContain("Check Today directly");
   });

@@ -236,6 +236,20 @@
 .workspace-page .kin-trust-link summary { cursor: pointer; padding: 8px 0; }
 .workspace-page .kin-trust-link summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
 .workspace-page .kin-trust-link .kin-install { max-width: none; }
+.workspace-page .kin-trust-link .kin-push-controls { max-width: none; }
+.kin-push-intro { max-width: 42rem; color: var(--muted); margin: 16px 0 24px; }
+.kin-push-facts { margin: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--card); padding: 8px 24px; }
+.kin-push-facts > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 24px; padding: 16px 0; }
+.kin-push-facts > div + div { border-top: 1px solid var(--line); }
+.kin-push-facts dt { font-weight: 750; }
+.kin-push-facts dd { margin: 0; color: var(--muted); }
+.kin-push-boundary { max-width: 48rem; font-size: 13px; color: var(--muted); margin: 20px 0 16px; }
+.kin-push-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+@media (max-width: 620px) {
+  .kin-push-facts { padding: 0 20px; }
+  .kin-push-facts > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .kin-push-actions { flex-direction: column; align-items: stretch; }
+}
 .kin-install-body { margin-top: 16px; padding: 32px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px 48px; }
 .kin-install-intro h2 { font: 400 32px/1.15 Georgia, serif; letter-spacing: -.035em; margin: 12px 0 16px; }
 .kin-install-intro .kicker { margin: 0; }

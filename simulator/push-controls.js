@@ -8,12 +8,19 @@ export function createPushControls({ request, container }) {
     const make = (tag, text) => { const node = document.createElement(tag); node.textContent = text; return node; };
     const heading = make("summary", "On-duty notifications"), details = make("details", "");
     details.className = "kin-push-controls";
-    const status = make("p", "Checking this phone’s connection…");
+    const status = make("div", "Checking this phone’s connection…");
+    status.className = "kin-push-status";
     status.setAttribute("role", "status");
     const enable = make("button", "Enable on this phone"), disable = make("button", "Turn off on this phone");
     const check = make("button", "Check connection");
     for (const button of [enable, disable, check]) { button.type = "button"; button.className = "secondary"; }
-    details.append(heading, make("p", "Connecting a phone does not activate automatic follow-ups. Check Today directly while delivery is unverified. Choosing Enable replaces your previously selected phone. Lock-screen notices contain no care details. Push is best-effort, not an emergency service."), enable, disable, status, check);
+    const introduction = make("p", "Connecting a phone does not activate automatic follow-ups. Check Today directly while delivery is unverified.");
+    introduction.className = "kin-push-intro";
+    const actions = make("div", ""); actions.className = "kin-push-actions";
+    actions.append(enable, disable, check);
+    const consent = make("p", "Choosing Enable replaces your previously selected phone. Lock-screen notices contain no care details. Push is best-effort, not an emergency service.");
+    consent.className = "kin-push-boundary";
+    details.append(heading, introduction, status, consent, actions);
     container.append(details);
     if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
       enable.hidden = disable.hidden = check.hidden = true;
@@ -48,6 +55,7 @@ export function createPushControls({ request, container }) {
       if (!owns()) return;
       enrollment = data.enrollment;
       const connected = localId !== null && enrollment.state === "saved" && enrollment.id === localId;
+      if (connected) pendingEnrollment = null;
       const connection = connected ? "This phone is connected to this account."
         : enrollment.state === "saved" ? "A saved connection does not match this browser."
         : enrollment.state === "expired" ? "Your saved phone connection has expired."
@@ -58,8 +66,14 @@ export function createPushControls({ request, container }) {
         : "Phone permission has not been granted.";
       const duty = !data.duty.assigned ? "No one is on duty right now."
         : data.duty.onDuty ? "You are on duty right now." : "You are not on duty right now.";
-      status.textContent = [prefix, connection, permission, duty, "Automatic delivery has not been verified.",
-        local && !connected && !pendingEnrollment ? "Turn off this phone’s existing connection before enabling it for this account." : ""].filter(Boolean).join(" ");
+      const facts = make("dl", ""); facts.className = "kin-push-facts";
+      for (const [label, value] of [["This phone", `${connection} ${permission}`], ["Your turn", duty], ["Delivery", "Automatic delivery has not been verified."]]) {
+        const row = make("div", ""); row.append(make("dt", label), make("dd", value)); facts.append(row);
+      }
+      status.replaceChildren();
+      if (prefix) status.append(make("p", prefix));
+      status.append(facts);
+      if (local && !connected && !pendingEnrollment) status.append(make("p", "Turn off this phone’s existing connection before enabling it for this account."));
       enable.textContent = pendingEnrollment ? "Retry connection" : connected ? "Reconnect this phone" : "Enable on this phone";
     }
     async function checkConnection() {
