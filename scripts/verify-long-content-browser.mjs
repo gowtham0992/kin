@@ -26,6 +26,10 @@ try {
     if (['today', 'plan'].includes(view)) {
       await expect(page.getByRole('heading', { name: 'CheckInWithoutAnySpaces'.repeat(5), exact: true })).toBeVisible();
     }
+    if (view === 'ask') {
+      await page.getByText('What can I say?', { exact: true }).click();
+      await expect(page.getByRole('button', { name: 'CheckInWithoutAnySpaces'.repeat(5), exact: true })).toBeVisible();
+    }
     for (const width of [320, 375, 768, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
       // Body overflow can be hidden by CSS. Also inspect individual text and
