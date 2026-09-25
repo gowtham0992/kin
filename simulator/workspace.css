@@ -213,10 +213,10 @@
   .care-summary { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 8px; }
   .workspace-page #workspace-content .care-summary h2 { font-size: 40px; margin: 12px 0 16px; }
   .care-duty-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; border-left: 0; border-top: 1px solid var(--line); padding: 16px 0 0; }
-  .care-duty-card .kicker { grid-column: 1 / -1; }
-  .care-duty-card h3 { font-size: 26px; margin: 8px 0; }
+  .care-duty-card .kicker { grid-column: 1; align-self: center; margin: 0; }
+  .care-duty-card h3 { grid-column: 1 / -1; font-size: 26px; margin: 8px 0; }
   .care-duty-card .care-note { grid-column: 1 / -1; grid-row: 3; max-width: none; }
-  .care-duty-link { grid-column: 2; grid-row: 2; margin: 0; }
+  .care-duty-link { grid-column: 2; grid-row: 1; margin: 0; }
   .care-summary > .care-author-note { font-size: 13px; }
   .workspace-page .care-plan h3 { font-size: 26px; }
   .workspace-page .care-plan .care-actions { width: 100%; }

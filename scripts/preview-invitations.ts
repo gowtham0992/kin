@@ -10,7 +10,7 @@ import { createMemoryRosterManagement, type RosterMemberRecord } from "../src/ro
 const mode = process.argv[2] ?? "success";
 const port = Number(process.argv[3] ?? 3014);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid preview port");
-if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
 const rosterMembers: RosterMemberRecord[] = mode === "roster-empty" ? [] : [
@@ -18,12 +18,22 @@ const rosterMembers: RosterMemberRecord[] = mode === "roster-empty" ? [] : [
   { id: "maya", name: "Maya", relationship: "daughter", canReceiveAlerts: true },
   { id: "theo", name: "Theo", relationship: "son", canReceiveAlerts: true },
 ];
+if (mode === "long-content") {
+  rosterMembers[1]!.name = "Alexandria-Catherine Montgomery-Worthington · synthetic caregiver";
+  rosterMembers[2]!.name = "LongUnbrokenSyntheticCaregiverName".repeat(2);
+}
 const store = process.env.KIN_PREVIEW_CLOSE_UNANSWERED === "true"
   ? new InMemoryCareStore([{ id: "close-test", title: "Synthetic unanswered call", dueAt: new Date(Date.now() - 86400000).toISOString(),
       state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null }], () => new Date(), null, "America/Denver", [], rosterMembers)
   : mode === "coverage-empty" || mode === "duty-uncertain"
   ? new InMemoryCareStore([], () => new Date(), null, "America/Denver", [], rosterMembers)
   : createDemoStore(mode === "mcp-family" ? () => new Date("2026-09-08T15:00:00.000Z") : undefined, undefined, rosterMembers);
+if (mode === "long-content") {
+  await store.scheduleTask({ id: "long-content-test", title: "CheckInWithoutAnySpaces".repeat(5), dueAt: new Date(Date.now() + 60_000).toISOString() });
+  for (const assignment of (await store.circle()).assignments) {
+    await store.assignDuty({ date: assignment.date, memberId: assignment.memberId });
+  }
+}
 if (process.env.KIN_PREVIEW_PAUSE_FIXTURE === "true") {
   const base = Date.now();
   for (const [id, title, hours] of [["pause-call", "Synthetic call", 24], ["pause-walk", "Synthetic walk", 72], ["after-pause", "Synthetic next week", 192]] as const) {
