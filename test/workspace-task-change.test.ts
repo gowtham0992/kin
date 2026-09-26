@@ -89,6 +89,38 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
 }
 
 describe("reviewed one-time check-in editing", () => {
+  it("puts upcoming plans before earlier open check-ins and keeps outcomes in separate history", async () => {
+    const tasks = [
+      single("done", { title: "Recorded call", state: "done", dueAt: "2026-09-07T15:00:00.000Z" }),
+      single("old", { title: "Earlier walk", dueAt: "2026-09-06T15:00:00.000Z" }),
+      single("later", { title: "Later call", dueAt: "2026-09-10T15:00:00.000Z" }),
+      single("next", { title: "Next call" }),
+      single("now", { title: "Due now", dueAt: "2026-09-08T15:00:00.000Z", lastResponse: "not_yet" }),
+    ];
+    const ui = await fixture(tasks);
+    const upcoming = ui.element("plan-upcoming")!, earlier = ui.element("plan-earlier")!, history = ui.element("plan-history")!;
+    expect(upcoming?.textContent).toContain("Coming up · 2");
+    expect(upcoming.descendants().filter(el => el.tagName === "H3").map(el => el.textContent)).toEqual(["Coming up · 2", "Next call", "Later call"]);
+    expect(earlier?.textContent).toContain("Earlier, still open · 2");
+    expect(earlier.descendants().filter(el => el.tagName === "H3").map(el => el.textContent)).toEqual(["Earlier, still open · 2", "Due now", "Earlier walk"]);
+    expect(history?.tagName).toBe("DETAILS");
+    expect(history?.textContent).toContain("Recorded outcomes · 1");
+    expect(history?.textContent).toContain("Recorded call");
+    const sections = ui.element("workspace-content")!.children;
+    expect(sections.indexOf(upcoming)).toBeLessThan(sections.indexOf(earlier));
+    expect(sections.indexOf(earlier)).toBeLessThan(sections.indexOf(history));
+    expect(ui.tasks.map(task => task.id)).toEqual(["done", "old", "later", "next", "now"]);
+    expect(ui.bodies()).toEqual([]);
+  });
+
+  it("keeps every terminal state out of the open plan, including future cancellations", async () => {
+    const ui = await fixture(["done", "skipped", "cancelled", "closed_unanswered"].map((state, i) =>
+      single(`outcome-${i}`, { state: state as CareTask["state"] })));
+    expect(ui.element("plan-upcoming")?.textContent).toContain("No upcoming check-ins.");
+    expect(ui.element("plan-earlier")).toBeNull();
+    expect(ui.element("plan-history")?.textContent).toContain("Recorded outcomes · 4");
+  });
+
   it("requires a reviewed caregiver closure, retains its retry identity, and never submits a care reply", async () => {
     const overdue = single("overdue", { dueAt: "2026-09-08T14:00:00.000Z", routineId: "daily" });
     const ui = await fixture([overdue], true, false, true), editor = ui.edit("overdue");

@@ -617,18 +617,41 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         void mutate(() => client.schedule(input), "Care plan saved.", clearPlanDraft);
       });
     } else form.append(node("p", "Your role can view the plan. A caregiver can schedule new check-ins."));
-    const list = node("ul", null, "care-plan");
-    for (const task of data.tasks) {
-      const row = node("li"), copy = node("div"); copy.append(node("h3", task.title), node("p", `${new Date(task.dueAt).toLocaleString()} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state}`, "care-note"));
-      if (canCloseUnanswered(task)) copy.append(taskChangeEditor(task, false, true));
-      if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
-      if (member.permissions.manageDuty && !task.routineId && task.state === "scheduled" && task.lastResponse === null &&
-          task.confirmedAt === null && task.confirmedBy === null && new Date(task.dueAt) > new Date()) copy.append(taskChangeEditor(task, data.features?.reschedule === true));
-      if (task.rescheduledFrom) copy.append(node("p", `Moved from ${timestamp(task.rescheduledFrom.dueAt)}. A new Alexa reminder requires a fresh request.`, "care-note"));
-      if (task.rescheduledTo) copy.append(node("p", `Moved to ${timestamp(task.rescheduledTo.dueAt)}; this original check-in is cancelled.`, "care-note"));
-      row.append(copy); list.append(row);
+    const now = Date.now();
+    const upcomingTasks = data.tasks.filter(task => task.state === "scheduled" && Date.parse(task.dueAt) > now)
+      .sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt));
+    const earlierTasks = data.tasks.filter(task => task.state === "scheduled" && Date.parse(task.dueAt) <= now)
+      .sort((a, b) => Date.parse(b.dueAt) - Date.parse(a.dueAt));
+    const recordedTasks = data.tasks.filter(task => task.state !== "scheduled")
+      .sort((a, b) => Date.parse(b.dueAt) - Date.parse(a.dueAt));
+    function planRows(tasks) {
+      const list = node("ul", null, "care-plan");
+      for (const task of tasks) {
+        const row = node("li"), copy = node("div"); copy.append(node("h3", task.title), node("p", `${timestamp(task.dueAt)} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state}`, "care-note"));
+        if (canCloseUnanswered(task)) copy.append(taskChangeEditor(task, false, true));
+        if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
+        if (member.permissions.manageDuty && !task.routineId && task.state === "scheduled" && task.lastResponse === null &&
+            task.confirmedAt === null && task.confirmedBy === null && new Date(task.dueAt) > new Date()) copy.append(taskChangeEditor(task, data.features?.reschedule === true));
+        if (task.rescheduledFrom) copy.append(node("p", `Moved from ${timestamp(task.rescheduledFrom.dueAt)}. A new Alexa reminder requires a fresh request.`, "care-note"));
+        if (task.rescheduledTo) copy.append(node("p", `Moved to ${timestamp(task.rescheduledTo.dueAt)}; this original check-in is cancelled.`, "care-note"));
+        row.append(copy); list.append(row);
+      }
+      return list;
     }
-    if (!data.tasks.length) list.append(node("li", "Your plan is empty. Start with one small, agreed-upon check-in."));
+    const upcoming = node("section", null, "care-plan-group"); upcoming.id = "plan-upcoming";
+    upcoming.setAttribute("aria-label", "Coming up");
+    upcoming.append(node("h3", `Coming up · ${upcomingTasks.length}`, "care-plan-group-title"));
+    if (upcomingTasks.length) upcoming.append(planRows(upcomingTasks));
+    else upcoming.append(node("p", member.permissions.manageDuty
+      ? data.tasks.length ? "No upcoming check-ins. Add one above when your family is ready." : "Your plan is empty. Start with one small, agreed-upon check-in."
+      : "No upcoming check-ins. A caregiver can schedule an agreed-upon check-in.", "care-note"));
+    const earlier = node("section", null, "care-plan-group"); earlier.id = "plan-earlier";
+    earlier.setAttribute("aria-label", "Earlier, still open");
+    earlier.append(node("h3", `Earlier, still open · ${earlierTasks.length}`, "care-plan-group-title"),
+      node("p", "Their scheduled time has passed, but no completion, skip or closure is recorded. This does not tell you whether someone is safe.", "care-note"), planRows(earlierTasks));
+    const recorded = node("details", null, "care-plan-group care-plan-history"); recorded.id = "plan-history";
+    recorded.append(node("summary", `Recorded outcomes · ${recordedTasks.length}`),
+      node("p", "Completed, skipped, cancelled and closed check-ins in this loaded plan. Most recent scheduled time first.", "care-note"), planRows(recordedTasks));
     const routines = node("section", null, "care-routines");
     if (member.permissions.manageDuty) {
       const groups = new Map();
@@ -665,7 +688,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         onError: failure, onSave: proposal => mutate(() => client.pausePlan(proposal), pauseSavedMessage, () => {}, "pause") });
     }
     const activePause = data.planPause?.pause && new Date(data.planPause.pause.endsAt) > new Date();
-    content.replaceChildren(heading, ...(pauseEditor && activePause ? [pauseEditor.element] : []), form, routines, list,
+    content.replaceChildren(heading, ...(pauseEditor && activePause ? [pauseEditor.element] : []), form, routines, upcoming,
+      ...(earlierTasks.length ? [earlier] : []), ...(recordedTasks.length ? [recorded] : []),
       ...(pauseEditor && !activePause ? [pauseEditor.element] : []));
   }
   function renderBrief(data) {
