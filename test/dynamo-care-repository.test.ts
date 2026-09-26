@@ -371,6 +371,16 @@ describe("DynamoCareRepository", () => {
     expect((await repository.circle()).members).toEqual([member]);
   });
 
+  it("returns the configured duty time zone with the matching local-date query window", async () => {
+    const client = new FakeDynamoSender([{ Items: [] }, { Items: [] }]);
+    const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1",
+      now: () => new Date("2026-09-03T01:00:00Z"), timeZone: "America/Denver" });
+    expect(await repository.circle()).toMatchObject({ timeZone: "America/Denver", startDate: "2026-09-02", endDate: "2026-09-08" });
+    expect(client.commands[1]?.input).toMatchObject({ ExpressionAttributeValues: {
+      ":start": "DUTY#2026-09-02", ":end": "DUTY#2026-09-08\uffff",
+    } });
+  });
+
   it("reads a complete 50-person roster with a bounded strongly consistent query", async () => {
     const members = Array.from({ length: 50 }, (_, index) => ({
       ...dutyMembers[0]!, id: `person-${index}`, name: `Person ${String(index).padStart(2, "0")}`,

@@ -5,6 +5,11 @@ import { DutyConflict } from "../src/duty-change.js";
 const fixedNow = () => new Date("2026-09-02T08:00:00.000Z");
 
 describe("Kin care loop", () => {
+  it("identifies the circle time zone defining its seven duty dates across a UTC day boundary", async () => {
+    const circle = await createDemoStore(() => new Date("2026-09-03T01:00:00Z"), "America/Denver").circle();
+    expect(circle).toMatchObject({ timeZone: "America/Denver", startDate: "2026-09-02", endDate: "2026-09-08" });
+  });
+
   it("shows today's tasks in due-time order", async () => {
     const snapshot = await createDemoStore(fixedNow).today();
     expect(snapshot.tasks.map((task) => task.id)).toEqual([

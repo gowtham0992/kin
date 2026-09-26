@@ -68,6 +68,7 @@ export interface CircleMember {
 }
 
 export interface CircleSnapshot {
+  timeZone: string;
   startDate: string;
   endDate: string;
   members: CircleMember[];
@@ -377,6 +378,7 @@ export class InMemoryCareStore implements CareRepository {
     const startDate = calendarDate(this.#now(), this.#timeZone);
     const endDate = shiftCalendarDate(startDate, 6);
     return {
+      timeZone: this.#timeZone,
       startDate,
       endDate,
       members: this.#members.map(({ id, name, relationship, canReceiveAlerts }) => ({ id, name, relationship, canReceiveAlerts })),

@@ -70,7 +70,7 @@ if (mode === "alerts") {
   await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
 }
 if (mode === "offline") store.today = async () => { throw new Error("Synthetic offline fixture"); };
-if (mode === "empty") store.circle = async () => ({ startDate: "2026-09-05", endDate: "2026-09-11", members: [], assignments: [] });
+if (mode === "empty") store.circle = async () => ({ timeZone: "UTC", startDate: "2026-09-05", endDate: "2026-09-11", members: [], assignments: [] });
 let targetStatus = "active";
 const familyAccess = { circleId: "synthetic", directory: { async find(principal?: AccessPrincipal) { return {
   circleId: "synthetic", memberId: mode === "mcp-family" && principal?.subject === "synthetic-theo" ? "theo" : "maya",

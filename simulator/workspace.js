@@ -447,6 +447,10 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const days = dutyDays(data), caregivers = data.members.filter(person => person.canReceiveAlerts);
     const covered = days.filter(day => day.assignment).length;
     const coverage = node("p", `${covered} of 7 days assigned${covered < 7 ? ` · ${7 - covered} uncovered` : ""}`, "care-count");
+    const zoneNote = typeof data.timeZone === "string" && data.timeZone.trim()
+      ? `Duty dates use ${data.timeZone}, your circle’s time zone.`
+      : "Circle time zone unavailable. These dates follow the circle’s calendar, not necessarily your phone’s.";
+    heading.append(node("p", zoneNote, "care-note"));
     const balance = node("p", caregivers.map(person => {
       const count = days.filter(day => day.assignment?.memberId === person.id).length;
       return `${person.name}: ${count} ${count === 1 ? "day" : "days"}`;
@@ -476,6 +480,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
           const change = { date: day.date, memberId: clearing ? null : person.id, expectedMemberId: day.assignment?.memberId ?? null };
           review.replaceChildren(node("h3", clearing ? "Clear this assignment?" : day.assignment ? "Review the handoff" : "Cover this day"),
             node("p", `${date(day.date)}: ${assignedName ?? "Uncovered"} → ${clearing ? "Uncovered" : person.name}`),
+            node("p", zoneNote, "care-note"),
             node("p", clearing ? "Nobody will be assigned for new follow-ups on this day. Alerts already queued keep their original recipient. The change is recorded." : "This changes the day's duty assignment. It does not redirect alerts already queued or confirm notification delivery.", "care-note"));
           const actions = node("div", null, "care-actions");
           const confirm = button(clearing ? "Confirm clear assignment" : "Confirm duty assignment", () => void mutate(() => client.assignDuty(change), clearing ? "Assignment cleared. This day is uncovered." : "Duty assignment saved.", () => {}, "duty"), false);

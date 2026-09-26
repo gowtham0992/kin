@@ -27,8 +27,8 @@ let close: (() => void) | undefined;
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { close?.(); close = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-async function fixture() {
-  const store = createDemoStore(() => new Date("2026-09-08T15:00:00.000Z"));
+async function fixture(timeZone = "UTC", legacy = false) {
+  const store = createDemoStore(() => new Date("2026-09-08T15:00:00.000Z"), timeZone);
   const elements = new Map<string, Element>();
   const get = (id: string) => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id)!; };
   vi.stubGlobal("document", { getElementById: get, createElement: (tag: string) => new Element(tag), querySelector: () => get("main"), querySelectorAll: () => [], addEventListener() {}, hidden: false });
@@ -38,7 +38,10 @@ async function fixture() {
   const pendingProposal = new Promise<void>((resolve, reject) => { resolveProposal = resolve; rejectProposal = () => reject(new Error("Synthetic unavailable proposal")); });
   const request = vi.fn(async (url: string) => {
     if (url === "/api/session") return { ok: true, json: async () => ({ name: "Maya", role: "caregiver", permissions: { confirm: true, manageDuty: true, manageRoster: false, invite: false } }) };
-    if (url === "/api/circle") return { ok: true, json: async () => store.circle() };
+    if (url === "/api/circle") return { ok: true, json: async () => {
+      const data = await store.circle();
+      return legacy ? { ...data, timeZone: undefined } : data;
+    } };
     if (url === "/api/circle/rotation") { await pendingProposal; return { ok: true, json: async () => store.proposeDutyRotation() }; }
     if (url === "/api/circle/duty") return { ok: false, status: 409 };
     throw new Error(`Unexpected request: ${url}`);
@@ -54,6 +57,21 @@ async function fixture() {
 }
 
 describe("rotation proposal loading and workspace mutation locking", () => {
+  it.each(["maya", "__clear__"])("shows the circle time zone before reviewing duty change %s without writing", async proposed => {
+    const ui = await fixture("America/Denver");
+    expect(ui.get("workspace-content").textContent).toContain("Duty dates use America/Denver");
+    ui.firstForm.descendants().find(item => item.tagName === "SELECT")!.value = proposed;
+    await ui.firstForm.emit("submit");
+    const review = ui.firstForm.descendants().find(item => item.className.includes("duty-review"))!;
+    expect(review.textContent).toContain("America/Denver");
+    expect(ui.writes()).toHaveLength(0);
+  });
+  it("does not guess a circle time zone from the browser when an older API omits it", async () => {
+    const ui = await fixture("America/Denver", true);
+    expect(ui.get("workspace-content").textContent).toContain("Circle time zone unavailable");
+    expect(ui.get("workspace-content").textContent).not.toContain("Duty dates use UTC");
+    expect(ui.writes()).toHaveLength(0);
+  });
   it.each(["maya", "__clear__"])("discarding duty proposal %s restores the saved choice without a write", async proposed => {
     const ui = await fixture();
     const select = ui.firstForm.descendants().find(item => item.tagName === "SELECT")!;

@@ -693,7 +693,7 @@ export class DynamoCareRepository implements CareRepository {
     const assignments = (dutyPage.Items ?? [])
       .map((stored) => ({ date: stored.SK.slice("DUTY#".length), ...stripDutyStorage(stored) }))
       .sort((left, right) => left.date.localeCompare(right.date));
-    return { startDate, endDate, members, assignments };
+    return { timeZone: this.#timeZone, startDate, endDate, members, assignments };
   }
 
   async assignDuty(rawInput: DutyChangeInput, authorization?: CareWriteAuthorization): Promise<DutyChangeResult> {
