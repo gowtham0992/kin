@@ -2,7 +2,7 @@ import request from "supertest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEchoCareClient, EchoCareError } from "../src/echo-care-client.js";
-import { createDemoStore } from "../src/domain.js";
+import { createDemoStore, InMemoryCareStore } from "../src/domain.js";
 import { createHttpApp } from "../src/http.js";
 import { taskReview } from "../src/task-review.js";
 import { acceptPlanPause, makePauseWindow, proposePlanPause } from "../src/plan-pause.js";
@@ -84,6 +84,58 @@ describe("Echo plan pause strict boundary", () => {
 });
 
 describe("Echo care MCP boundary", () => {
+  it("reads and confirms a browser-rescheduled check-in, then reads a cancelled week after write gates close", async () => {
+    const now = new Date("2026-09-11T15:00:00.000Z");
+    const store = new InMemoryCareStore([task], () => now);
+    let rescheduleEnabled = true;
+    const options = { mcpAuthMode: "standard" as const,
+      canonicalMcpUri: endpoint, authorizationServer: "https://kin.example",
+      get rescheduleEnabled() { return rescheduleEnabled; },
+      accessAuthorizer: { async authorize() { return { subject: "maya", claims: { iss: "https://kin.example" }, scopes: new Set(["mcp:tools"]) }; } },
+      familyAccess: { circleId: "family", directory: { async find() { return { circleId: "family", memberId: "maya", name: "Maya", role: "caregiver", status: "active" }; } } },
+    };
+    let app = createHttpApp(store, undefined, options);
+    const fetch = async (_url: string | URL | Request, init: RequestInit = {}) => {
+      expect(String(_url)).toBe(endpoint);
+      const outgoing = request(app).post("/mcp");
+      new Headers(init.headers).forEach((value, name) => outgoing.set(name, value));
+      const result = await outgoing.send(JSON.parse(String(init.body)));
+      return new Response(result.status === 202 ? null : result.text, { status: result.status, headers: result.headers as Record<string, string> });
+    };
+    const client = createEchoCareClient(endpoint, { fetch });
+    const moved = await request(app).post(`/api/tasks/${task.id}/change`).set("authorization", `Bearer ${token}`)
+      .send({ action: "reschedule", dueAt: "2026-09-11T18:00:00.000Z", expected: { title: task.title, dueAt: task.dueAt },
+        requestId: "browser-move-for-echo", confirm: true }).expect(200);
+    // Disabling new writes must not make already-written replacement metadata unreadable.
+    rescheduleEnabled = false;
+    app = createHttpApp(store, undefined, options);
+    const today = await client.today(token);
+    expect(today.tasks).toHaveLength(1);
+    const replacement = today.tasks[0]!;
+    expect(replacement).toMatchObject({ id: moved.body.replacement.taskId, dueAt: "2026-09-11T18:00:00.000Z",
+      rescheduledFrom: { taskId: task.id, dueAt: task.dueAt } });
+    const saved = await client.confirm(token, { taskId: replacement.id, response: "done", actor: "Forged",
+      requestId: "echo-confirm-moved", expected: taskReview(replacement) });
+    expect(saved.task).toMatchObject({ state: "done", rescheduledFrom: replacement.rescheduledFrom });
+    expect(saved.confirmation.actor).toBe("Maya");
+    await store.scheduleTask({ id: "future-test", title: "A later check-in", dueAt: "2026-09-11T20:00:00.000Z" });
+    const review = await client.reviewPlanPause!(token);
+    expect(review.proposal!.tasks.map(item => item.id)).toEqual(["future-test"]);
+    const proposal = review.proposal!;
+    const paused = await client.pausePlan!(token, { startsAt: proposal.startsAt, endsAt: proposal.endsAt,
+      reviewToken: proposal.reviewToken, requestId: "echo-cancel-week", confirm: true });
+    expect(paused.cancelledTasks.map(item => item.id)).toEqual(["future-test"]);
+    Object.defineProperty(store, "planPauseEnabled", { value: false });
+    app = createHttpApp(store, undefined, options);
+    const remaining = await client.today(token);
+    expect(remaining.tasks).toEqual([saved.task]);
+    expect(remaining.summary).toEqual({ total: 1, completed: 1, skipped: 0, remaining: 0 });
+    const plan = await request(app).get("/api/plan").set("authorization", `Bearer ${token}`).expect(200);
+    expect(plan.body.features).toMatchObject({ reschedule: false, planPause: false });
+    expect(plan.body.planPause.pause.requestId).toBeTruthy();
+    await expect(store.scheduleTask({ id: "blocked-new", title: "Must stay blocked", dueAt: "2026-09-11T21:00:00.000Z" }))
+      .rejects.toMatchObject({ name: "PlanPauseConflict" });
+  });
   it("sends a reviewed undo and validates the matching restored state receipt", async () => {
     const f = fixture(undoReceipt);
     expect(await f.client.undoCompletion!(token, undoInput)).toEqual(undoReceipt);
