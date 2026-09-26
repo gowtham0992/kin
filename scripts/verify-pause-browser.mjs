@@ -43,17 +43,27 @@ try {
     await page.setViewportSize({ width, height: 900 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(output, `pause-review-${width}.png`), fullPage: true });
   }
-  let dropped = false;
+  let dropped = false, deniedRetry = false;
   await page.route(`${origin}/api/plan/pause`, async route => {
-    if (route.request().method() !== "POST" || dropped) return route.continue(); dropped = true;
+    if (route.request().method() !== "POST") return route.continue();
+    if (dropped) {
+      if (!deniedRetry) { deniedRetry = true; return route.fulfill({ status: 404, json: { error: "not_enabled" } }); }
+      return route.continue();
+    }
+    dropped = true;
     const committed = await route.fetch(); assert.equal(committed.status(), 201); return route.abort("connectionreset");
   });
   await section.getByRole("checkbox").check(); await section.getByRole("button", { name: "Confirm seven-day cancellation" }).click();
   await expect(page.locator("#workspace-retry-write")).toBeVisible();
   await page.getByRole("link", { name: "Today", exact: true }).click(); await expect(page).toHaveURL(`${origin}/invite.html#plan`);
   await page.locator("#workspace-retry-write").click();
+  await expect(page.locator("#workspace-status")).toContainText("Retry the same request");
+  await expect(page.locator("#workspace-status")).not.toContainText("Nothing was cancelled");
+  await expect(section.getByRole("button", { name: "Confirm seven-day cancellation" })).toBeDisabled();
+  await expect(page.locator("#workspace-retry-write")).toBeVisible();
+  await page.locator("#workspace-retry-write").click();
   await expect(page.locator("#workspace-status")).toContainText("The reviewed check-ins were cancelled");
-  assert.equal(writes.length, 2); assert.deepEqual(writes[0], writes[1]);
+  assert.equal(writes.length, 3); assert.deepEqual(writes[0], writes[1]); assert.deepEqual(writes[0], writes[2]);
   const plan = await (await page.request.get(`${origin}/api/plan`)).json();
   assert.equal(Date.parse(plan.planPause.pause.endsAt) - Date.parse(plan.planPause.pause.startsAt), 168 * 3_600_000);
   assert.deepEqual(plan.tasks.filter(task => task.state === "cancelled").map(task => task.id).sort(), ["pause-call", "pause-walk"]);
@@ -62,5 +72,5 @@ try {
   await page.reload(); await expect(section).toContainText("New check-ins are blocked from");
   await page.screenshot({ path: path.join(output, "pause-active-1280.png"), fullPage: true });
   assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
-  console.log(JSON.stringify({ passed: true, checks: ["parent-narrow-permission", "review-exact-168h-and-list", "fresh-consent", "navigation-drops-review", "same-id-lost-response-retry", "cancel-reviewed-only", "later-date-unchanged", "active-after-reload", "no-message-or-reminder-writes", "responsive-375-768-1280"], output }));
+  console.log(JSON.stringify({ passed: true, checks: ["parent-narrow-permission", "review-exact-168h-and-list", "fresh-consent", "navigation-drops-review", "same-id-lost-response-retry", "disabled-retry-keeps-unknown-outcome", "cancel-reviewed-only", "later-date-unchanged", "active-after-reload", "no-message-or-reminder-writes", "responsive-375-768-1280"], output }));
 } finally { await browser?.close(); child.kill("SIGTERM"); }

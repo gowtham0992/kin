@@ -40,7 +40,7 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
   vi.stubGlobal("location", { hash: "#plan" });
   vi.stubGlobal("history", { replaceState: (_data: unknown, _unused: string, hash: string) => { location.hash = hash; } });
   vi.stubGlobal("Option", class extends Element { constructor(label: string, value: string) { super("option"); this.textContent = label; this.value = value; } });
-  let loseNextSave = false, conflict = false;
+  let loseNextSave = false, conflict = false, unavailable = false;
   const receipts = new Map<string, unknown>();
   const request = vi.fn(async (url: string, options: { body?: string } = {}) => {
     if (url === "/api/session") return { ok: true, json: async () => ({ name: "Maya", role: "caregiver", permissions: { confirm: true, manageDuty, closeUnanswered: manageDuty && closeUnanswered, invite: false } }) };
@@ -49,6 +49,7 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
     const match = /^\/api\/(tasks|routines)\/([^/]+)\/change$/.exec(url);
     if (!match) throw new Error(`Unexpected request: ${url}`);
     if (conflict) return { ok: false, status: 409 };
+    if (unavailable) return { ok: false, status: 422 };
     const body = JSON.parse(options.body!);
     if (!receipts.has(body.requestId)) {
       const selected = tasks.filter(task => match[1] === "tasks" ? task.id === decodeURIComponent(match[2]!) : task.routineId === decodeURIComponent(match[2]!));
@@ -80,6 +81,7 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
   const settled = () => vi.waitFor(() => expect(root("workspace-status").textContent).not.toMatch(/Saving|Loading/));
   return { element, edit, routineEdit, request, tasks, status: () => root("workspace-status").textContent,
     loseNextSave: () => { loseNextSave = true; }, conflict: () => { conflict = true; },
+    unavailable: (value: boolean) => { unavailable = value; },
     bodies: () => request.mock.calls.filter(([url]) => url.endsWith("/change")).map(([, options]) => JSON.parse(options!.body!)),
     async submit(editor: { form: Element } = edit()) { await editor.form.emit("submit"); await settled(); },
     async navigate(tab: string) { location.hash = `#${tab}`; events.get("hashchange")?.(); await settled(); },
@@ -171,6 +173,23 @@ describe("reviewed one-time check-in editing", () => {
     ui.loseNextSave(); await ui.submit(editor); await ui.retry();
     expect(ui.bodies()).toHaveLength(2); expect(ui.bodies()[1]).toEqual(ui.bodies()[0]);
     expect(ui.tasks).toHaveLength(2); expect(ui.status()).toContain("fresh, explicit request on Alexa");
+  });
+
+  it("keeps a lost move locked through a disabled retry without reporting no change or allowing another save", async () => {
+    const ui = await fixture([single()], true, true), editor = ui.edit();
+    editor.action.value = "reschedule"; await editor.action.emit("change");
+    editor.due.value = "2026-09-10T14:00"; await editor.due.emit("input"); editor.consent.checked = true;
+    ui.loseNextSave(); await ui.submit(editor);
+    ui.unavailable(true); await ui.retry();
+    expect(ui.status()).toContain("Retry the same request");
+    expect(ui.element("workspace-retry-write")!.hidden).toBe(false);
+    expect(editor.due.disabled).toBe(true);
+    await ui.navigate("today"); expect(location.hash).toBe("#plan");
+    ui.unavailable(false); await ui.retry();
+    expect(ui.bodies()).toHaveLength(3); expect(ui.bodies()[2]).toEqual(ui.bodies()[0]);
+    expect(ui.tasks).toHaveLength(2);
+    expect(ui.status()).toContain("fresh, explicit request on Alexa");
+    expect(ui.element("workspace-retry-write")!.hidden).toBe(true);
   });
 
   it.each(["2026-09-07T12:00", "2026-10-10T12:00"])("rejects invalid new time %s without a POST", async due => {

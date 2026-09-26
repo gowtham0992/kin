@@ -32,6 +32,22 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
   let pendingRoster = null;
   let pendingRotation = null;
   let pendingPause = null;
+  // Transport uncertainty belongs to this exact session-memory request, not its
+  // JSON body. A later denial describes that attempt, not an earlier commit.
+  const uncertainPlanWrites = new WeakSet();
+  function rejectedPlanWrite(current, error, definitive) {
+    if (error.stale) return false;
+    // Reviewed-change conflicts are receipt-aware: the server checks the saved
+    // result before returning 409. Gate/auth/validation denials are not.
+    if (uncertainPlanWrites.has(current) && !(definitive && error.status === 409)) {
+      error.outcomeUnknown = true;
+      error.definitiveRejection = false;
+      return false;
+    }
+    if (definitive) return true;
+    uncertainPlanWrites.add(current);
+    return false;
+  }
   const pauseConflict = () => Promise.reject(new Error("Resolve the pending plan pause first"));
   const undo = createCompletionUndo({ newRequestId, now, send: ({ taskId, ...body }) => json(`/api/tasks/${encodeURIComponent(taskId)}/undo`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
@@ -87,9 +103,7 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
       const result = await json("/api/plan/pause", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(current.input) });
       assertPauseReceipt(result, current); pendingPause = null; return result;
     } catch (error) {
-      if ([401, 403].includes(error.status) && current.uncertain) error.outcomeUnknown = true;
-      else if (error.definitiveRejection || error.status === 409) pendingPause = null;
-      else if (!error.stale) current.uncertain = true;
+      if (rejectedPlanWrite(current, error, error.definitiveRejection || error.status === 409)) pendingPause = null;
       throw error;
     }
   }
@@ -146,7 +160,10 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
         : result.task?.title === current.title && result.task?.dueAt === current.dueAt;
       if (result.requestId !== current.requestId || !matches) throw new Error("Receipt mismatch");
       pendingPlan = null; return result;
-    } catch (error) { if (error.definitiveRejection || ((current.routineId || current.taskId) && error.status === 409)) pendingPlan = null; throw error; }
+    } catch (error) {
+      if (rejectedPlanWrite(current, error, error.definitiveRejection || ((current.routineId || current.taskId) && error.status === 409))) pendingPlan = null;
+      throw error;
+    }
   }
   return {
     async session() { const session = await json("/api/session"); undo.configure(session); return session; },

@@ -18,4 +18,13 @@ describe("reschedule client receipt", () => {
     await expect(client.changeTask(input)).rejects.toMatchObject({ definitiveRejection: true });
     expect(client.pending).toBeNull(); client.reset(); expect(client.pending).toBeNull();
   });
+  it.each([401, 403])("does not erase an uncertain move when retry loses access with %s", async status => {
+    const request = vi.fn(async (): Promise<unknown> => { throw new Error("Lost response"); });
+    const client = createWorkspaceClient({ request, newRequestId: () => result.requestId });
+    await expect(client.changeTask(input)).rejects.toThrow("Lost response");
+    request.mockResolvedValue({ ok: false, status });
+    await expect(client.retry()).rejects.toMatchObject({ status, outcomeUnknown: true, definitiveRejection: false });
+    expect(client.pending).toMatchObject({ ...input, requestId: result.requestId });
+    client.reset(); expect(client.pending).toBeNull();
+  });
 });

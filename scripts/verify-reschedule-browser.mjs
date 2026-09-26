@@ -52,23 +52,32 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(output, `reschedule-review-${width}.png`), fullPage: true });
   }
-  let dropped = false;
+  let dropped = false, deniedRetry = false;
   await page.route(`${origin}/api/tasks/${old.id}/change`, async route => {
-    if (dropped) return route.continue(); dropped = true;
+    if (dropped) {
+      if (!deniedRetry) { deniedRetry = true; return route.fulfill({ status: 422, json: { error: "reschedule_unavailable" } }); }
+      return route.continue();
+    }
+    dropped = true;
     const committed = await route.fetch(); assert.equal(committed.ok(), true); return route.abort("connectionreset");
   });
   await form.getByRole("checkbox").check(); await form.getByRole("button", { name: "Apply reviewed change" }).click();
   await expect(page.locator("#workspace-retry-write")).toBeVisible();
   await page.locator("#workspace-retry-write").click();
+  await expect(page.locator("#workspace-status")).toContainText("Retry the same request");
+  await expect(form.locator('input[type="datetime-local"]')).toBeDisabled();
+  await expect(page.locator("#workspace-retry-write")).toBeVisible();
+  await page.getByRole("link", { name: "Today", exact: true }).click(); await expect(page).toHaveURL(`${origin}/invite.html#plan`);
+  await page.locator("#workspace-retry-write").click();
   await expect(page.locator("#workspace-status")).toContainText("none was created here");
-  const moves = writes.filter(write => write.body.action === "reschedule"); assert.equal(moves.length, 2); assert.deepEqual(moves[0], moves[1]);
+  const moves = writes.filter(write => write.body.action === "reschedule"); assert.equal(moves.length, 3); assert.deepEqual(moves[0], moves[1]); assert.deepEqual(moves[0], moves[2]);
   const history = (await read()).filter(task => task.title === old.title); assert.equal(history.length, 2);
   const cancelled = history.find(task => task.id === old.id), replacement = history.find(task => task.id !== old.id);
   assert.equal(cancelled.state, "cancelled"); assert.equal(replacement.dueAt, dates.nextIso);
   assert.deepEqual(cancelled.rescheduledTo, { taskId: replacement.id, dueAt: replacement.dueAt });
   assert.deepEqual(replacement.rescheduledFrom, { taskId: old.id, dueAt: old.dueAt });
-  assert.equal(writes.length, 3, "Only creation plus same reschedule retry; no reminder POST");
+  assert.equal(writes.length, 4, "Only creation plus original move, denied retry and exact receipt retry; no reminder POST");
   await page.screenshot({ path: path.join(output, "reschedule-receipt-1280.png"), fullPage: true });
   assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
-  console.log(JSON.stringify({ passed: true, checks: ["create", "review-old-and-new", "fresh-consent", "retained-draft", "same-id-lost-response-retry", "atomic-cancel-new", "history-links", "no-reminder-post", "responsive-375-768-1280"], output }));
+  console.log(JSON.stringify({ passed: true, checks: ["create", "review-old-and-new", "fresh-consent", "retained-draft", "same-id-lost-response-retry", "disabled-retry-stays-locked", "atomic-cancel-new", "history-links", "no-reminder-post", "responsive-375-768-1280"], output }));
 } finally { await browser?.close(); child.kill("SIGTERM"); }
