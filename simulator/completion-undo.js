@@ -1,3 +1,5 @@
+import { createWriteRecovery } from "./care-client.js";
+
 // Only a verified completion from this browser session can become an undo offer.
 // This is a review/retry coordinator; the backend owns authorization and atomic state.
 const fields = ["title", "dueAt", "state", "lastResponse", "confirmedAt", "confirmedBy"];
@@ -12,6 +14,7 @@ const valid = value => value && typeof value.title === "string" && value.title.l
 const conflict = message => Object.assign(new Error(message), { status: 409, definitiveRejection: true });
 
 export function createCompletionUndo({ send, newRequestId = () => crypto.randomUUID(), now = Date.now }) {
+  const rejectedWrite = createWriteRecovery();
   let identity = null, enabled = false, latest = null, reviewedAt = null, pending = null, inFlight = null, generation = 0;
   const fresh = (at, lifetime) => Number.isFinite(at) && at <= now() && now() - at <= lifetime;
   function reset() { generation += 1; identity = null; enabled = false; latest = null; reviewedAt = null; pending = null; inFlight = null; }
@@ -43,7 +46,7 @@ export function createCompletionUndo({ send, newRequestId = () => crypto.randomU
       // Access can change after commit. Retain only until the workspace closes,
       // so its signed-out notice can preserve an opaque uncertain-operation ID.
       if ([401, 403].includes(error.status)) error.outcomeUnknown = true;
-      else if ([400, 404, 409, 422].includes(error.status)) { pending = null; latest = null; reviewedAt = null; }
+      else if (rejectedWrite(pending, error, [400, 404, 409, 422].includes(error.status))) { pending = null; latest = null; reviewedAt = null; }
       throw error;
     }).finally(() => { if (current === generation) inFlight = null; });
     return inFlight;

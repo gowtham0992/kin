@@ -18,6 +18,18 @@ function fixture(previous: Record<string, any> = before) {
 }
 
 describe("session-only reviewed completion undo", () => {
+  it.each([400, 404, 422])("retains an uncertain undo across a later %s denial and resolves the original receipt", async status => {
+    const f = fixture(); f.undo.prepare({ tasks: [task] });
+    f.send.mockRejectedValueOnce(new Error("lost response"));
+    await expect(f.undo.confirm()).rejects.toThrow("lost response");
+    const pending = f.undo.pending;
+    f.send.mockRejectedValueOnce(Object.assign(new Error("denied"), { status }));
+    await expect(f.undo.retry()).rejects.toMatchObject({ status, outcomeUnknown: true });
+    expect(f.undo.pending).toEqual(pending);
+    await f.undo.retry();
+    expect(f.send.mock.calls.map(call => call[0])).toEqual([pending, pending, pending]);
+    expect(f.undo.pending).toBeNull();
+  });
   it("requires backend availability, own latest receipt and matching follow-up snapshot", () => {
     const f = fixture(); expect(f.undo.offer({ tasks: [task] })).toMatchObject({ taskId: "water", restore: before });
     f.undo.configure({ ...session, features: undefined }); expect(f.undo.offer({ tasks: [task] })).toBeNull();

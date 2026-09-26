@@ -15,9 +15,29 @@ export function createSnapshotReader({ fetchSnapshot, onSnapshot, onError }) {
   };
 }
 
+// Uncertainty belongs to the exact in-memory request, never its serialized body.
+// A gate/auth/validation denial on retry cannot disprove an earlier commit.
+export function createWriteRecovery() {
+  const uncertain = new WeakSet();
+  return (request, error, definitive) => {
+    if (error.stale) return false;
+    // These callers' reviewed conflicts are receipt-aware. A matching saved
+    // result is returned before a stale-review conflict can be produced.
+    if (uncertain.has(request) && !(definitive && error.status === 409)) {
+      error.outcomeUnknown = true;
+      error.definitiveRejection = false;
+      return false;
+    }
+    if (definitive) return true;
+    uncertain.add(request);
+    return false;
+  };
+}
+
 export function createConfirmationSender({ send, newRequestId = () => crypto.randomUUID() }) {
   let pending = null;
   let inFlight = null;
+  const rejectedWrite = createWriteRecovery();
   const attempt = () => {
     if (inFlight) return inFlight;
     if (!pending) return Promise.reject(new Error("No pending confirmation"));
@@ -26,7 +46,7 @@ export function createConfirmationSender({ send, newRequestId = () => crypto.ran
       pending = null;
       return result;
     }).catch(error => {
-      if (error?.definitiveRejection === true) pending = null;
+      if (rejectedWrite(pending, error, error?.definitiveRejection === true)) pending = null;
       throw error;
     }).finally(() => { inFlight = null; });
     return inFlight;

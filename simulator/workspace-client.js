@@ -1,4 +1,4 @@
-import { createConfirmationSender } from "./care-client.js";
+import { createConfirmationSender, createWriteRecovery } from "./care-client.js";
 import { createCompletionUndo } from "./completion-undo.js";
 import { validPauseProposal, assertPauseReceipt } from "./plan-pause.js";
 
@@ -32,22 +32,7 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
   let pendingRoster = null;
   let pendingRotation = null;
   let pendingPause = null;
-  // Transport uncertainty belongs to this exact session-memory request, not its
-  // JSON body. A later denial describes that attempt, not an earlier commit.
-  const uncertainPlanWrites = new WeakSet();
-  function rejectedPlanWrite(current, error, definitive) {
-    if (error.stale) return false;
-    // Reviewed-change conflicts are receipt-aware: the server checks the saved
-    // result before returning 409. Gate/auth/validation denials are not.
-    if (uncertainPlanWrites.has(current) && !(definitive && error.status === 409)) {
-      error.outcomeUnknown = true;
-      error.definitiveRejection = false;
-      return false;
-    }
-    if (definitive) return true;
-    uncertainPlanWrites.add(current);
-    return false;
-  }
+  const rejectedWrite = createWriteRecovery();
   const pauseConflict = () => Promise.reject(new Error("Resolve the pending plan pause first"));
   const undo = createCompletionUndo({ newRequestId, now, send: ({ taskId, ...body }) => json(`/api/tasks/${encodeURIComponent(taskId)}/undo`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
@@ -103,7 +88,7 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
       const result = await json("/api/plan/pause", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(current.input) });
       assertPauseReceipt(result, current); pendingPause = null; return result;
     } catch (error) {
-      if (rejectedPlanWrite(current, error, error.definitiveRejection || error.status === 409)) pendingPause = null;
+      if (rejectedWrite(current, error, error.definitiveRejection || error.status === 409)) pendingPause = null;
       throw error;
     }
   }
@@ -117,7 +102,7 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
         result.assignments.length < result.assigned || result.assignments.length > 7 || new Set(result.assignments.map(day => day.date)).size !== result.assignments.length ||
         result.assignments.some(day => typeof day.date !== "string" || day.date < current.startDate || day.date > result.endDate || typeof day.memberId !== "string")) throw new Error("Receipt mismatch");
       pendingRotation = null; return result;
-    } catch (error) { if (error.definitiveRejection || error.status === 409) pendingRotation = null; throw error; }
+    } catch (error) { if (rejectedWrite(current, error, error.definitiveRejection || error.status === 409)) pendingRotation = null; throw error; }
   }
   async function saveRoster() {
     const current = pendingRoster;
@@ -128,7 +113,7 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
           (current.action === "enable_duty" ? person?.id !== current.memberId || person.canReceiveAlerts !== true || person.canRename !== false || person.relationship === "parent" : current.action === "connect_self" ? !/^[A-Za-z0-9_-]{1,80}$/.test(person?.id ?? "") || person.id === current.memberId || person.canReceiveAlerts !== true || person.canRename !== false || person.relationship !== "caregiver" : current.action === "rename" ? person?.id !== current.memberId :
             !/^person-[a-f0-9]{40}$/.test(person?.id ?? "") || person?.relationship !== current.relationship || person?.canReceiveAlerts !== false)) throw new Error("Receipt mismatch");
       pendingRoster = null; return result;
-    } catch (error) { if (error.definitiveRejection || error.status === 409) pendingRoster = null; throw error; }
+    } catch (error) { if (rejectedWrite(current, error, error.definitiveRejection || error.status === 409)) pendingRoster = null; throw error; }
   }
   async function saveDuty() {
     const current = pendingDuty;
@@ -138,7 +123,7 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
         ? result.assignments.some(day => day.date === current.date)
         : !result.assignments.some(day => day.date === current.date && day.memberId === current.memberId))) throw new Error("Receipt mismatch");
       pendingDuty = null; return result;
-    } catch (error) { if (error.definitiveRejection || error.status === 409) pendingDuty = null; throw error; }
+    } catch (error) { if (rejectedWrite(current, error, error.definitiveRejection || error.status === 409)) pendingDuty = null; throw error; }
   }
   async function savePlan() {
     const current = pendingPlan;
@@ -161,7 +146,7 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
       if (result.requestId !== current.requestId || !matches) throw new Error("Receipt mismatch");
       pendingPlan = null; return result;
     } catch (error) {
-      if (rejectedPlanWrite(current, error, error.definitiveRejection || ((current.routineId || current.taskId) && error.status === 409))) pendingPlan = null;
+      if (rejectedWrite(current, error, error.definitiveRejection || ((current.routineId || current.taskId) && error.status === 409))) pendingPlan = null;
       throw error;
     }
   }
@@ -212,6 +197,7 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
       if (undoLocked()) return undoConflict();
       if (pendingRotation) return Promise.reject(new Error("Resolve the pending rotation first"));
       if (pendingRoster) return Promise.reject(new Error("Resolve the pending circle change first"));
+      if (pendingDuty || confirmations.pending) return Promise.reject(new Error("Resolve the pending change first"));
       if (pendingPlan && (pendingPlan.title !== input.title || pendingPlan.dueAt !== input.dueAt || pendingPlan.timeZone !== input.timeZone || JSON.stringify(pendingPlan.dueAts) !== JSON.stringify(input.dueAts))) return Promise.reject(new Error("Resolve the pending task first"));
       pendingPlan ??= { ...input, requestId: newRequestId ? newRequestId() : crypto.randomUUID() };
       return savePlan();
@@ -220,7 +206,7 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
       if (pendingPause) return pauseConflict();
       if (undoLocked()) return undoConflict();
       if (pendingRotation) return Promise.reject(new Error("Resolve the pending rotation first"));
-      if (pendingPlan || pendingRoster) return Promise.reject(new Error("Resolve the pending task first"));
+      if (pendingPlan || pendingRoster || pendingDuty || confirmations.pending) return Promise.reject(new Error("Resolve the pending task first"));
       pendingPlan = { ...input, requestId: newRequestId ? newRequestId() : crypto.randomUUID() };
       return savePlan();
     },

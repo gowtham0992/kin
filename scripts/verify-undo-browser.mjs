@@ -84,9 +84,10 @@ try {
 
   // Commit succeeds, response is lost: all competing UI is locked, exact retry recovers.
   await saveDone(); await open.click();
-  let lose = true;
+  let lose = true, denyRetry = true;
   await page.route("**/api/tasks/*/undo", async route => {
     if (lose) { lose = false; const response = await route.fetch(); assert.equal(response.ok(), true); return route.abort("failed"); }
+    if (denyRetry) { denyRetry = false; return route.fulfill({ status: 404, json: { error: "not_enabled" } }); }
     return route.continue();
   });
   await page.getByRole("button", { name: "Confirm undo", exact: true }).click();
@@ -94,13 +95,18 @@ try {
   await expect(page.getByRole("button", { name: "Keep completion", exact: true })).toBeDisabled();
   await page.getByRole("link", { name: "Plan", exact: true }).click(); await expect(page).toHaveURL(`${origin}/invite.html#today`);
   await page.getByRole("button", { name: "Retry the same completion undo", exact: true }).click();
+  await expect(page.locator("#workspace-status")).toContainText("not acknowledged");
+  await expect(page.locator("#workspace-status")).not.toContainText("Nothing was undone");
+  await expect(page.getByRole("button", { name: "Keep completion", exact: true })).toBeDisabled();
+  await page.getByRole("link", { name: "Plan", exact: true }).click(); await expect(page).toHaveURL(`${origin}/invite.html#today`);
+  await page.getByRole("button", { name: "Retry the same completion undo", exact: true }).click();
   await expect(page.locator("#workspace-status")).toContainText("Completion undone.");
-  assert.deepEqual(undoWrites[1], undoWrites[2]); assert.deepEqual(review(await currentTask()), previous);
+  assert.deepEqual(undoWrites[1], undoWrites[2]); assert.deepEqual(undoWrites[2], undoWrites[3]); assert.deepEqual(review(await currentTask()), previous);
   await page.unroute("**/api/tasks/*/undo");
 
   // A fresh read prevents stale reviews; a write-time conflict never claims success.
   await saveDone(); await externalResponse("skipped"); await open.click();
-  await expect(page.locator("#workspace-status")).toContainText("completion changed"); assert.equal(undoWrites.length, 3);
+  await expect(page.locator("#workspace-status")).toContainText("completion changed"); assert.equal(undoWrites.length, 4);
   await externalResponse("not_yet"); await page.locator("#workspace-refresh").click(); await saveDone(); await open.click();
   await expect(page.locator("#workspace-undo-heading")).toBeVisible();
   await externalResponse("skipped"); await page.getByRole("button", { name: "Confirm undo", exact: true }).click();
@@ -157,7 +163,7 @@ try {
   await page.screenshot({ path: path.join(output, "expired.png"), fullPage: true });
   assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
   console.log(JSON.stringify({ result: "pass", viewports: [320, 375, 768, 1280], undoRequests: undoWrites.length, contrast: ratios,
-    assertions: ["keyboard", "account attribution", "exact not-yet restoration", "decline", "lost-response exact retry", "malformed receipt", "post-commit access loss", "competing controls lock", "stale review/write", "viewer/feature gate", "reload clears", "expiry"], errors, blocked, output }, null, 2));
+    assertions: ["keyboard", "account attribution", "exact not-yet restoration", "decline", "lost-response exact retry", "disabled-retry-keeps-undo-uncertain", "malformed receipt", "post-commit access loss", "competing controls lock", "stale review/write", "viewer/feature gate", "reload clears", "expiry"], errors, blocked, output }, null, 2));
 } finally {
   await browser?.close();
   child.kill("SIGTERM");

@@ -87,7 +87,7 @@ describe("simulator over real Streamable HTTP", () => {
     const expected = taskReview((await store.today()).tasks.find(task => task.id === input.taskId)!);
     await store.confirm({ ...input, response: "not_yet", requestId: "intervening-update-1" });
 
-    await expect(client.confirm({ ...input, expected })).rejects.toMatchObject({ definitiveRejection: true });
+    await expect(client.confirm({ ...input, expected })).rejects.toMatchObject({ definitiveRejection: true, status: 409 });
     await expect(client.confirm({ ...input, taskId: "unknown" })).rejects.toMatchObject({ definitiveRejection: true });
 
     expect(events.map(event => event.phase)).toEqual(["request", "error", "request", "error"]);

@@ -66,7 +66,7 @@ describe("workspace over authenticated MCP", () => {
   it("rejects mismatched MCP receipts and clears pending only for a definite rejection", async () => {
     let conflict = false;
     const client = createWorkspaceClient({ newRequestId: () => "mcp-request-1", request: vi.fn(), mcp: async () => ({ confirm: async () => {
-      if (conflict) throw Object.assign(new Error("Review changed"), { definitiveRejection: true });
+      if (conflict) throw Object.assign(new Error("Review changed"), { definitiveRejection: true, status: 409 });
       return { confirmation: { requestId: "another-request", taskId: "water", response: "done" } };
     } }) });
     await expect(client.confirmViaMcp({ taskId: "water", response: "done", actor: "Maya", expected })).rejects.toThrow("Receipt mismatch");

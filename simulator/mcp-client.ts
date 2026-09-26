@@ -144,6 +144,9 @@ export function createMcpCareClient(endpoint: URL, options: McpCareClientOptions
         errorCode = details?.code === "review_conflict" || details?.code === "task_not_found" || details?.code === "confirmation_conflict" ? details.code : "invalid_result";
         throw Object.assign(new Error("MCP tool did not return a confirmed result"), {
           definitiveRejection: details?.code === "review_conflict" || details?.code === "task_not_found" || details?.code === "confirmation_conflict",
+          // Preserve the receipt-aware conflict distinction for browser retry
+          // recovery; a generic rejection cannot settle an earlier lost result.
+          ...(details?.code === "review_conflict" || details?.code === "confirmation_conflict" ? { status: 409 } : {}),
         });
       }
       const structured = result.structuredContent as Record<string, unknown>;
