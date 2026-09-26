@@ -92,6 +92,13 @@ try {
   await expect(page.getByRole("heading", { name: brief.headline, exact: true })).toBeVisible();
   const details = page.locator(".care-brief-evidence");
   await expect(details).not.toHaveAttribute("open", "");
+  for (const group of await page.locator(".care-source-group").all()) {
+    await expect(group).not.toHaveAttribute("open", "");
+    await expect(group.locator(".care-source-link").first()).toBeHidden();
+    await group.locator("summary").press("Enter");
+    await expect(group).toHaveAttribute("open", "");
+    await expect(group.locator(".care-source-link").first()).toBeVisible();
+  }
   for (const [index, fact] of brief.evidence.entries()) {
     const source = page.locator(`#brief-source-${index + 1}`);
     await expect(source.locator("code")).toHaveText(fact.id);
@@ -111,9 +118,12 @@ try {
   }
   // Close before each keyboard print lifecycle; no print dialog or printer is invoked.
   const printState = async open => {
+    const groups = await page.locator(".care-source-group").all();
+    for (const [index, group] of groups.entries()) await group.evaluate((element, next) => { element.open = next; }, index % 2 === 1);
     await details.evaluate((element, next) => { element.open = next; }, open);
     await page.evaluate(() => window.dispatchEvent(new Event("beforeprint")));
     await expect(details).toHaveAttribute("open", "");
+    for (const group of groups) await expect(group).toHaveAttribute("open", "");
     await page.evaluate(() => window.dispatchEvent(new Event("beforeprint")));
     await page.emulateMedia({ media: "print" });
     await expect(page.locator("#brief-source-1")).toBeVisible();
@@ -122,6 +132,7 @@ try {
     await page.emulateMedia({ media: "screen" });
     await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
     assert.equal(await details.evaluate(element => element.open), open, "Restore the pre-print disclosure state");
+    for (const [index, group] of groups.entries()) assert.equal(await group.evaluate(element => element.open), index % 2 === 1, "Restore each citation group's pre-print state");
   };
   await printState(false); await printState(true);
   await page.evaluate(() => { window.__kinPrintRequests = 0; window.print = () => { window.__kinPrintRequests += 1; }; });
@@ -177,6 +188,14 @@ try {
   await expect(page.locator(".care-brief-evidence")).toContainText("Prior comparison period: Outside the seven-day window");
   await expect(page.getByRole("heading", { name: "Patterns in recorded replies" })).toBeVisible();
   await expect(page.locator("#workspace-content")).not.toContainText("Untouched future check-in");
+  const mixedGroups = await page.locator(".care-source-group").all();
+  assert.ok(mixedGroups.length > 0, "The mixed week exercises long citation groups");
+  for (const group of mixedGroups) {
+    await expect(group).not.toHaveAttribute("open", "");
+    await group.locator("summary").press("Enter");
+    await expect(group.locator(".care-source-link").first()).toBeVisible();
+    await group.locator("summary").press("Enter");
+  }
   await page.evaluate(() => {
     window.__kinActualPrintEvents = [];
     for (const name of ["beforeprint", "afterprint"]) window.addEventListener(name, () => window.__kinActualPrintEvents.push(name));

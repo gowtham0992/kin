@@ -47,7 +47,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   let conversationDraft = "";
   let conversationSelection = null;
   let voice = null;
-  let briefEvidence = null, printedEvidence = null;
+  let briefEvidence = null, printedEvidence = null, briefCitationGroups = [];
   let undoReviewTimer = null;
   let member = null, revision = 0, busy = false, loading = false, timer = null, lastRender = "", activeView = null;
   const content = $("workspace-content"), status = $("workspace-status");
@@ -76,7 +76,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     pushControls.reset();
     sessionGeneration += 1; mcpConnection = null; mcpTrace.length = 0; mcpTracePanel = null;
     rotationEditor?.destroy(); rotationEditor = null;
-    restorePrintedEvidence(); briefEvidence = null;
+    restorePrintedEvidence(); briefEvidence = null; briefCitationGroups = [];
     voice?.cancel(); voice = null;
     revision += 1; client.reset(); planDraft.clear(); taskChangeDrafts.clear(); rosterDraft.clear(); rosterEditor = null; conversationDraft = ""; conversationSelection = null; member = null; busy = false; loading = false; activeView = null;
     clearTimeout(timer); content.replaceChildren(); $("workspace").hidden = true;
@@ -698,7 +698,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       ...(pauseEditor && !activePause ? [pauseEditor.element] : []));
   }
   function renderBrief(data) {
-    restorePrintedEvidence();
+    restorePrintedEvidence(); briefCitationGroups = [];
     const evidence = node("details", null, "care-brief-evidence"); briefEvidence = evidence;
     evidence.append(node("summary", `Based on ${data.evidence.length} recorded event${data.evidence.length === 1 ? "" : "s"}`));
     const sources = new Map();
@@ -712,15 +712,24 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     if (!data.evidence.length) evidence.append(node("p", "No source records were returned for this period.", "care-note"));
     function references(ids = []) {
       const links = node("div", null, "care-source-links");
+      let unavailable = false, count = 0;
       for (const id of new Set(ids)) {
         const source = sources.get(id);
-        if (!source) { links.append(node("span", "A source for this point is unavailable.", "care-note")); continue; }
+        if (!source) { unavailable = true; continue; }
+        count += 1;
         const link = button(`Source ${source.number}`, () => {
           evidence.open = true; source.element.focus(); source.element.scrollIntoView({ block: "nearest" });
         });
         link.classList.add("care-source-link"); link.setAttribute("aria-controls", source.element.id); links.append(link);
       }
-      return links;
+      const result = node("div");
+      if (count > 3) {
+        const group = node("details", null, "care-source-group");
+        group.append(node("summary", `View ${count} sources`), links);
+        briefCitationGroups.push(group); result.append(group);
+      } else result.append(links);
+      if (unavailable) result.append(node("p", "A source for this point is unavailable.", "care-note"));
+      return result;
     }
     const heading = node("div", null, "care-brief-heading"); heading.append(node("p", `${date(data.period.startDate)} – ${date(data.period.endDate)}`, "kicker"), node("h2", data.headline), node("p", data.overview));
     heading.append(references(data.overviewEvidenceIds));
@@ -751,7 +760,10 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     content.replaceChildren(heading, facts, points, evidence, node("p", data.generatedBy === "bedrock" ? "Evidence selected with Amazon Bedrock; wording comes from recorded facts." : "Prepared directly from recorded activity; no generated interpretation.", "care-note"), node("p", data.safetyNotice, "care-note"), print);
   }
   function restorePrintedEvidence() {
-    if (printedEvidence) { printedEvidence.element.open = printedEvidence.wasOpen; printedEvidence = null; }
+    if (printedEvidence) {
+      for (const { element, wasOpen } of printedEvidence) element.open = wasOpen;
+      printedEvidence = null;
+    }
   }
   function renderAccess(data) {
     const heading = node("div"); heading.append(node("p", "Organizer controls", "kicker"), node("h2", "Who can see your circle?"), node("p", "These are account memberships, not just names on the roster. Revoking access blocks future family-data requests; a request already in progress may finish."));
@@ -820,7 +832,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     voice?.cancel(); voice = null;
     mcpTracePanel = null;
     rotationEditor?.destroy(); rotationEditor = null;
-    restorePrintedEvidence(); briefEvidence = null;
+    restorePrintedEvidence(); briefEvidence = null; briefCitationGroups = [];
     revision += 1; loading = false; content.replaceChildren(); lastRender = "";
     const view = tab();
     activeView = view;
@@ -858,7 +870,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   window.addEventListener("hashchange", () => void navigate({ focus: true }));
   window.addEventListener("beforeprint", () => {
     if (!member || activeView !== "week" || !briefEvidence || printedEvidence) return;
-    printedEvidence = { element: briefEvidence, wasOpen: briefEvidence.open }; briefEvidence.open = true;
+    printedEvidence = [briefEvidence, ...briefCitationGroups].map(element => ({ element, wasOpen: element.open }));
+    for (const { element } of printedEvidence) element.open = true;
   });
   window.addEventListener("afterprint", restorePrintedEvidence);
   document.addEventListener("visibilitychange", () => { if (document.hidden) voice?.cancel(); else void refresh(); });

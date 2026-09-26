@@ -50,7 +50,7 @@ async function fixture(data = brief()) {
   const workspace = createWorkspace({ request, onAccessLost: vi.fn(), onInvite() {}, onLeaveInvite() {} }); reset = workspace.reset;
   await workspace.open();
   return { content, get, print, workspace, emit: (event: string) => events.get(event)?.(),
-    details: () => content.descendants().find(element => element.tagName === "DETAILS")!,
+    details: () => content.descendants().find(element => element.tagName === "DETAILS" && element.children[0]?.textContent.startsWith("Based on "))!,
     sourceButtons: () => content.descendants().filter(element => element.tagName === "BUTTON" && element.textContent.startsWith("Source ")) };
 }
 
@@ -62,6 +62,42 @@ it("includes unanswered closures in the visible weekly count line", async () => 
 });
 
 describe("weekly source evidence and visit notes", () => {
+  it("groups long citation lists without losing, duplicating or inventing sources", async () => {
+    const data = brief();
+    data.evidence = Array.from({ length: 5 }, (_, index) => ({ ...data.evidence[0]!, id: `record-${index}`, fact: `Recorded fact ${index}` }));
+    data.overviewEvidenceIds = [...data.evidence.map(fact => fact.id), "record-0", "missing"];
+    data.highlights = []; data.followUps = [];
+    const ui = await fixture(data);
+    const group = ui.content.descendants().find(element => element.tagName === "DETAILS" && element.children[0]?.textContent === "View 5 sources");
+    expect(group).toBeDefined(); expect(group!.open).toBe(false);
+    expect(group!.descendants().filter(element => element.tagName === "BUTTON").map(element => element.textContent))
+      .toEqual(["Source 1", "Source 2", "Source 3", "Source 4", "Source 5"]);
+    expect(group!.textContent).not.toContain("unavailable");
+    expect(ui.content.textContent).toContain("A source for this point is unavailable.");
+    await ui.sourceButtons()[4]!.click();
+    expect(ui.details().open).toBe(true); expect(ui.get("brief-source-5").focused).toBe(true);
+  });
+
+  it("expands every citation group for printing and restores each reader choice afterward and on reset", async () => {
+    const data = brief();
+    data.evidence = Array.from({ length: 4 }, (_, index) => ({ ...data.evidence[0]!, id: `record-${index}` }));
+    data.overviewEvidenceIds = data.evidence.map(fact => fact.id);
+    data.highlights[0]!.evidenceIds = [...data.overviewEvidenceIds]; data.followUps = [];
+    const ui = await fixture(data);
+    const groups = ui.content.descendants().filter(element => element.tagName === "DETAILS" && element.children[0]?.textContent === "View 4 sources");
+    expect(groups).toHaveLength(2); groups[1]!.open = true;
+    ui.emit("beforeprint"); ui.emit("beforeprint");
+    expect(groups.map(group => group.open)).toEqual([true, true]); expect(ui.details().open).toBe(true);
+    ui.emit("afterprint"); expect(groups.map(group => group.open)).toEqual([false, true]); expect(ui.details().open).toBe(false);
+    ui.emit("beforeprint"); ui.workspace.reset(); ui.emit("afterprint");
+    expect(groups.map(group => group.open)).toEqual([false, true]); expect(ui.content.childElementCount).toBe(0);
+  });
+
+  it("keeps short citation lists directly available without another disclosure", async () => {
+    const ui = await fixture();
+    expect(ui.content.descendants().filter(element => element.tagName === "DETAILS")).toEqual([ui.details()]);
+    expect(ui.sourceButtons()).toHaveLength(4);
+  });
   it("renders complete overview and completion citations from the real service when only the ninth task is done", async () => {
     const asOf = new Date("2026-09-08T17:00:00.000Z");
     const tasks: CareTask[] = Array.from({ length: 9 }, (_, index) => ({

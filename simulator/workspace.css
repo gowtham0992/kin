@@ -172,6 +172,10 @@
 #workspace-content .care-brief-sections + .care-brief-evidence { margin-top: 0; border-top: 0; }
 .care-brief-heading .care-source-link, .care-brief-section .care-source-link { border: 0; border-radius: 0; padding: 4px 0; min-height: 44px; color: var(--sage); background: transparent; text-decoration: underline; text-underline-offset: 4px; font-size: 13px; }
 .care-brief-heading .care-source-links, .care-brief-section .care-source-links { gap: 16px; margin: 0; }
+#workspace-content .care-source-group { border: 0; margin: 0; padding: 0; }
+.care-source-group > summary { width: fit-content; min-height: 48px; padding: 12px 0; box-sizing: border-box; color: var(--sage); font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
+.care-source-group > summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
+@media print { .care-source-group > summary { display: none; } }
 @media (max-width: 700px) {
   .care-brief-sections { grid-template-columns: minmax(0, 1fr); }
   .care-brief-section { padding: 24px 0; }
