@@ -10,7 +10,7 @@ import { createMemoryRosterManagement, type RosterMemberRecord } from "../src/ro
 const mode = process.argv[2] ?? "success";
 const port = Number(process.argv[3] ?? 3014);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid preview port");
-if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content", "week-sources"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content", "week-sources", "week-comparison"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
 const rosterMembers: RosterMemberRecord[] = mode === "roster-empty" ? [] : [
@@ -22,7 +22,13 @@ if (mode === "long-content") {
   rosterMembers[1]!.name = "Alexandria-Catherine Montgomery-Worthington · synthetic caregiver";
   rosterMembers[2]!.name = "LongUnbrokenSyntheticCaregiverName".repeat(2);
 }
-const store = mode === "week-sources"
+const store = mode === "week-comparison"
+  ? new InMemoryCareStore(Array.from({ length: 4 }, (_, index) => ({ id: `comparison-test-${index}`, title: `Synthetic conversation ${index + 1}`,
+      dueAt: new Date(Date.now() - (index < 2 ? 24 : 192) * 3_600_000 - index * 3_600_000).toISOString(),
+      state: index === 0 || index >= 2 ? "done" as const : "scheduled" as const,
+      lastResponse: index === 0 || index >= 2 ? "done" as const : null,
+      confirmedAt: null, confirmedBy: null })), () => new Date(), null, "UTC", [], rosterMembers)
+  : mode === "week-sources"
   ? new InMemoryCareStore(Array.from({ length: 9 }, (_, index) => ({ id: `source-test-${index}`, title: `Synthetic shared check-in ${index + 1}`,
       dueAt: new Date(Date.now() - (index + 1) * 3_600_000).toISOString(), state: "scheduled" as const,
       lastResponse: null, confirmedAt: null, confirmedBy: null })), () => new Date(), null, "America/Denver", [], rosterMembers)
