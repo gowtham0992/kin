@@ -67,6 +67,31 @@ try {
   await page.keyboard.press("Enter");
   await expect(page.locator("#workspace-content")).toBeFocused();
   await expect(primary.getByRole("link", { name: "Plan", exact: true })).toHaveAttribute("aria-current", "page");
+  const planForm = page.getByRole("form", { name: "Schedule a check-in" });
+  const planHelp = page.locator("#plan-editing-help"), planSummary = planHelp.locator("summary");
+  await expect(planHelp).not.toHaveAttribute("open", "");
+  await expect(planHelp.locator("p")).not.toBeVisible();
+  await expect(page.locator("#plan-notification-note")).toBeVisible();
+  await expect(page.locator("#plan-draft-note")).toBeVisible();
+  await expect(page.locator("#plan-due")).toHaveAttribute("aria-describedby", "plan-time-note");
+  assert.equal(await planForm.evaluate(form => {
+    const save = form.querySelector('button[type="submit"]');
+    return !!(save.compareDocumentPosition(form.querySelector('#plan-editing-help')) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }), true, "Optional management help follows Save");
+  await planSummary.focus(); await page.keyboard.press("Enter");
+  await expect(planHelp).toHaveAttribute("open", "");
+  await expect(planHelp.locator("p")).toContainText("future, untouched check-ins");
+  assert.equal(await planSummary.evaluate(el => getComputedStyle(el).outlineStyle !== "none"), true, "Keyboard focus is visible");
+  await page.keyboard.press("Enter"); await expect(planHelp).not.toHaveAttribute("open", "");
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const dimensions = await planForm.evaluate(form => {
+      const controls = [...form.querySelectorAll('input, select, button, summary')];
+      return controls.map(el => { const r = el.getBoundingClientRect(); return { width: r.width, height: r.height, left: r.left, right: r.right }; });
+    });
+    assert.ok(dimensions.every(r => r.width >= 44 && r.height >= 44 && r.left >= 0 && r.right <= width), `Plan controls fit at ${width}px`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
   await page.locator("#plan-title").fill("A draft for our next call");
   await primary.getByRole("link", { name: "Turns", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Who’s taking the next turn?" })).toBeVisible();

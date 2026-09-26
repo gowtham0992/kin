@@ -91,6 +91,35 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
 }
 
 describe("reviewed one-time check-in editing", () => {
+  it.each(["1", "7"])("previews %s scheduled dates with readable minutes and the local time zone", async repeat => {
+    const ui = await fixture([]), due = ui.element("plan-due")!, frequency = ui.element("plan-repeat")!;
+    due.value = "2026-09-09T18:00"; frequency.value = repeat; await frequency.emit("change");
+    const format = (value: string) => new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(value));
+    expect(ui.element("workspace-content")!.textContent).toContain(repeat === "1"
+      ? `1 check-in · ${format(due.value)}`
+      : `7 check-ins · ${format(due.value)} through ${format("2026-09-15T18:00")}. Stops after the last check-in; it does not renew.`);
+    expect(ui.bodies()).toEqual([]);
+  });
+
+  it.each([false, true])("keeps essential scheduling guidance visible and moves optional editing help after Save (reschedule=%s)", async enabled => {
+    const ui = await fixture([], true, enabled);
+    const form = ui.element("workspace-content")!.descendants().find(el => el.tagName === "FORM")!;
+    const save = form.children.find(el => el.tagName === "BUTTON" && el.type === "submit")!;
+    const help = ui.element("plan-editing-help")!;
+    expect(help?.tagName).toBe("DETAILS");
+    expect(help.children[0]?.textContent).toBe("Changing a plan later");
+    expect(form.children.indexOf(help)).toBeGreaterThan(form.children.indexOf(save));
+    expect(help.textContent).toContain("future, untouched check-ins");
+    expect(help.textContent).toContain(enabled ? "A one-time check-in can also move to a new time." : "To change a time, cancel the old check-in or routine");
+    const alert = ui.element("plan-notification-note")!, draft = ui.element("plan-draft-note")!, limit = ui.element("plan-time-note")!;
+    expect(form.children).toContain(alert); expect(form.children).toContain(draft); expect(form.children).toContain(limit);
+    expect(alert.textContent).toBe("Missed check-ins may notify the caregiver on duty.");
+    expect(form.children.indexOf(alert)).toBeLessThan(form.children.indexOf(save));
+    expect(limit.textContent).toBe("Keep every check-in within the next 30 days.");
+    expect(draft.textContent).toContain("Reloading this page or closing the session clears it.");
+    expect(ui.bodies()).toEqual([]);
+  });
+
   it("puts upcoming plans before earlier open check-ins and keeps outcomes in separate history", async () => {
     const tasks = [
       single("done", { title: "Recorded call", state: "done", dueAt: "2026-09-07T15:00:00.000Z" }),

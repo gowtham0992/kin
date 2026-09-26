@@ -187,6 +187,14 @@
 }
 .care-plan-create { margin-top: 24px; }
 .care-plan-create > h3 { font: 400 28px/1.25 Georgia, serif; letter-spacing: -.02em; margin: 0 0 24px; }
+.care-plan-create .care-plan-time-note { margin: 8px 0 0; }
+.care-plan-create .care-plan-preview { margin: 24px 0 16px; padding: 12px 16px; border-left: 2px solid var(--sage); background: var(--paper-deep); color: var(--ink); }
+.care-plan-create .care-plan-notification-note { margin: 0 0 16px; }
+.care-plan-create .care-plan-draft-note { margin: 16px 0 0; }
+.workspace-page #workspace-content .care-plan-editing-help { margin: 24px 0 0; padding: 0; }
+.care-plan-editing-help > summary { min-height: 48px; padding: 12px 0; box-sizing: border-box; color: var(--sage); font-size: 14px; }
+.care-plan-editing-help > p { margin: 0 0 16px; }
+@media (max-width: 620px) { .care-plan-create > button[type="submit"] { width: 100%; } }
 .care-plan-group { margin-top: 40px; min-width: 0; }
 .care-plan-group-title { font-size: 13px; line-height: 1.5; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--sage); margin: 0 0 12px; }
 .care-plan-group > .care-note { max-width: 72ch; }

@@ -588,7 +588,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       repeat.value = draft.repeat;
       const remember = () => planDraft.update({ title: title.value, due: due.value, repeat: repeat.value });
       for (const field of [title, due, repeat]) { field.addEventListener("input", remember); field.addEventListener("change", remember); }
-      const preview = node("p", "", "care-note"); preview.setAttribute("role", "status");
+      const preview = node("p", "", "care-note care-plan-preview"); preview.setAttribute("role", "status");
       function occurrences() {
         const first = new Date(due.value), times = [];
         const localStamp = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
@@ -602,14 +602,21 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       }
       function updatePreview() {
         if (!due.value) { preview.textContent = "Choose a start time to review the dates."; return; }
-        try { const times = occurrences(); preview.textContent = `${times.length} check-in${times.length === 1 ? "" : "s"} · ${new Date(times[0]).toLocaleString()}${times.length > 1 ? ` through ${new Date(times.at(-1)).toLocaleString()}. Stops after the last check-in; it does not renew.` : ""}`; }
+        try { const times = occurrences(); preview.textContent = `${times.length} check-in${times.length === 1 ? "" : "s"} · ${timestamp(times[0])}${times.length > 1 ? ` through ${timestamp(times.at(-1))}. Stops after the last check-in; it does not renew.` : ""}`; }
         catch (error) { preview.textContent = error.message; }
       }
       due.addEventListener("change", updatePreview); repeat.addEventListener("change", updatePreview); updatePreview();
       const submit = node("button", "Save care plan", "primary"); submit.type = "submit";
-      const note = node("p", `Keep every check-in within the next 30 days. You can rename or cancel future, untouched check-ins below. ${data.features?.reschedule === true ? "A one-time check-in can also move to a new time. For a routine, cancel its future check-ins and schedule a new routine." : "To change a time, cancel the old check-in or routine and schedule a new one."} Missed check-ins may notify the caregiver on duty.`, "care-note");
-      form.append(titleLabel, title, dueLabel, due, repeatLabel, repeat, preview, note,
-        node("p", "Your draft stays while switching Kin tabs. Reloading this page or closing the session clears it.", "care-note"), submit);
+      const timeNote = node("p", "Keep every check-in within the next 30 days.", "care-note care-plan-time-note");
+      timeNote.id = "plan-time-note"; due.setAttribute("aria-describedby", timeNote.id);
+      const alertNote = node("p", "Missed check-ins may notify the caregiver on duty.", "care-note care-plan-notification-note");
+      alertNote.id = "plan-notification-note";
+      const draftNote = node("p", "Your draft stays while switching Kin tabs. Reloading this page or closing the session clears it.", "care-note care-plan-draft-note");
+      draftNote.id = "plan-draft-note";
+      const editingHelp = node("details", null, "care-plan-editing-help"); editingHelp.id = "plan-editing-help";
+      editingHelp.append(node("summary", "Changing a plan later"),
+        node("p", `You can rename or cancel future, untouched check-ins below. ${data.features?.reschedule === true ? "A one-time check-in can also move to a new time. For a routine, cancel its future check-ins and schedule a new routine." : "To change a time, cancel the old check-in or routine and schedule a new one."}`, "care-note"));
+      form.append(titleLabel, title, dueLabel, due, timeNote, repeatLabel, repeat, preview, alertNote, submit, draftNote, editingHelp);
       form.addEventListener("submit", event => {
         event.preventDefault(); if (!form.reportValidity()) return;
         const when = new Date(due.value);
