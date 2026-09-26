@@ -1,5 +1,5 @@
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryCareStore, type CareTask } from "../src/domain.js";
 import { createHttpApp } from "../src/http.js";
 import { AccessDeniedError } from "../src/auth.js";
@@ -11,6 +11,37 @@ const task: CareTask = { id: "water", title: "Synthetic water", dueAt: now.toISO
   lastResponse: null, confirmedAt: null, confirmedBy: null };
 
 describe("committed confirmation recovery through real HTTP authorization", () => {
+  it.each(["before", "after"])("closes an unconfirmed first save when access is revoked %s commit", async phase => {
+    const store = new InMemoryCareStore([task], () => now);
+    let revoked = phase === "before";
+    const original = store.confirm.bind(store);
+    vi.spyOn(store, "confirm").mockImplementation(async (...args) => {
+      const result = await original(...args);
+      revoked = true; // The handler's real final authorization check must deny.
+      return result;
+    });
+    const app = createHttpApp(store, undefined, {
+      accessAuthorizer: { async authorize() { return { subject: "synthetic", claims: { iss: "https://synthetic.invalid" }, scopes: new Set(["mcp:tools"]) }; } },
+      familyAccess: { circleId: "family", directory: { async find() {
+        return { circleId: "family", memberId: "maya", name: "Maya", role: "caregiver", status: revoked ? "revoked" : "active" };
+      } } },
+    });
+    const calls: string[] = [];
+    const client = createWorkspaceClient({ newRequestId: () => "first-save-revoked", request: async (url: string, init: RequestInit) => {
+      calls.push(url);
+      const response = await request(app).post(url).set("authorization", "Bearer synthetic").send(JSON.parse(init.body as string));
+      return { ok: response.ok, status: response.status, json: async () => response.body };
+    } });
+    const failure = await client.confirm({ taskId: task.id, response: "done", actor: "Maya", expected: taskReview(task) }).catch((error: unknown) => error);
+    expect((await store.today()).tasks[0]?.state).toBe(phase === "after" ? "done" : "scheduled");
+    expect(failure).toMatchObject({ status: 403, outcomeUnknown: true, definitiveRejection: false });
+    expect(client.pending?.requestId).toBe("first-save-revoked");
+    client.reset();
+    expect(client.pending).toBeNull();
+    await expect(client.retry()).rejects.toThrow("No pending");
+    expect(calls).toEqual(["/api/tasks/water/confirm"]);
+  });
+
   it.each([401, 403])("retains the committed request through a later %s, then resolves its original receipt", async status => {
     const store = new InMemoryCareStore([task], () => now);
     let denied = false, loseResponse = true;

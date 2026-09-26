@@ -43,7 +43,15 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
     const revision = generation;
     const response = await request(url, { cache: "no-store", signal: AbortSignal.timeout(8000), ...options });
     if (revision !== generation) throw Object.assign(new Error("Session changed"), { stale: true });
-    if (!response.ok) throw Object.assign(new Error("Request failed"), { status: response.status, definitiveRejection: [400, 401, 403, 404, 422].includes(response.status) || (response.status === 409 && /\/confirm$/.test(url)) });
+    if (!response.ok) {
+      // A final authorization recheck can deny a response after committing.
+      // Close the private workspace, but preserve its opaque save reference;
+      // HTTP status alone cannot tell a denied write from a denied receipt.
+      const outcomeUnknown = [401, 403].includes(response.status) && ["POST", "PUT", "DELETE", "PATCH"].includes(options.method);
+      throw Object.assign(new Error("Request failed"), { status: response.status,
+        definitiveRejection: !outcomeUnknown && ([400, 401, 403, 404, 422].includes(response.status) || (response.status === 409 && /\/confirm$/.test(url))),
+        ...(outcomeUnknown ? { outcomeUnknown: true } : {}) });
+    }
     const data = await response.json();
     if (revision !== generation) throw Object.assign(new Error("Session changed"), { stale: true });
     return data;

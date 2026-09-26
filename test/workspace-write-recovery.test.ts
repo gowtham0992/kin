@@ -14,6 +14,16 @@ const cases = [
 ];
 
 describe.each(cases)("$name retry uncertainty", scenario => {
+  it.each([401, 403])("keeps a first %s write outcome unknown until session cleanup, without automatically resending", async status => {
+    let calls = 0;
+    const client = createWorkspaceClient({ newRequestId: () => requestId, request: async () => { calls++; return { ok: false, status }; } });
+    await expect(scenario.save(client)).rejects.toMatchObject({ status, outcomeUnknown: true, definitiveRejection: false });
+    expect(client.pending?.requestId).toBe(requestId);
+    client.reset(); expect(client.pending).toBeNull();
+    await expect(client.retry()).rejects.toThrow("No pending");
+    expect(calls).toBe(1);
+  });
+
   it.each([400, 401, 403, 404, 422])("does not interpret a later %s denial as proof the earlier write failed", async status => {
     const bodies: string[] = [];
     const client = createWorkspaceClient({ newRequestId: () => requestId, request: async (_url: string, init: RequestInit) => {

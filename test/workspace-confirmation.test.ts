@@ -43,10 +43,11 @@ async function fixture() {
     if (loseNextSave) { loseNextSave = false; throw new Error("Synthetic lost committed response"); }
     return { ok: true, json: async () => result };
   });
-  const page = createWorkspace({ request, onAccessLost: vi.fn(), onInvite() {}, onLeaveInvite() {} }); close = page.reset;
+  const onAccessLost = vi.fn();
+  const page = createWorkspace({ request, onAccessLost, onInvite() {}, onLeaveInvite() {} }); close = page.reset;
   await page.open();
   const firstRow = () => get("workspace-content").descendants().find(item => item.tagName === "LI")!;
-  return { store, get, request, loseNextSave: () => { loseNextSave = true; },
+  return { store, get, request, onAccessLost, loseNextSave: () => { loseNextSave = true; },
     button: (label: string) => firstRow().descendants().find(item => item.tagName === "BUTTON" && item.textContent === label)!,
     bodies: () => request.mock.calls.filter(([url]) => url.endsWith("/confirm")).map(([, options]) => JSON.parse(options!.body!)),
     async settled() { await vi.waitFor(() => expect(get("workspace-status").textContent).not.toBe("Saving…")); },
@@ -54,6 +55,25 @@ async function fixture() {
 }
 
 describe("reviewed direct Today confirmations", () => {
+  it("clears private content after a post-commit access denial while preserving only the opaque save reference", async () => {
+    const ui = await fixture(), original = ui.request.getMockImplementation()!;
+    const displayed = (await ui.store.today()).tasks[0]!;
+    ui.request.mockImplementation(async (...args) => {
+      const result = await original(...args);
+      return args[0].endsWith("/confirm") ? { ok: false, status: 403, json: async () => ({ error: "family_access_denied" }) } : result;
+    });
+    ui.button("Done").click();
+    await vi.waitFor(() => expect(ui.onAccessLost).toHaveBeenCalled());
+    expect((await ui.store.today()).tasks.find(task => task.id === displayed.id)?.state).toBe("done");
+    expect(ui.bodies()).toHaveLength(1);
+    expect(ui.onAccessLost).toHaveBeenCalledExactlyOnceWith(403, { outcomeUnknown: true, requestId: ui.bodies()[0].requestId });
+    expect(ui.get("workspace-content").childElementCount).toBe(0);
+    expect(ui.get("workspace-identity").textContent).toBe("");
+    expect(ui.get("workspace").hidden).toBe(true);
+    expect(ui.get("workspace-retry-write").hidden).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(ui.bodies()).toHaveLength(1);
+  });
   it.each([["Done", "done"], ["Not yet", "not_yet"], ["Skip today", "skipped"]])("binds %s to every displayed task field", async (label, response) => {
     const ui = await fixture();
     const displayed = (await ui.store.today()).tasks[0]!;

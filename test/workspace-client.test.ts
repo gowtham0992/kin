@@ -139,10 +139,11 @@ describe("authenticated workspace requests", () => {
     client.reset(); resolve({ privateData: "old family" });
     await expect(read).rejects.toMatchObject({ stale: true });
   });
-  it("clears a definitively denied check-in without retrying it", async () => {
+  it("retains the opaque reference on a denied write until the private session is cleared, without retrying", async () => {
     const request = vi.fn(async () => ({ ok: false, status: 403 }));
     const client = createWorkspaceClient({ request, newRequestId: () => "denied-request" });
-    await expect(client.confirm({ taskId: "water", response: "done", actor: "Maya" })).rejects.toMatchObject({ status: 403 });
-    expect(client.pending).toBeNull(); expect(request).toHaveBeenCalledTimes(1);
+    await expect(client.confirm({ taskId: "water", response: "done", actor: "Maya" })).rejects.toMatchObject({ status: 403, outcomeUnknown: true, definitiveRejection: false });
+    expect(client.pending.requestId).toBe("denied-request");
+    client.reset(); expect(client.pending).toBeNull(); expect(request).toHaveBeenCalledTimes(1);
   });
 });

@@ -137,6 +137,26 @@ try {
   await expect(page.locator("#invite-status")).not.toContainText("Drink a glass of water");
   await page.unroute("**/api/tasks/*/undo");
 
+  // Direct replies also need the closed-session warning on their first attempt.
+  for (const status of [401, 403]) {
+    await externalResponse("not_yet"); await page.reload();
+    const attempts = [];
+    await page.route("**/api/tasks/*/confirm", async route => {
+      attempts.push(route.request().postDataJSON());
+      const response = await route.fetch(); assert.equal(response.ok(), true);
+      await route.fulfill({ status, json: { error: "family_access_denied" } });
+    });
+    await row().getByRole("button", { name: "Done", exact: true }).click();
+    await expect(page.locator("#workspace")).toBeHidden();
+    await expect(page.locator("#workspace-content")).toBeEmpty();
+    await expect(page.locator("#workspace-identity")).toBeEmpty();
+    await expect(page.locator("#invite-status")).toContainText("pending change may have completed");
+    await expect(page.locator("#invite-status")).toContainText(`Reference: ${attempts[0].requestId}`);
+    await expect(page.locator("#invite-status")).not.toContainText("Drink a glass of water");
+    assert.equal((await currentTask()).state, "done"); assert.equal(attempts.length, 1);
+    await page.unroute("**/api/tasks/*/confirm");
+  }
+
   // No action when the backend advertises no support; no offer after page/session reload.
   await externalResponse("not_yet"); await page.reload(); await saveDone(); await page.reload(); await expect(open).toHaveCount(0);
   await externalResponse("not_yet");
@@ -163,7 +183,7 @@ try {
   await page.screenshot({ path: path.join(output, "expired.png"), fullPage: true });
   assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
   console.log(JSON.stringify({ result: "pass", viewports: [320, 375, 768, 1280], undoRequests: undoWrites.length, contrast: ratios,
-    assertions: ["keyboard", "account attribution", "exact not-yet restoration", "decline", "lost-response exact retry", "disabled-retry-keeps-undo-uncertain", "malformed receipt", "post-commit access loss", "competing controls lock", "stale review/write", "viewer/feature gate", "reload clears", "expiry"], errors, blocked, output }, null, 2));
+    assertions: ["keyboard", "account attribution", "exact not-yet restoration", "decline", "lost-response exact retry", "disabled-retry-keeps-undo-uncertain", "malformed receipt", "post-commit access loss", "first-reply-denial-clears-private-ui-with-save-reference", "competing controls lock", "stale review/write", "viewer/feature gate", "reload clears", "expiry"], errors, blocked, output }, null, 2));
 } finally {
   await browser?.close();
   child.kill("SIGTERM");

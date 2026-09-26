@@ -36,7 +36,7 @@ describe("circle change retry contract", () => {
     expect(client.pending).toBeNull();
   });
 
-  it.each([400, 401, 403, 404, 409, 422])("releases a definitive rejection (%s) for a fresh review", async status => {
+  it.each([400, 404, 409, 422])("releases a definitive rejection (%s) for a fresh review", async status => {
     const client = createWorkspaceClient({ request: async () => ({ ok: false, status }), newRequestId: () => "roster-request-1" });
     await expect(client.changeRoster(add)).rejects.toMatchObject({ status });
     expect(client.pending).toBeNull();

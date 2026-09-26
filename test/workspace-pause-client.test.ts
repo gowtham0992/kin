@@ -30,9 +30,16 @@ describe("reviewed plan-pause client", () => {
     const client = createWorkspaceClient({ request: async () => ok({ ...result, ...patch }), newRequestId: () => requestId });
     await expect(client.pausePlan(proposal)).rejects.toThrow("Receipt mismatch"); expect(client.pendingKind).toBe("plan pause");
   });
-  it.each([400, 401, 403, 404, 409])("clears a definitive no-write status %s", async status => {
+  it.each([400, 404, 409])("clears a definitive no-write status %s", async status => {
     const client = createWorkspaceClient({ request: async () => ({ ok: false, status }), newRequestId: () => requestId });
     await expect(client.pausePlan(proposal)).rejects.toMatchObject({ status }); expect(client.pending).toBeNull();
+  });
+  it.each([401, 403])("preserves an unconfirmed pause reference on initial access denial %s until session reset", async status => {
+    const request = vi.fn(async () => ({ ok: false, status }));
+    const client = createWorkspaceClient({ request, newRequestId: () => requestId });
+    await expect(client.pausePlan(proposal)).rejects.toMatchObject({ status, outcomeUnknown: true, definitiveRejection: false });
+    expect(client.pending.requestId).toBe(requestId);
+    client.reset(); expect(client.pending).toBeNull(); expect(request).toHaveBeenCalledOnce();
   });
   it("rejects late receipts after reset and never restores a private pending draft", async () => {
     let release!: (value: unknown) => void;
