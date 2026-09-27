@@ -152,7 +152,17 @@ async function main() {
   const config = await json<{ context: Record<string, unknown> }>(path.join(root, "cdk.json"));
   if (!config.context || typeof config.context !== "object" || Array.isArray(config.context)) throw new Error("Missing CDK context");
   const before = await inputHashes();
-  const cached = await assemblySnapshot(path.join(root, "cdk.out"), false);
+  const cachedDirectory = path.join(root, "cdk.out");
+  // Only an absent cache root is optional. A present, malformed or symlinked
+  // assembly must still fail validation rather than silently lose its baseline.
+  const hasCache = await lstat(cachedDirectory).then(() => true, (error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  });
+  const cached = hasCache ? await assemblySnapshot(cachedDirectory, false) : null;
+  const cachedBaselineIssues = cached?.issues ?? [
+    "No cached cdk.out baseline exists; no baseline comparison or rollback verification was performed.",
+  ];
   const releaseDirectory = await mkdtemp(path.join(tmpdir(), "kin-consolidated-release-"));
   const outdir = path.join(releaseDirectory, "cdk.out");
   console.error(`Preparing local candidate in ${releaseDirectory}; cached cdk.out remains untouched.`);
@@ -191,7 +201,7 @@ async function main() {
   }
   const after = await inputHashes();
   if (before.sha256 !== after.sha256) throw new Error(`Source changed during synthesis; candidate at ${releaseDirectory} is not releasable`);
-  const comparisons = current.stacks.map(stack => {
+  const comparisons = cached ? current.stacks.map(stack => {
     const prior = cached.stacks.find(item => item.name === stack.name)!;
     const paths = changedPaths(prior.template, stack.template);
     const knownFunctions = new Set(Object.entries(stack.template.Resources).filter(([, item]) => item.Type === "AWS::Lambda::Function" &&
@@ -203,16 +213,19 @@ async function main() {
     return { stack: stack.name, cachedTemplateSha256: prior.templateSha256, candidateTemplateSha256: stack.templateSha256,
       changedTemplatePaths: paths, nonCodeChangesRequiringReview: paths.filter(item => !codeOnlyPath(item)),
       changedManifestArtifactPaths: changedPaths(prior.artifact, stack.artifact) };
-  });
+  }) : [];
   const report = {
     status: "local-candidate-not-deployed", createdAt: new Date().toISOString(),
-    comparisonScope: "Cached local cdk.out only; not the live AWS template, parameters, IAM, drift, alarms or delivery state",
+    comparisonScope: cached
+      ? "Cached local cdk.out only; not the live AWS template, parameters, IAM, drift, alarms or delivery state"
+      : "No cached baseline; candidate inventory only. No live comparison or rollback verification.",
     releaseDirectory, assemblyDirectory: outdir,
     revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
     runtime: { node: process.version, cdk: require("aws-cdk-lib/package.json").version, esbuild: require("esbuild/package.json").version },
     configContext: config.context, synthesisMetadataContext, sourceInputs: before,
-    cached: { directory: cached.directory, manifestSha256: cached.manifestSha256, issues: cached.issues,
-      stacks: cached.stacks.map(({ template: _template, ...stack }) => stack) },
+    cached: cached ? { directory: cached.directory, manifestSha256: cached.manifestSha256, issues: cached.issues,
+      stacks: cached.stacks.map(({ template: _template, ...stack }) => stack) } : null,
+    cachedBaselineIssues,
     candidate: { manifestSha256: current.manifestSha256, manifest: current.manifest,
       stacks: current.stacks.map(({ template: _template, ...stack }) => stack) },
     voiceCandidate: { directory: voiceOutdir, manifestSha256: voice.manifestSha256, manifest: voice.manifest,
@@ -232,7 +245,7 @@ async function main() {
   await writeFile(reportFile, `${JSON.stringify(report, null, 2)}\n`, { flag: "wx" });
   console.log(JSON.stringify({ status: report.status, reportFile, assemblyDirectory: outdir, sourceSha256: before.sha256,
     voiceAssemblyDirectory: voiceOutdir,
-    cachedBaselineIssues: cached.issues, comparisons }, null, 2));
+    cachedBaselineIssues, comparisons }, null, 2));
 }
 
 await main();
