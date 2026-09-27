@@ -189,5 +189,8 @@ app.use(createHttpApp(store, undefined, {
       expiresAt: Math.floor(Date.now() / 1000) + 86400, memberId: input.memberId, role: input.role };
   } },
 }));
-const server = app.listen(port, "127.0.0.1", () => console.log(`Synthetic invitation preview (${mode}): http://127.0.0.1:${port}/invite.html`));
+const server = app.listen(port, "127.0.0.1", (error?: Error) => {
+  if (error) throw error;
+  console.log(`Synthetic invitation preview (${mode}): http://127.0.0.1:${port}/invite.html`);
+});
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => server.close(() => process.exit(0)));

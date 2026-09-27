@@ -33,4 +33,7 @@ const controls=createPushControls({container:document.getElementById('push'),req
 async function show(){mode=document.getElementById('scenario').value;local=['saved','mismatch'].includes(mode)?subscription:null;saved=!!local;notification.permission=mode==='denied'?'denied':saved?'granted':'default';await controls.open({publicKey:btoa('x'.repeat(65)),consentVersion:'synthetic'});document.querySelector('details').open=true;}
 document.getElementById('scenario').addEventListener('change',show);await show();
 </script></main></body></html>`));
-app.listen(port, "127.0.0.1", () => console.log(`Synthetic notification preview: http://127.0.0.1:${port}`));
+app.listen(port, "127.0.0.1", (error?: Error) => {
+  if (error) throw error;
+  console.log(`Synthetic notification preview: http://127.0.0.1:${port}`);
+});

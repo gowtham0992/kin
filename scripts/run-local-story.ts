@@ -15,7 +15,9 @@ if (options.help) {
 const { port, model } = options;
 const client = model ? createLocalStoryBedrockClient(model) : undefined;
 const intentGenerator = model ? createBedrockIntentGenerator({ ...model, client }) : undefined;
-const server = createLocalStoryApp({ intentGenerator }).listen(port, "127.0.0.1", () => {
+const server = createLocalStoryApp({ intentGenerator }).listen(port, "127.0.0.1", (error?: Error) => {
+  // The error listener below owns client cleanup and the unsuccessful exit.
+  if (error) return;
   console.log(`Kin local story: http://127.0.0.1:${port}/story.html — synthetic data, simulated notifications, no Alexa device connection.`);
   console.log(model ? "Amazon Nova is available only for explicitly opted-in requests (20 attempts per process). AWS model charges may apply."
     : "Simple check-in replies and exact commands stay local. No AWS model or notification calls.");

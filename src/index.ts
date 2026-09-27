@@ -6,7 +6,8 @@ if (!Number.isInteger(port) || port < 1 || port > 65_535) {
 }
 
 const app = createConfiguredApp();
-const server = app.listen(port, "127.0.0.1", () => {
+const server = app.listen(port, "127.0.0.1", (error?: Error) => {
+  if (error) throw error;
   console.log(`Kin MCP server listening at http://127.0.0.1:${port}/mcp`);
 });
 

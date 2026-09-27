@@ -26,7 +26,7 @@ const app = createHttpApp(createDemoStore(), undefined, {
     forRecipient: async () => null, removeExpired: async () => {},
   } },
 });
-const server = await new Promise(resolve => { const running = app.listen(0, "127.0.0.1", () => resolve(running)); });
+const server = await new Promise((resolve, reject) => { const running = app.listen(0, "127.0.0.1", error => error ? reject(error) : resolve(running)); });
 const origin = `http://127.0.0.1:${server.address().port}`;
 let browser;
 try {
