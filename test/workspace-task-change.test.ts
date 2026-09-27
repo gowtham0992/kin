@@ -45,7 +45,7 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
   const request = vi.fn(async (url: string, options: { body?: string } = {}) => {
     if (url === "/api/session") return { ok: true, json: async () => ({ name: "Maya", role: "caregiver", permissions: { confirm: true, manageDuty, closeUnanswered: manageDuty && closeUnanswered, invite: false } }) };
     if (url === "/api/plan") return { ok: true, json: async () => ({ tasks: structuredClone(tasks), features: { reschedule } }) };
-    if (url === "/api/today") return { ok: true, json: async () => ({ date: "2026-09-08", tasks: [], summary: { total: 0, completed: 0 }, escalations: [], onDuty: null }) };
+    if (url === "/api/today") return { ok: true, json: async () => ({ date: "2026-09-08", tasks: tasks.filter(task => task.dueAt.startsWith("2026-09-08")), summary: { total: tasks.filter(task => task.dueAt.startsWith("2026-09-08")).length, completed: 0 }, escalations: [], onDuty: null }) };
     const match = /^\/api\/(tasks|routines)\/([^/]+)\/change$/.exec(url);
     if (!match) throw new Error(`Unexpected request: ${url}`);
     if (conflict) return { ok: false, status: 409 };
@@ -91,6 +91,23 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
 }
 
 describe("reviewed one-time check-in editing", () => {
+  it("puts today's reply actions before secondary closure without changing consent", async () => {
+    const overdue = single("today-overdue", { dueAt: "2026-09-08T14:00:00.000Z" });
+    const ui = await fixture([overdue], true, false, true);
+    await ui.navigate("today");
+    const elements = ui.element("workspace-content")!.descendants();
+    const replies = elements.filter(element => element.tagName === "BUTTON" && ["Done", "Not yet", "Skip today"].includes(element.textContent));
+    const closure = elements.find(element => element.tagName === "SUMMARY" && element.textContent === "Close without a reply")!;
+    expect(replies.map(element => element.textContent)).toEqual(["Done", "Not yet", "Skip today"]);
+    expect(closure).toBeDefined();
+    for (const reply of replies) expect(elements.indexOf(reply)).toBeLessThan(elements.indexOf(closure));
+    const editor = ui.edit(overdue.id);
+    expect(editor.consent.required).toBe(true);
+    expect(editor.consent.checked).toBe(false);
+    expect(editor.form.textContent).toContain("not as done or skipped");
+    await ui.submit(editor);
+    expect(ui.bodies()).toEqual([]);
+  });
   it.each<Partial<CareTask>>([
     { state: "cancelled" }, { state: "done" }, { state: "skipped" },
     { state: "closed_unanswered" }, { dueAt: "2026-09-08T15:00:00.000Z" },

@@ -413,10 +413,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     if (member.permissions.confirm) header.append(authorNote());
     const list = node("ul", null, "care-plan");
     for (const task of data.tasks) {
-      const item = node("li"), copy = node("div");
+      const item = node("li", null, "care-check-in"), copy = node("div");
       copy.append(node("p", `${timestamp(task.dueAt)} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state === "scheduled" ? task.lastResponse === "not_yet" ? "Not yet" : "Awaiting check-in" : task.state}`, "kicker"), node("h3", task.title));
       if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
-      if (canCloseUnanswered(task)) copy.append(taskChangeEditor(task, false, true));
       if (task.confirmedBy) copy.append(node("p", `Via ${task.confirmedBy}’s Kin account · ${timestamp(task.confirmedAt)}`, "care-note"));
       item.append(copy);
       if (member.permissions.confirm && task.state === "scheduled") {
@@ -428,6 +427,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         }
         item.append(actions);
       }
+      if (canCloseUnanswered(task)) item.append(taskChangeEditor(task, false, true));
       list.append(item);
     }
     if (!data.tasks.length) {

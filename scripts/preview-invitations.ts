@@ -10,7 +10,7 @@ import { createMemoryRosterManagement, type RosterMemberRecord } from "../src/ro
 const mode = process.argv[2] ?? "success";
 const port = Number(process.argv[3] ?? 3014);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid preview port");
-if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content", "week-sources", "week-comparison"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "today-closure", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content", "week-sources", "week-comparison"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
 // Optional bounded delay for inspecting the real workspace loading UI locally.
@@ -29,7 +29,10 @@ if (mode === "long-content") {
   rosterMembers[1]!.name = "Alexandria-Catherine Montgomery-Worthington · synthetic caregiver";
   rosterMembers[2]!.name = "LongUnbrokenSyntheticCaregiverName".repeat(2);
 }
-const store = mode === "week-comparison"
+const store = mode === "today-closure"
+  ? new InMemoryCareStore([{ id: "close-today", title: "A call together — synthetic check-in", dueAt: "2026-09-08T14:00:00.000Z",
+      state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null }], () => new Date("2026-09-08T15:00:00.000Z"), null, "America/Denver", [], rosterMembers)
+  : mode === "week-comparison"
   ? new InMemoryCareStore(Array.from({ length: 4 }, (_, index) => ({ id: `comparison-test-${index}`, title: `Synthetic conversation ${index + 1}`,
       dueAt: new Date(Date.now() - (index < 2 ? 24 : 192) * 3_600_000 - index * 3_600_000).toISOString(),
       state: index === 0 || index >= 2 ? "done" as const : "scheduled" as const,
@@ -153,7 +156,7 @@ if (mode === "mcp-family") {
 }
 app.use(createHttpApp(store, undefined, {
   rescheduleEnabled: process.env.KIN_PREVIEW_RESCHEDULE === "true",
-  closeUnansweredEnabled: process.env.KIN_PREVIEW_CLOSE_UNANSWERED === "true",
+  closeUnansweredEnabled: mode === "today-closure" || process.env.KIN_PREVIEW_CLOSE_UNANSWERED === "true",
   // No canonical HTTPS resource belongs to this loopback-only synthetic
   // account proxy. The real socket's origin guard and bearer checks apply.
   rosterManagement: mode.startsWith("roster") ? rosterManagement : undefined,

@@ -244,6 +244,9 @@
 .workspace-page .care-plan h3 { font-size: 28px; line-height: 1.25; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .workspace-page .care-plan .kicker { color: var(--sage); font-size: 11px; letter-spacing: .09em; }
 .workspace-page .care-plan .care-actions { gap: 8px; }
+.workspace-page .care-plan li.care-check-in { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 24px; }
+#workspace-content .care-check-in > details { grid-column: 1 / -1; margin-top: 0; padding: 12px 0 0; }
+#workspace-content .care-check-in > details > summary { min-height: 44px; box-sizing: border-box; padding: 10px 0; font-size: 14px; color: var(--muted); }
 .workspace-page .care-alerts { padding: 28px 32px; }
 .workspace-page .care-alerts > h3 { font: 400 26px/1.2 Georgia, serif; letter-spacing: -.02em; margin-bottom: 12px; }
 .workspace-page .care-alerts > p { max-width: 72ch; }
@@ -253,6 +256,7 @@
   .care-duty-card { padding-left: 24px; }
   .workspace-page .care-plan li { flex-wrap: wrap; }
   .workspace-page .care-plan li > div:first-child { flex-basis: 100%; }
+  .workspace-page .care-plan li.care-check-in { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 620px) {
   .care-today { display: block; }
