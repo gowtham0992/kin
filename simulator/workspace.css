@@ -161,6 +161,10 @@
 .care-duty-week label { font-weight: 700; }
 .care-duty-week .care-roster-row > div:first-child { min-width: 0; }
 .care-duty-week .duty-review .care-actions { margin-top: 16px; }
+@media (max-width: 620px) {
+  .care-duty-week .care-roster-row { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 24px 0; }
+  .care-duty-week .care-roster-row > select { width: 100%; }
+}
 .care-brief-heading > p:not(.kicker) { max-width: 68ch; font-size: 18px; }
 .care-brief-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 48px; margin: 32px 0; border-top: 1px solid var(--line); }
 .care-brief-section { min-width: 0; padding: 32px 0; border-bottom: 1px solid var(--line); }

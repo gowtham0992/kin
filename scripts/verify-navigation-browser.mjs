@@ -96,6 +96,19 @@ try {
   await primary.getByRole("link", { name: "Turns", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Who’s taking the next turn?" })).toBeVisible();
   await expect(page).toHaveURL(`${origin}/invite.html#turns`);
+  for (const width of [320, 375, 620, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const rows = await page.locator('.care-duty-week .care-roster-row').evaluateAll(rows => rows.map(row => {
+      const r = row.getBoundingClientRect(), s = row.querySelector('select').getBoundingClientRect();
+      const label = row.querySelector('label').getBoundingClientRect(), button = row.querySelector('button').getBoundingClientRect();
+      return { rowWidth: r.width, selectWidth: s.width, selectHeight: s.height, left: s.left, right: s.right,
+        belowLabel: s.top >= label.bottom, buttonBelow: button.top >= s.bottom, buttonHeight: button.height };
+    }));
+    assert.equal(rows.length, 7);
+    assert.ok(rows.every(r => r.selectHeight >= 44 && r.buttonHeight >= 44 && r.left >= 0 && r.right <= width), `Duty controls fit at ${width}px`);
+    if (width <= 620) assert.ok(rows.every(r => Math.abs(r.selectWidth - r.rowWidth) < 1 && r.belowLabel && r.buttonBelow), `Phone duty rows use full-width choices at ${width}px`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
   await page.goBack();
   await expect(page.locator("#plan-title")).toHaveValue("A draft for our next call");
   await page.goto(`${origin}/invite.html#circle`);
