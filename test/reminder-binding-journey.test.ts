@@ -85,6 +85,13 @@ describe("consented reminder binding through MCP, Echo and cancellation", () => 
         session: { new: false, sessionId: "session", application: system.application, attributes },
         request: { type: "IntentRequest", requestId: name, timestamp: new Date(now).toISOString(), locale: "en-US", intent: { name } } });
       const proposal = await handle(event("NextCheckInReminderIntent"));
+      const consentSpeech = (proposal.response.outputSpeech as { ssml: string }).ssml;
+      expect(consentSpeech).toContain("Set one reminder");
+      expect(consentSpeech).toContain("Others nearby may hear it");
+      expect(consentSpeech).toContain("completed, skipped or cancelled");
+      expect(consentSpeech).toContain("may be delayed or fail");
+      expect(consentSpeech).toContain("Alexa app. Yes or no?");
+      expect(consentSpeech.split(/\s+/).length).toBeLessThanOrEqual(45);
       expect(JSON.stringify(proposal)).toContain("request cancellation"); expect(fetcher).not.toHaveBeenCalled();
       expect([...db.rows.values()].some(row => row.entityType === "ReminderTicket")).toBe(false);
       await handle(event("AMAZON.YesIntent", proposal.sessionAttributes));

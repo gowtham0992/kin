@@ -92,7 +92,8 @@ export function createEchoCareVoice(care: EchoCareClient, now: () => number = Da
     return say(input, `${introduction} ${rows.map((row, index) => describeRow(row, index, rows)).join(" ")} Say mark check-in one done, or help.${next}`, "Choose a check-in by number, say repeat, or say today's plan.");
   }
   function saySingle(input: HandlerInput, row: VoiceState["rows"][number]) {
-    return say(input, `${row.review.title}, ${formatTime(row.review.dueAt, now())}.${row.review.lastResponse === "not_yet" ? " You last said not yet." : ""} Say done, not yet, or skip. Say next for another check-in.`, "For this check-in, say done, not yet, skip, or next.");
+    const actions = offerReminder ? "Say done, not yet, skip, or remind me." : "Say done, not yet, or skip.";
+    return say(input, `${row.review.title}, ${formatTime(row.review.dueAt, now())}.${row.review.lastResponse === "not_yet" ? " You last said not yet." : ""} ${actions}`, "Say done, not yet, skip, or next for another check-in.");
   }
 
   function sayUndoReview(input: HandlerInput, completion: NonNullable<VoiceState["completion"]>) {

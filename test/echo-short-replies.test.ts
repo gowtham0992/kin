@@ -34,6 +34,15 @@ function setup(undo = true, reminderEnabled = false) {
 }
 
 describe("one check-in conversation", () => {
+  it("makes reminders discoverable without creating one or accepting an unprompted yes", async () => {
+    const f = setup(true, true);
+    const first = await f.handle(f.event());
+    expect(speech(first)).toContain("Say done, not yet, skip, or remind me.");
+    expect(speech(first)).not.toContain("Say next for another check-in");
+    await f.handle(f.event("AMAZON.YesIntent", first.sessionAttributes));
+    expect(f.care.confirm).not.toHaveBeenCalled();
+    expect(f.reminders.createCheckIn).not.toHaveBeenCalled();
+  });
   it.each([undefined, "TodayPlanIntent", "ListTasksIntent"])("gives empty-plan next steps in initial speech for %s, not only the silence reprompt", async intent => {
     const f = setup();
     f.care.today.mockResolvedValue({ date: "2026-09-14", tasks: [], onDuty: null, escalations: [],
@@ -59,7 +68,7 @@ describe("one check-in conversation", () => {
     const first = await f.handle(f.event());
     const saved = await f.handle(f.event("CurrentTaskNotYetIntent", first.sessionAttributes));
     expect(speech(saved)).toContain("Saved not yet");
-    expect(speech(saved)).toContain("May I set one discreet reminder");
+    expect(speech(saved)).toContain("Set one reminder");
     expect(speech(saved)).toContain("Later plan edits won't cancel this reminder");
     expect(f.reminders.createCheckIn).not.toHaveBeenCalled();
     const receipt = await f.care.confirm.mock.results[0]!.value;

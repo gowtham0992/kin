@@ -136,8 +136,8 @@ const pendingSchema = z.object({ binding: z.string().regex(/^[a-f0-9]{64}$/), pr
     syncReview: taskReviewSchema.optional() }).strict().optional() }).strict();
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 function planOffer(when: string, sync = false) {
-  if (sync) return `This check-in is ${when}. May I set one discreet reminder? Anyone nearby may hear it. Kin will request cancellation if this check-in is completed, skipped or cancelled. Cancellation can be delayed or fail; you can manage reminders in the Alexa app. Say yes or no.`;
-  return `This check-in is ${when}. May I set one discreet reminder for that time? It will say it is time for your Kin check-in. Anyone nearby may hear it. Later plan edits won't cancel this reminder; you can cancel it in the Alexa app. Say yes or no.`;
+  if (sync) return `Set one reminder ${when}? Others nearby may hear it. If the check-in is completed, skipped or cancelled, Kin will request cancellation, which may be delayed or fail. Manage reminders in the Alexa app. Yes or no?`;
+  return `Set one reminder ${when}? Others nearby may hear it. Later plan edits won't cancel this reminder; you can cancel it in the Alexa app. Yes or no?`;
 }
 /** Offer only; the existing Yes handler rechecks membership, the task and consent before creating anything. */
 export function offerCheckInReminder(input: HandlerInput, task: CareTask, time: number, timeZone: string, cancelSync = false): string | undefined {

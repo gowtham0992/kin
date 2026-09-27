@@ -118,6 +118,7 @@ describe("Kin's isolated Echo voice connection", () => {
     const development = JSON.parse(readFileSync(new URL("../alexa/development.json", import.meta.url), "utf8"));
     expect(model.interactionModel.languageModel.invocationName).toBe("kin family");
     expect(development.invocationName).toBe(model.interactionModel.languageModel.invocationName);
+    expect(model.interactionModel.languageModel.intents.find((item: { name: string }) => item.name === "NextCheckInReminderIntent").samples).toContain("remind me");
     expect(model.interactionModel.languageModel.intents.map((item: { name: string }) => item.name)).toEqual([
       "TestReminderIntent", "NextCheckInReminderIntent", "HelloKinIntent", "TodayPlanIntent", "NextTasksIntent", "ListTasksIntent", "CurrentTaskDoneIntent", "CurrentTaskNotYetIntent", "CurrentTaskSkipIntent", "MarkTaskDoneIntent", "MarkTaskNotYetIntent", "SkipTaskIntent", "UndoLastCompletionIntent", "PausePlanWeekIntent",
       "AMAZON.YesIntent", "AMAZON.NoIntent", "AMAZON.HelpIntent", "AMAZON.RepeatIntent", "AMAZON.CancelIntent", "AMAZON.StopIntent", "AMAZON.FallbackIntent",

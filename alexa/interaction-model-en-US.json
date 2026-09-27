@@ -4,7 +4,7 @@
       "invocationName": "kin family",
       "intents": [
         { "name": "TestReminderIntent", "slots": [], "samples": ["test reminder", "test a reminder", "try a reminder"] },
-        { "name": "NextCheckInReminderIntent", "slots": [], "samples": ["remind me about my next check in", "set my next check in reminder", "next check in reminder"] },
+        { "name": "NextCheckInReminderIntent", "slots": [], "samples": ["remind me", "remind me about my next check in", "set my next check in reminder", "next check in reminder"] },
         {
           "name": "HelloKinIntent",
           "slots": [],

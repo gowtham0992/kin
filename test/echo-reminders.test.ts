@@ -162,7 +162,7 @@ describe("parent-approved plan reminder", () => {
       const offering = handle(request);
       await vi.advanceTimersByTimeAsync(3100);
       const proposal = await offering;
-      expect(speech(proposal)).toContain("May I set one discreet reminder");
+      expect(speech(proposal)).toContain("Set one reminder");
       expect(claims.claim).not.toHaveBeenCalled();
       const yes = event("AMAZON.YesIntent", proposal.sessionAttributes);
       Object.assign(yes.context.System.user, { accessToken: "private-kin-token" });
