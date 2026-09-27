@@ -213,6 +213,12 @@
 .care-plan-history { border-top: 1px solid var(--line); padding-top: 16px; }
 .care-plan-history > summary { padding: 12px 0; min-height: 48px; font-weight: 700; cursor: pointer; overflow-wrap: anywhere; }
 .care-plan-history > summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
+.care-plan-more > summary { min-height: 48px; padding: 12px 0; box-sizing: border-box; color: var(--sage); overflow-wrap: anywhere; }
+.care-plan-more > summary:hover { text-decoration: underline; text-underline-offset: 4px; }
+.care-plan-more > summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
+#workspace-content #plan-earlier li details { border-top: 0; margin-top: 8px; padding: 0; }
+#plan-earlier li details > summary { min-height: 48px; box-sizing: border-box; padding: 12px 0; }
+#workspace-content .care-plan-more { border-top: 0; margin-top: 0; padding: 0; }
 .care-plan-pause { margin-top: 32px; }
 .care-plan-pause > p { max-width: 72ch; }
 /* Today's plan leads; coverage is a separate, factual companion, not a safety score. */

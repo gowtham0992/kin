@@ -152,6 +152,33 @@ describe("reviewed one-time check-in editing", () => {
     expect(ui.element("plan-history")?.textContent).toContain("Recorded outcomes · 4");
   });
 
+  it.each([4, 10])("keeps the newest three of %s earlier open check-ins visible and every older record accessible", async count => {
+    const tasks = Array.from({ length: count }, (_, i) => single(`earlier-${i}`, {
+      title: `Open check-in ${i}`, dueAt: new Date(Date.UTC(2026, 8, 8, 14 - i)).toISOString(),
+    })).reverse();
+    const ui = await fixture(tasks, true, false, true);
+    const earlier = ui.element("plan-earlier")!, more = ui.element("plan-earlier-more")!;
+    expect(earlier.children.find(el => el.tagName === "UL")?.children.map(el => el.children[0]?.children[0]?.textContent))
+      .toEqual(["Open check-in 0", "Open check-in 1", "Open check-in 2"]);
+    expect(more?.tagName).toBe("DETAILS");
+    expect(more.children[0]?.tagName).toBe("SUMMARY");
+    expect(more.children[0]?.textContent).toBe(`Show ${count - 3} older open check-in${count === 4 ? "" : "s"}`);
+    expect(more.descendants().filter(el => el.tagName === "H3").map(el => el.textContent))
+      .toEqual(Array.from({ length: count - 3 }, (_, i) => `Open check-in ${i + 3}`));
+    expect(earlier.textContent).toContain(`Showing the 3 most recent of ${count} open check-ins.`);
+    expect(earlier.textContent).toContain("This does not tell you whether someone is safe.");
+    for (const task of tasks) expect(ui.edit(task.id).action.value).toBe("close_unanswered");
+    expect(ui.bodies()).toEqual([]);
+    expect(ui.tasks.every(task => task.state === "scheduled")).toBe(true);
+  });
+
+  it.each([1, 3])("shows all %s earlier records directly without an empty disclosure", async count => {
+    const ui = await fixture(Array.from({ length: count }, (_, i) => single(`old-${i}`, { dueAt: "2026-09-07T15:00:00.000Z" })));
+    expect(ui.element("plan-earlier-more")).toBeNull();
+    expect(ui.element("plan-earlier")!.children.find(el => el.tagName === "UL")?.children).toHaveLength(count);
+    expect(ui.bodies()).toEqual([]);
+  });
+
   it("requires a reviewed caregiver closure, retains its retry identity, and never submits a care reply", async () => {
     const overdue = single("overdue", { dueAt: "2026-09-08T14:00:00.000Z", routineId: "daily" });
     const ui = await fixture([overdue], true, false, true), editor = ui.edit("overdue");

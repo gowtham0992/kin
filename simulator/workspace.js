@@ -671,7 +671,15 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const earlier = node("section", null, "care-plan-group"); earlier.id = "plan-earlier";
     earlier.setAttribute("aria-label", "Earlier, still open");
     earlier.append(node("h3", `Earlier, still open · ${earlierTasks.length}`, "care-plan-group-title"),
-      node("p", "Their scheduled time has passed, but no completion, skip or closure is recorded. This does not tell you whether someone is safe.", "care-note"), planRows(earlierTasks));
+      node("p", "Their scheduled time has passed, but no completion, skip or closure is recorded. This does not tell you whether someone is safe.", "care-note"));
+    const recentEarlierTasks = earlierTasks.slice(0, 3), olderTasks = earlierTasks.slice(3);
+    if (olderTasks.length) earlier.append(node("p", `Showing the 3 most recent of ${earlierTasks.length} open check-ins. Older entries remain available below.`, "care-note"));
+    earlier.append(planRows(recentEarlierTasks));
+    if (olderTasks.length) {
+      const more = node("details", null, "care-plan-more"); more.id = "plan-earlier-more";
+      more.append(node("summary", `Show ${olderTasks.length} older open check-in${olderTasks.length === 1 ? "" : "s"}`), planRows(olderTasks));
+      earlier.append(more);
+    }
     const recorded = node("details", null, "care-plan-group care-plan-history"); recorded.id = "plan-history";
     recorded.append(node("summary", `Recorded outcomes · ${recordedTasks.length}`),
       node("p", "Completed, skipped, cancelled and closed check-ins in this loaded plan. Most recent scheduled time first.", "care-note"), planRows(recordedTasks));
