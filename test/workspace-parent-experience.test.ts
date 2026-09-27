@@ -92,6 +92,19 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
 }
 
 describe("parent-first conversation", () => {
+  it("reads account attribution before check-in actions and coverage after them", async () => {
+    const ui = await fixture([water], false, false, "#today");
+    const elements = ui.descendants();
+    const attribution = elements.findIndex(element => element.className.includes("care-author-note"));
+    const done = elements.findIndex(element => element.tagName === "BUTTON" && element.textContent === "Done");
+    const coverage = elements.findIndex(element => element.attributes["aria-label"] === "Today’s coverage");
+    expect(attribution).toBeGreaterThan(-1);
+    expect(done).toBeGreaterThan(attribution);
+    expect(coverage).toBeGreaterThan(done);
+    expect(elements[attribution]!.textContent).toContain("Kin cannot verify who is speaking");
+    expect(ui.request.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+  });
+
   it("keeps the full local date and zone on Today check-ins and recorded replies", async () => {
     // A family-calendar September 8 task can be September 9 on the caregiver's device.
     const task = { ...water, dueAt: "2026-09-09T01:00:00.000Z", state: "done",

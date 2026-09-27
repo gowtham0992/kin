@@ -222,6 +222,12 @@
 .care-plan-pause { margin-top: 32px; }
 .care-plan-pause > p { max-width: 72ch; }
 /* Today's plan leads; coverage is a separate, factual companion, not a safety score. */
+.care-today { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); column-gap: 48px; align-items: start; }
+.care-today > .care-summary { display: block; grid-column: 1; }
+.care-today > .care-duty-card { grid-column: 2; grid-row: 1; margin-top: 16px; }
+.care-today > .care-plan, .care-today > .care-alerts, .care-today > .care-undo-offer { grid-column: 1 / -1; }
+.care-today > .care-alerts { margin-top: 0; }
+.care-today > .care-summary > .care-author-note { margin-top: 24px; }
 .care-summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); gap: 24px 48px; align-items: start; padding-top: 16px; }
 .care-summary-intro { min-width: 0; }
 .workspace-page #workspace-content .care-summary h2 { font-size: clamp(40px, 4.5vw, 64px); line-height: 1.05; letter-spacing: -.045em; margin: 16px 0 24px; max-width: 560px; }
@@ -242,12 +248,16 @@
 .workspace-page .care-alerts > h3 { font: 400 26px/1.2 Georgia, serif; letter-spacing: -.02em; margin-bottom: 12px; }
 .workspace-page .care-alerts > p { max-width: 72ch; }
 @media (max-width: 900px) {
+  .care-today { grid-template-columns: minmax(0, 1fr) minmax(200px, 260px); column-gap: 24px; }
   .care-summary { grid-template-columns: minmax(0, 1fr) minmax(200px, 260px); gap: 24px; }
   .care-duty-card { padding-left: 24px; }
   .workspace-page .care-plan li { flex-wrap: wrap; }
   .workspace-page .care-plan li > div:first-child { flex-basis: 100%; }
 }
 @media (max-width: 620px) {
+  .care-today { display: block; }
+  .care-today > .care-duty-card { margin-top: 24px; }
+  .care-today > .care-alerts { margin-top: 32px; }
   .care-summary { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 8px; }
   .workspace-page #workspace-content .care-summary h2 { font-size: 40px; margin: 12px 0 16px; }
   .care-duty-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; border-left: 0; border-top: 1px solid var(--line); padding: 16px 0 0; }
@@ -262,12 +272,13 @@
   .workspace-page .care-alerts { padding: 24px; }
 }
 @media print {
+  .care-today { display: block; }
   .care-summary { display: block; }
   .care-duty-card { border: 0; padding: 0; }
   .care-duty-link { display: none; }
 }
-.workspace-page #workspace-content > .care-plan { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 0 24px; }
-.workspace-page #workspace-content > .care-plan li:last-child { border-bottom: 0; }
+.workspace-page #workspace-content > .care-plan, .workspace-page .care-today > .care-plan { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 0 24px; }
+.workspace-page #workspace-content > .care-plan li:last-child, .workspace-page .care-today > .care-plan li:last-child { border-bottom: 0; }
 .workspace-page .care-alerts { border: 1px solid var(--line); }
 .workspace-page .kin-trust-link { font-size: 13px; }
 .workspace-page .kin-trust-link details { margin-top: 16px; max-width: 38rem; font-size: 16px; line-height: 1.6; }

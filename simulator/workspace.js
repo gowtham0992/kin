@@ -409,7 +409,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       node("h3", data.onDuty ? data.onDuty.memberName : "A turn to fill"),
       node("p", data.onDuty ? `${data.onDuty.memberName} is on duty until ${timestamp(data.onDuty.endsAt)}.` : "Nobody is assigned today. A caregiver can arrange coverage in Turns.", "care-note"));
     const dutyLink = node("a", "See family turns", "care-duty-link"); dutyLink.href = "#turns";
-    duty.append(dutyLink); header.append(introduction, duty);
+    duty.append(dutyLink); header.append(introduction);
     if (member.permissions.confirm) header.append(authorNote());
     const list = node("ul", null, "care-plan");
     for (const task of data.tasks) {
@@ -451,7 +451,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     }
     if (data.escalations.length) alerts.append(node("p", "Acknowledgment records that a caregiver has seen the follow-up. It does not confirm the task is done or cancel queued messages.", "care-note"));
     const undoOffer = completionUndoOffer(data);
-    content.replaceChildren(header, ...(undoOffer ? [undoOffer] : []), list, alerts);
+    const today = node("div", null, "care-today");
+    today.append(header, ...(undoOffer ? [undoOffer] : []), list, duty, alerts);
+    content.replaceChildren(today);
   }
   function renderCircle(data) {
     rotationEditor?.destroy(); rotationEditor = null;
