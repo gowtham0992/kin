@@ -62,6 +62,18 @@ it("includes unanswered closures in the visible weekly count line", async () => 
 });
 
 describe("weekly source evidence and visit notes", () => {
+  it("puts conversation follow-ups before retrospective highlights without losing their evidence", async () => {
+    const ui = await fixture();
+    const sections = ui.content.descendants().filter(element => element.tagName === "SECTION" && element.children[0]?.tagName === "H3");
+    expect(sections.slice(0, 2).map(section => section.children[0]!.textContent))
+      .toEqual(["For your next conversation", "What stood out"]);
+    expect(sections[0]!.textContent).toContain("Ask a caregiver to acknowledge the follow-up.");
+    const citation = sections[0]!.descendants().find(element => element.tagName === "BUTTON" && element.textContent === "Source 2")!;
+    await citation.click();
+    expect(ui.get("brief-source-2").focused).toBe(true);
+    expect(ui.details().open).toBe(true);
+  });
+
   it("returns to the exact citation most recently followed, including repeated references to the same source", async () => {
     const ui = await fixture();
     const links = ui.sourceButtons().filter(link => link.textContent === "Source 1");
@@ -182,7 +194,7 @@ describe("weekly source evidence and visit notes", () => {
 
   it("maps every displayed observation to its real evidence and associated due date", async () => {
     const ui = await fixture();
-    expect(ui.sourceButtons().map(button => button.textContent)).toEqual(["Source 1", "Source 2", "Source 1", "Source 2"]);
+    expect(ui.sourceButtons().map(button => button.textContent)).toEqual(["Source 1", "Source 2", "Source 2", "Source 1"]);
     const source = ui.get("brief-source-1");
     expect(source.textContent).toContain("Drink a glass of water was completed.");
     expect(source.textContent).toContain("task:water:2026-09-08T15:00:00.000Z");

@@ -776,7 +776,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     heading.append(references(data.overviewEvidenceIds));
     const facts = node("p", `${data.stats.completed} completed · ${data.stats.skipped} skipped · ${data.stats.stillOpen} still open${data.stats.closedUnanswered ? ` · ${data.stats.closedUnanswered} closed without a reply` : ""}`, "care-count");
     const points = node("div", null, "care-brief-sections");
-    for (const [title, rows] of [["What stood out", data.highlights], ["For your next conversation", data.followUps]]) {
+    for (const [title, rows] of [["For your next conversation", data.followUps], ["What stood out", data.highlights]]) {
       const section = node("section", null, "care-brief-section");
       section.append(node("h3", title)); const list = node("ul");
       for (const point of rows) { const item = node("li"); item.append(node("p", point.text), references(point.evidenceIds)); list.append(item); }
