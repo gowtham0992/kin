@@ -29,5 +29,14 @@ jobs:
       - run: npm run build
       - run: npm test -- --sequence.shuffle --sequence.seed=9102611
       - run: npm test -- --sequence.shuffle --sequence.seed=9102612
+      - name: Verify plan transactions against DynamoDB Local
+        shell: bash
+        run: |
+          set -euo pipefail
+          kin_dynamo_dir=$(mktemp -d "$RUNNER_TEMP/kin-dynamo.XXXXXX")
+          curl --fail --location --max-time 90 https://d1ni2b6xgvw0s0.cloudfront.net/v2.x/dynamodb_local_latest.tar.gz -o "$kin_dynamo_dir/archive.tar.gz"
+          echo "f80bcec477f85f57e2c77f8d54aa6b672a8403fceff0c450560aee1cf6c21163  $kin_dynamo_dir/archive.tar.gz" | sha256sum --check -
+          tar -xzf "$kin_dynamo_dir/archive.tar.gz" -C "$kin_dynamo_dir"
+          npm run test:dynamo -- "$kin_dynamo_dir"
       - run: npx --no-install playwright install --with-deps chromium
       - run: npm run test:browser

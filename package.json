@@ -25,6 +25,7 @@
     "sweep:aws": "tsx scripts/run-escalation-sweep.ts",
     "brief:aws": "tsx scripts/generate-weekly-brief.ts",
     "test": "vitest run --exclude 'dist/**'",
+    "test:dynamo": "node --import tsx scripts/verify-plan-dynamo.ts",
     "check": "npm run build && npm test",
     "test:browser:session": "node scripts/verify-session-reconnect-browser.mjs",
     "test:browser": "node scripts/verify-story-browser.mjs && node --import tsx scripts/verify-story-inputs-browser.mjs && node scripts/verify-roster-link-browser.mjs && node --import tsx scripts/verify-push-browser.mjs && node scripts/verify-navigation-browser.mjs && node --import tsx scripts/verify-week-browser.mjs && node scripts/verify-reschedule-browser.mjs && node scripts/verify-undo-browser.mjs && node scripts/verify-pause-browser.mjs && node scripts/verify-close-unanswered-browser.mjs && node scripts/verify-conversation-layout-browser.mjs && node scripts/verify-long-content-browser.mjs"
