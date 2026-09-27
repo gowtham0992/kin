@@ -91,6 +91,28 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
 }
 
 describe("reviewed one-time check-in editing", () => {
+  it.each<Partial<CareTask>>([
+    { state: "cancelled" }, { state: "done" }, { state: "skipped" },
+    { state: "closed_unanswered" }, { dueAt: "2026-09-08T15:00:00.000Z" },
+    { dueAt: "2026-09-07T15:00:00.000Z" },
+  ])("retains moved history without inviting a reminder for an inactive occurrence: %j", async overrides => {
+    const ui = await fixture([single("replacement", {
+      ...overrides, rescheduledFrom: { taskId: "original", dueAt: "2026-09-06T15:00:00.000Z" },
+    })]);
+    const content = ui.element("workspace-content")!.textContent;
+    expect(content).toContain("Moved from");
+    expect(content).not.toContain("A new Alexa reminder requires a fresh request.");
+    expect(ui.bodies()).toEqual([]);
+  });
+
+  it("keeps fresh reminder consent guidance for an upcoming moved check-in", async () => {
+    const ui = await fixture([single("replacement", {
+      rescheduledFrom: { taskId: "original", dueAt: "2026-09-09T14:00:00.000Z" },
+    })]);
+    expect(ui.element("workspace-content")!.textContent).toContain("A new Alexa reminder requires a fresh request.");
+    expect(ui.bodies()).toEqual([]);
+  });
+
   it.each(["1", "7"])("previews %s scheduled dates with readable minutes and the local time zone", async repeat => {
     const ui = await fixture([]), due = ui.element("plan-due")!, frequency = ui.element("plan-repeat")!;
     due.value = "2026-09-09T18:00"; frequency.value = repeat; await frequency.emit("change");

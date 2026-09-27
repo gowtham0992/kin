@@ -656,7 +656,11 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
         if (member.permissions.manageDuty && !task.routineId && task.state === "scheduled" && task.lastResponse === null &&
             task.confirmedAt === null && task.confirmedBy === null && new Date(task.dueAt) > new Date()) copy.append(taskChangeEditor(task, data.features?.reschedule === true));
-        if (task.rescheduledFrom) copy.append(node("p", `Moved from ${timestamp(task.rescheduledFrom.dueAt)}. A new Alexa reminder requires a fresh request.`, "care-note"));
+        if (task.rescheduledFrom) {
+          const reminderNote = task.state === "scheduled" && Date.parse(task.dueAt) > now
+            ? " A new Alexa reminder requires a fresh request." : "";
+          copy.append(node("p", `Moved from ${timestamp(task.rescheduledFrom.dueAt)}.${reminderNote}`, "care-note"));
+        }
         if (task.rescheduledTo) copy.append(node("p", `Moved to ${timestamp(task.rescheduledTo.dueAt)}; this original check-in is cancelled.`, "care-note"));
         row.append(copy); list.append(row);
       }
