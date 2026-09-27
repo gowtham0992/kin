@@ -62,6 +62,30 @@ it("includes unanswered closures in the visible weekly count line", async () => 
 });
 
 describe("weekly source evidence and visit notes", () => {
+  it("returns to the exact citation most recently followed, including repeated references to the same source", async () => {
+    const ui = await fixture();
+    const links = ui.sourceButtons().filter(link => link.textContent === "Source 1");
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      for (const other of links) { other.focused = false; other.scrolled = false; }
+      await link.click();
+      const back = ui.get("brief-source-1").descendants().find(element => element.tagName === "BUTTON" && element.textContent === "Back to summary");
+      expect(back).toBeDefined(); await back!.click();
+      expect(link.focused).toBe(true); expect(link.scrolled).toBe(true);
+      expect(links.filter(other => other !== link).every(other => !other.focused)).toBe(true);
+      expect(ui.details().open).toBe(true);
+      expect(location.hash).toBe("#week");
+    }
+  });
+  it("returns to the weekly heading when evidence was opened without following a citation", async () => {
+    const ui = await fixture(); ui.details().open = true;
+    const heading = ui.content.descendants().find(element => element.tagName === "H2")!;
+    const back = ui.get("brief-source-2").descendants().find(element => element.tagName === "BUTTON" && element.textContent === "Back to summary");
+    expect(back).toBeDefined(); await back!.click();
+    expect(heading.attributes.get("tabindex")).toBe("-1");
+    expect(heading.focused).toBe(true); expect(heading.scrolled).toBe(true);
+  });
+
   it("groups long citation lists without losing, duplicating or inventing sources", async () => {
     const data = brief();
     data.evidence = Array.from({ length: 5 }, (_, index) => ({ ...data.evidence[0]!, id: `record-${index}`, fact: `Recorded fact ${index}` }));

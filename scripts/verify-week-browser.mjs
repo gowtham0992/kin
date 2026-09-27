@@ -115,6 +115,8 @@ try {
     await expect(details).toHaveAttribute("open", "");
     await expect(page.locator(`#brief-source-${number}`)).toBeFocused();
     await expect(page).toHaveURL(`${origin}/invite.html#week`);
+    await page.locator(`#brief-source-${number}`).getByRole("button", { name: "Back to summary", exact: true }).click();
+    await expect(button).toBeFocused();
   }
   // Close before each keyboard print lifecycle; no print dialog or printer is invoked.
   const printState = async open => {
@@ -128,6 +130,7 @@ try {
     await page.emulateMedia({ media: "print" });
     await expect(page.locator("#brief-source-1")).toBeVisible();
     await expect(page.getByRole("button", { name: "Print visit notes" })).toBeHidden();
+    for (const back of await page.locator(".care-source-return").all()) await expect(back).toBeHidden();
     await page.screenshot({ path: path.join(output, `week-print-${open ? "open" : "closed"}.png`), fullPage: true });
     await page.emulateMedia({ media: "screen" });
     await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));

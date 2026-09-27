@@ -717,6 +717,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   }
   function renderBrief(data) {
     restorePrintedEvidence(); briefCitationGroups = [];
+    let returnCitation = null;
+    const title = node("h2", data.headline); title.setAttribute("tabindex", "-1");
     const evidence = node("details", null, "care-brief-evidence"); briefEvidence = evidence;
     evidence.append(node("summary", `Based on ${data.evidence.length} recorded event${data.evidence.length === 1 ? "" : "s"}`));
     const sources = new Map();
@@ -725,6 +727,11 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       item.append(node("h3", `Source ${index + 1}`), node("p", fact.fact),
         node("p", `${fact.kind === "care_task" ? "Check-in due" : "Related check-in due"} · ${timestamp(fact.occurredAt)}`, "care-note"),
         node("code", fact.id, "care-source-id"));
+      const back = button("Back to summary", () => {
+        const target = returnCitation ?? title;
+        target.focus(); target.scrollIntoView({ block: "center" });
+      });
+      back.classList.add("care-source-return", "no-print"); item.append(back);
       evidence.append(item); sources.set(fact.id, { number: index + 1, element: item });
     }
     if (!data.evidence.length) evidence.append(node("p", "No source records were returned for this period.", "care-note"));
@@ -736,6 +743,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         if (!source) { unavailable = true; continue; }
         count += 1;
         const link = button(`Source ${source.number}`, () => {
+          returnCitation = link;
           evidence.open = true; source.element.focus(); source.element.scrollIntoView({ block: "nearest" });
         });
         link.classList.add("care-source-link"); link.setAttribute("aria-controls", source.element.id); links.append(link);
@@ -749,7 +757,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       if (unavailable) result.append(node("p", "A source for this point is unavailable.", "care-note"));
       return result;
     }
-    const heading = node("div", null, "care-brief-heading"); heading.append(node("p", `${date(data.period.startDate)} – ${date(data.period.endDate)}`, "kicker"), node("h2", data.headline), node("p", data.overview));
+    const heading = node("div", null, "care-brief-heading"); heading.append(node("p", `${date(data.period.startDate)} – ${date(data.period.endDate)}`, "kicker"), title, node("p", data.overview));
     heading.append(references(data.overviewEvidenceIds));
     const facts = node("p", `${data.stats.completed} completed · ${data.stats.skipped} skipped · ${data.stats.stillOpen} still open${data.stats.closedUnanswered ? ` · ${data.stats.closedUnanswered} closed without a reply` : ""}`, "care-count");
     const points = node("div", null, "care-brief-sections");
