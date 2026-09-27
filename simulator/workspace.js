@@ -50,6 +50,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   let briefEvidence = null, printedEvidence = null, briefCitationGroups = [];
   let undoReviewTimer = null;
   let member = null, revision = 0, busy = false, loading = false, timer = null, lastRender = "", activeView = null;
+  let loadingPanel = null;
   const content = $("workspace-content"), status = $("workspace-status");
   const viewLabels = { today: "Today", ask: "Ask Kin", plan: "Plan", turns: "Turns", circle: "Turns", week: "Week", invite: "Invite family", access: "Access" };
   const isTurns = view => view === "turns" || view === "circle";
@@ -79,7 +80,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     restorePrintedEvidence(); briefEvidence = null; briefCitationGroups = [];
     voice?.cancel(); voice = null;
     revision += 1; client.reset(); planDraft.clear(); taskChangeDrafts.clear(); rosterDraft.clear(); rosterEditor = null; conversationDraft = ""; conversationSelection = null; member = null; busy = false; loading = false; activeView = null;
-    clearTimeout(timer); content.replaceChildren(); $("workspace").hidden = true;
+    clearTimeout(timer); content.replaceChildren(); loadingPanel = null; content.removeAttribute("aria-busy"); $("workspace").hidden = true;
     $("workspace-nav").hidden = true; $("workspace-identity").textContent = "";
     $("workspace-navigation").hidden = true; $("workspace-secondary").hidden = true;
     $("workspace-retry-write").hidden = true;
@@ -98,8 +99,18 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       return;
     }
     status.textContent = "Could not refresh. Any visible information is the last known update. Check your connection and try again.";
-    if (!content.childElementCount) content.replaceChildren(node("h2", `${viewLabels[tab()]} is temporarily unavailable.`),
+    if (!content.childElementCount || loadingPanel) content.replaceChildren(node("h2", `${viewLabels[tab()]} is temporarily unavailable.`),
       node("p", "Use Refresh to try again. Your unsaved draft stays in this session.", "care-note"));
+  }
+  function renderLoading(view) {
+    loadingPanel = node("section", null, "care-loading");
+    const placeholders = node("div", null, "care-loading-lines");
+    placeholders.setAttribute("aria-hidden", "true");
+    placeholders.append(node("span"), node("span"), node("span"));
+    loadingPanel.append(node("h2", `Loading ${viewLabels[view]}…`),
+      node("p", "You can switch tabs while this loads.", "care-note"), placeholders);
+    content.setAttribute("aria-busy", "true");
+    content.replaceChildren(loadingPanel);
   }
   function button(label, action, secondary = true) {
     const element = node("button", label, secondary ? "secondary" : "primary"); element.type = "button";
@@ -793,7 +804,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   async function refresh(afterWrite = false) {
     if (!member || voice?.active || (busy && !afterWrite) || (!afterWrite && client.undoReviewing) || loading || tab() === "invite") return;
     loading = true; const current = revision, view = tab();
-    if (!content.childElementCount) status.textContent = "Loading your family’s update…";
+    if (!content.childElementCount) { status.textContent = "Loading your family’s update…"; renderLoading(view); }
     try {
       const identity = await client.session();
       if (current !== revision || view !== tab() || voice?.active) return;
@@ -826,7 +837,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       if (client.pending) lockControls(true);
       return true;
     } catch (error) { if (current === revision) failure(error); }
-    finally { if (current === revision) loading = false; }
+    finally { if (current === revision) { loading = false; loadingPanel = null; content.removeAttribute("aria-busy"); } }
   }
   async function navigate({ focus = false } = {}) {
     if (!member) return;
@@ -840,7 +851,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     mcpTracePanel = null;
     rotationEditor?.destroy(); rotationEditor = null;
     restorePrintedEvidence(); briefEvidence = null; briefCitationGroups = [];
-    revision += 1; loading = false; content.replaceChildren(); lastRender = "";
+    revision += 1; loading = false; loadingPanel = null; content.removeAttribute("aria-busy"); content.replaceChildren(); lastRender = "";
     const view = tab();
     activeView = view;
     const management = $("workspace-management");

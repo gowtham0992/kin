@@ -18,7 +18,10 @@ class Element {
   descendants(): Element[] { return this.children.flatMap(child => [child, ...child.descendants()]); }
   querySelectorAll() { return this.descendants().filter(child => ["BUTTON", "INPUT", "SELECT", "TEXTAREA"].includes(child.tagName)); }
   addEventListener(name: string, action: (event: { preventDefault(): void }) => unknown) { this.listeners.set(name, [...this.listeners.get(name) ?? [], action]); }
-  setAttribute() {} removeAttribute() {} focus = vi.fn(); reportValidity() { return true; }
+  attributes = new Map<string, string>();
+  setAttribute(name: string, value: string) { this.attributes.set(name, value); }
+  removeAttribute(name: string) { this.attributes.delete(name); }
+  focus = vi.fn(); reportValidity() { return true; }
   async emit(name: string) { await Promise.all((this.listeners.get(name) ?? []).map(action => action({ preventDefault() {} }))); }
   async click() { if (!this.disabled) await this.emit("click"); }
 }
@@ -55,6 +58,84 @@ async function fixture(timeZone = "UTC", legacy = false) {
   return { get, request, button, resolveProposal, rejectProposal, firstForm, store,
     writes: () => request.mock.calls.filter(([url]) => url === "/api/circle/duty") };
 }
+
+async function loadingFixture() {
+  const store = createDemoStore(() => new Date("2026-09-08T15:00:00.000Z"));
+  const elements = new Map<string, Element>(), events = new Map<string, () => void>();
+  const get = (id: string) => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id)!; };
+  vi.stubGlobal("document", { getElementById: get, createElement: (tag: string) => new Element(tag), querySelector: () => get("main"), querySelectorAll: () => [], addEventListener() {}, hidden: false });
+  vi.stubGlobal("window", { addEventListener: (name: string, action: () => void) => events.set(name, action) });
+  vi.stubGlobal("location", { hash: "#circle" }); vi.stubGlobal("history", { replaceState() {} });
+  vi.stubGlobal("Option", class extends Element { constructor(label: string, value: string) { super("option"); this.textContent = label; this.value = value; } });
+  let held: Promise<void> | null = null;
+  let release!: () => void;
+  let status = 200;
+  const request = vi.fn(async (url: string) => {
+    if (url === "/api/session") return { ok: true, json: async () => ({ name: "Maya", role: "caregiver", permissions: { confirm: true, manageDuty: true, manageRoster: false, invite: false } }) };
+    if (url === "/api/circle") { const pending = held, responseStatus = status; if (pending) await pending; return { ok: responseStatus === 200, status: responseStatus, json: async () => store.circle() }; }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const lost = vi.fn();
+  const page = createWorkspace({ request, onAccessLost: lost, onInvite() {}, onLeaveInvite() {} }); close = page.reset;
+  const hold = (code = 200) => { status = code; held = new Promise<void>(resolve => { release = resolve; }); return release; };
+  const finish = async () => { release(); held = null; status = 200; await vi.advanceTimersByTimeAsync(0); await vi.waitFor(() => expect(get("workspace-content").attributes.has("aria-busy")).toBe(false)); };
+  return { get, page, lost, request, hold, finish, navigate: () => { events.get("hashchange")!(); } };
+}
+
+describe("workspace view loading", () => {
+  it("shows a noninteractive placeholder until the initial view is available", async () => {
+    const ui = await loadingFixture(); ui.hold(); const opening = ui.page.open();
+    await vi.waitFor(() => expect(ui.request).toHaveBeenCalledWith("/api/circle", expect.anything()));
+    const content = ui.get("workspace-content");
+    expect(content.textContent).toContain("Loading Turns");
+    expect(content.attributes.get("aria-busy")).toBe("true");
+    expect(content.querySelectorAll()).toHaveLength(0);
+    await ui.finish(); await opening;
+    expect(content.textContent).not.toContain("Loading Turns");
+    expect(content.textContent).toContain("Duty dates use UTC");
+  });
+  it.each([503, 401])("replaces loading on a %s response and clears busy state", async code => {
+    const ui = await loadingFixture(); ui.hold(code); const opening = ui.page.open();
+    await vi.waitFor(() => expect(ui.get("workspace-content").textContent).toContain("Loading Turns"));
+    await ui.finish(); await opening;
+    expect(ui.get("workspace-content").textContent).not.toContain("Loading Turns");
+    if (code === 401) { expect(ui.lost).toHaveBeenCalledWith(401); expect(ui.get("workspace-content").childElementCount).toBe(0); }
+    else {
+      expect(ui.get("workspace-content").textContent).toContain("Turns is temporarily unavailable");
+      await ui.get("workspace-refresh").click();
+      await vi.waitFor(() => expect(ui.get("workspace-content").textContent).toContain("Duty dates use UTC"));
+    }
+  });
+  it("keeps the rendered controls during a same-view refresh", async () => {
+    const ui = await loadingFixture(); await ui.page.open();
+    const content = ui.get("workspace-content"), original = [...content.children];
+    ui.hold(); await ui.get("workspace-refresh").click();
+    expect(content.children).toEqual(original);
+    expect(content.textContent).not.toContain("Loading Turns");
+    await ui.finish();
+  });
+  it("removes old care content during navigation and ignores an obsolete response", async () => {
+    const ui = await loadingFixture(); await ui.page.open(); ui.hold(); ui.navigate();
+    await vi.waitFor(() => expect(ui.get("workspace-content").textContent).toContain("Loading Turns"));
+    expect(ui.get("workspace-content").textContent).not.toContain("Maya");
+    ui.page.reset(); await ui.finish();
+    expect(ui.get("workspace-content").childElementCount).toBe(0);
+    expect(ui.get("workspace-content").attributes.has("aria-busy")).toBe(false);
+  });
+  it("keeps a newer navigation busy when an older request finishes", async () => {
+    const ui = await loadingFixture(); await ui.page.open();
+    const oldRelease = ui.hold(); ui.navigate();
+    await vi.waitFor(() => expect(ui.request.mock.calls.filter(([url]) => url === "/api/circle")).toHaveLength(2));
+    const oldResult = ui.request.mock.results.at(-1)!.value;
+    ui.hold(); ui.navigate();
+    await vi.waitFor(() => expect(ui.request.mock.calls.filter(([url]) => url === "/api/circle")).toHaveLength(3));
+    oldRelease(); await oldResult; await vi.advanceTimersByTimeAsync(0);
+    expect(ui.get("workspace-content").textContent).toContain("Loading Turns");
+    expect(ui.get("workspace-content").attributes.get("aria-busy")).toBe("true");
+    await ui.finish();
+    expect(ui.get("workspace-content").textContent).toContain("Duty dates use UTC");
+  });
+});
 
 describe("rotation proposal loading and workspace mutation locking", () => {
   it.each(["maya", "__clear__"])("shows the circle time zone before reviewing duty change %s without writing", async proposed => {

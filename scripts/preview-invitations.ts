@@ -13,6 +13,13 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Inv
 if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content", "week-sources", "week-comparison"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
+// Optional bounded delay for inspecting the real workspace loading UI locally.
+const readDelayMs = Number(process.env.KIN_PREVIEW_READ_DELAY_MS ?? 0);
+if (!Number.isInteger(readDelayMs) || readDelayMs < 0 || readDelayMs > 60_000) throw new Error("Invalid preview read delay");
+app.use((request, _response, next) => {
+  if (readDelayMs && request.method === "GET" && request.path === "/api/circle") setTimeout(next, readDelayMs);
+  else next();
+});
 const rosterMembers: RosterMemberRecord[] = mode === "roster-empty" ? [] : [
   { id: "evelyn", name: "Evelyn", relationship: "parent", canReceiveAlerts: false },
   { id: "maya", name: "Maya", relationship: "daughter", canReceiveAlerts: true },

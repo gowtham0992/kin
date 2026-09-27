@@ -137,9 +137,22 @@ try {
   await expect(page.locator("#workspace-content")).toContainText("Updates are recorded via Maya’s Kin account");
 
   // A failed new-view read remains recoverable from that view, with keyboard focus.
-  await page.route("**/api/plan", route => route.fulfill({ status: 503, json: { error: "unavailable" } }));
+  let releaseRead;
+  const heldRead = new Promise(resolve => { releaseRead = resolve; });
+  await page.route("**/api/plan", async route => { await heldRead; return route.fulfill({ status: 503, json: { error: "unavailable" } }); });
   await primary.getByRole("link", { name: "Plan", exact: true }).click();
+  await expect(page.locator("#workspace-content")).toHaveAttribute("aria-busy", "true");
+  await expect(page.locator("#workspace-content")).toContainText("Loading Plan");
+  await expect(page.locator("#care-request")).toHaveCount(0);
+  await expect(page.locator(".care-loading-lines")).toHaveAttribute("aria-hidden", "true");
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Loading overflow at ${width}px`);
+    await page.screenshot({ path: path.join(output, `loading-${width}.png`), fullPage: true });
+  }
+  releaseRead();
   await expect(page.locator("#workspace-status")).toContainText("Could not refresh");
+  await expect(page.locator("#workspace-content")).not.toHaveAttribute("aria-busy");
   await expect(page.locator("#workspace-content")).toContainText("Plan is temporarily unavailable");
   await expect(page.locator("#workspace-content")).toBeFocused();
   await page.unroute("**/api/plan");
