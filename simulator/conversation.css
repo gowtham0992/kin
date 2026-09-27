@@ -27,6 +27,7 @@
 .care-conversation-model summary { color: var(--sage); }
 .care-conversation-review { max-width: 760px; margin-top: 24px; }
 .care-conversation-review .care-review-task { font: 400 28px/1.3 Georgia, serif; overflow-wrap: anywhere; }
+.care-conversation-review .care-review-time { color: var(--sage); }
 .care-conversation-review h3:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
 .care-conversation-help, .care-conversation-boundary { max-width: 760px; }
 .care-conversation-help .care-actions { margin: 16px 0; }

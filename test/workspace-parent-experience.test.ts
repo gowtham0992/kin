@@ -92,6 +92,31 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
 }
 
 describe("parent-first conversation", () => {
+  it("keeps the full local date and zone on Today check-ins and recorded replies", async () => {
+    // A family-calendar September 8 task can be September 9 on the caregiver's device.
+    const task = { ...water, dueAt: "2026-09-09T01:00:00.000Z", state: "done",
+      confirmedBy: "Maya", confirmedAt: "2026-09-09T02:00:00.000Z" };
+    const ui = await fixture([task], false, false, "#today");
+    const format = (value: string) => new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(value));
+    const row = ui.descendants().find(element => element.tagName === "LI" && element.textContent.includes(task.title))!;
+    expect(row.textContent).toContain(`${format(task.dueAt)} · done`);
+    expect(row.textContent).toContain(`Via Maya’s Kin account · ${format(task.confirmedAt)}`);
+    expect(ui.get("workspace-content").textContent).toContain("Family plan ·");
+    expect(ui.request.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+  });
+
+  it("keeps the occurrence date and zone visible when choosing and reviewing an Ask Kin reply", async () => {
+    const ui = await fixture([water]);
+    const when = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(water.dueAt));
+    expect(ui.get("workspace-content").textContent).toContain(`Next in your plan · ${when}`);
+    await ui.button(`${water.title} · ${when}`).click();
+    expect(ui.get("care-selected-task").textContent).toContain(when);
+    await ui.submit();
+    expect(ui.descendants().find(element => element.className === "care-review-task")?.textContent).toBe(water.title);
+    expect(ui.descendants().find(element => element.className === "care-note care-review-time")?.textContent).toBe(`Scheduled for ${when}`);
+    expect(ui.request.mock.calls.some(([url]) => url.endsWith("/confirm"))).toBe(false);
+  });
+
   it("separates unassigned coverage from check-in progress without implying safety", async () => {
     const ui = await fixture([], false, false, "#today");
     const coverage = ui.descendants().find(element => element.attributes["aria-label"] === "Today’s coverage");
@@ -189,7 +214,7 @@ describe("parent-first conversation", () => {
   it("keeps the chosen occurrence when repeated titles are drafted and only the response is edited", async () => {
     const later = { ...water, id: "water-evening", dueAt: "2026-09-08T23:00:00.000Z" };
     const ui = await fixture([water, later]);
-    const displayedTime = new Date(later.dueAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const displayedTime = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(later.dueAt));
     await ui.button(`${later.title} · ${displayedTime}`).click();
     expect(ui.get("care-selected-task").textContent).toContain(displayedTime);
     expect(ui.request.mock.calls.some(([url]) => url === "/api/conversation")).toBe(false);
@@ -224,7 +249,7 @@ describe("parent-first conversation", () => {
   it("lets the parent select an occurrence beyond the first eight open check-ins", async () => {
     const tasks = Array.from({ length: 10 }, (_, index) => ({ ...water, id: `water-${index}`, dueAt: `2026-09-08T${String(index + 10).padStart(2, "0")}:00:00.000Z` }));
     const selected = tasks[9]!, ui = await fixture(tasks);
-    const displayedTime = new Date(selected.dueAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const displayedTime = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(selected.dueAt));
     await ui.button(`${selected.title} · ${displayedTime}`).click(); await ui.submit();
     expect(JSON.parse(ui.request.mock.calls.find(([url]) => url === "/api/conversation")![1]!.body!)).toEqual({ message: `Done: ${selected.title}`, selectedTaskId: selected.id });
   });
@@ -258,7 +283,7 @@ describe("parent-first conversation", () => {
     const confirmedAt = "2026-09-08T15:10:00.000Z";
     const ui = await fixture([{ ...water, lastResponse: "not_yet", confirmedBy: "Theo", confirmedAt }]);
     const recorded = ui.descendants().find(child => child.id === "care-last-response");
-    const displayedTime = new Date(confirmedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const displayedTime = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(confirmedAt));
     expect(recorded?.textContent).toBe(`Last reply: not yet · Theo · ${displayedTime}`);
     expect(recorded?.textContent).not.toContain("Evelyn");
     expect(ui.request.mock.calls.every(([url]) => ["/api/session", "/api/today"].includes(url))).toBe(true);

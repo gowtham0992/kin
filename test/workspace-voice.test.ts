@@ -165,7 +165,7 @@ describe("optional family Bedrock consent", () => {
     input.value = "Not yet:"; await input.emit("input");
     consent.checked = true; await consent.emit("change");
     if (change === "typing") { input.value = "I drank the water"; await input.emit("input"); }
-    else if (change === "example") await ui.button(`Drink a glass of water · ${new Date(dueAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`).click();
+    else if (change === "example") await ui.button(`Drink a glass of water · ${new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(dueAt))}`).click();
     else {
       await ui.button("Use voice input").click();
       expect(consent.checked).toBe(false); // Microphone permission cannot carry model consent.

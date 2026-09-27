@@ -241,7 +241,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const selectionNote = node("p", null, "care-note"); selectionNote.id = "care-selected-task";
     const renderSelection = () => {
       selectionNote.hidden = !conversationSelection;
-      selectionNote.textContent = conversationSelection ? `Selected check-in: ${conversationSelection.title} · ${time(conversationSelection.dueAt)}` : "";
+      selectionNote.textContent = conversationSelection ? `Selected check-in: ${conversationSelection.title} · ${timestamp(conversationSelection.dueAt)}` : "";
     };
     renderSelection();
     const submit = node("button", "Review request", "primary"); submit.type = "submit";
@@ -304,10 +304,10 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     if (currentTask) {
       const taskHeading = node("h3", currentTask.title); taskHeading.id = "care-current-task";
       prompt.setAttribute("aria-labelledby", taskHeading.id);
-      prompt.append(node("p", `Next in your plan · ${time(currentTask.dueAt)}`, "kicker"), taskHeading);
+      prompt.append(node("p", `Next in your plan · ${timestamp(currentTask.dueAt)}`, "kicker"), taskHeading);
       if (currentTask.lastResponse) {
         const lastReply = node("p", [`Last reply: ${currentTask.lastResponse.replaceAll("_", " ")}`, currentTask.confirmedBy,
-          currentTask.confirmedAt ? time(currentTask.confirmedAt) : null].filter(Boolean).join(" · "), "care-note");
+          currentTask.confirmedAt ? timestamp(currentTask.confirmedAt) : null].filter(Boolean).join(" · "), "care-note");
         lastReply.id = "care-last-response"; prompt.append(lastReply);
       }
       prompt.append(node("p", "Tell Kin how it went. You’ll review before anything is recorded.", "care-note"));
@@ -338,7 +338,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     }
     const examples = node("div", null, "care-actions");
     for (const task of openTasks) {
-      examples.append(button(`${task.title} · ${time(task.dueAt)}`, () => draftRequest(`Done: ${task.title}`, task)));
+      examples.append(button(`${task.title} · ${timestamp(task.dueAt)}`, () => draftRequest(`Done: ${task.title}`, task)));
     }
     form.addEventListener("submit", async event => {
       event.preventDefault(); if (busy || voice?.active || client.pending || !form.reportValidity()) return;
@@ -354,7 +354,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         if (current !== revision) return;
         if (result.action === "confirm") {
           const reviewHeading = node("h3", "Review this check-in"); reviewHeading.tabIndex = -1;
-          review.replaceChildren(reviewHeading, node("p", `${result.task.title} · ${time(result.task.dueAt)}`, "care-review-task"),
+          review.replaceChildren(reviewHeading, node("p", result.task.title, "care-review-task"),
+            node("p", `Scheduled for ${timestamp(result.task.dueAt)}`, "care-note care-review-time"),
             node("p", `Record as ${result.response.replaceAll("_", " ")} by ${member.name}?`));
           const actions = node("div", null, "care-actions");
           actions.append(button("Confirm this check-in", () => void mutate(() => (usesMcp ? client.confirmViaMcp : client.confirm)({ taskId: result.task.id, response: result.response, actor: member.name, expected: result.expected }), "Check-in recorded.", () => { conversationDraft = ""; conversationSelection = null; }), false),
@@ -371,7 +372,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
           } else {
             reply.textContent = `${result.snapshot.summary.completed} of ${result.snapshot.summary.total} check-ins recorded as done today.`;
             const list = node("ul");
-            for (const task of result.snapshot.tasks) list.append(node("li", `${task.title} · ${time(task.dueAt)} · ${task.lastResponse?.replaceAll("_", " ") ?? "No response recorded"}`));
+            for (const task of result.snapshot.tasks) list.append(node("li", `${task.title} · ${timestamp(task.dueAt)} · ${task.lastResponse?.replaceAll("_", " ") ?? "No response recorded"}`));
             review.replaceChildren(node("h3", "Today’s shared plan"), list); review.hidden = false;
           }
         } else {
@@ -400,23 +401,23 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   function renderToday(data) {
     const header = node("div", null, "care-summary");
     const introduction = node("div", null, "care-summary-intro");
-    introduction.append(node("p", date(data.date), "kicker"), node("h2", "A little care, shared."),
+    introduction.append(node("p", `Family plan · ${date(data.date)}`, "kicker"), node("h2", "A little care, shared."),
       node("p", data.summary.total ? `${data.summary.completed} of ${data.summary.total} check-ins completed` : "Room for one small check-in.", "care-count"));
     const duty = node("section", null, "care-duty-card");
     duty.setAttribute("aria-label", "Today’s coverage");
     duty.append(node("p", "Today’s coverage", "kicker"),
       node("h3", data.onDuty ? data.onDuty.memberName : "A turn to fill"),
-      node("p", data.onDuty ? `${data.onDuty.memberName} is on duty until ${time(data.onDuty.endsAt)}.` : "Nobody is assigned today. A caregiver can arrange coverage in Turns.", "care-note"));
+      node("p", data.onDuty ? `${data.onDuty.memberName} is on duty until ${timestamp(data.onDuty.endsAt)}.` : "Nobody is assigned today. A caregiver can arrange coverage in Turns.", "care-note"));
     const dutyLink = node("a", "See family turns", "care-duty-link"); dutyLink.href = "#turns";
     duty.append(dutyLink); header.append(introduction, duty);
     if (member.permissions.confirm) header.append(authorNote());
     const list = node("ul", null, "care-plan");
     for (const task of data.tasks) {
       const item = node("li"), copy = node("div");
-      copy.append(node("p", `${time(task.dueAt)} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state === "scheduled" ? task.lastResponse === "not_yet" ? "Not yet" : "Awaiting check-in" : task.state}`, "kicker"), node("h3", task.title));
+      copy.append(node("p", `${timestamp(task.dueAt)} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state === "scheduled" ? task.lastResponse === "not_yet" ? "Not yet" : "Awaiting check-in" : task.state}`, "kicker"), node("h3", task.title));
       if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
       if (canCloseUnanswered(task)) copy.append(taskChangeEditor(task, false, true));
-      if (task.confirmedBy) copy.append(node("p", `Via ${task.confirmedBy}’s Kin account · ${time(task.confirmedAt)}`, "care-note"));
+      if (task.confirmedBy) copy.append(node("p", `Via ${task.confirmedBy}’s Kin account · ${timestamp(task.confirmedAt)}`, "care-note"));
       item.append(copy);
       if (member.permissions.confirm && task.state === "scheduled") {
         const actions = node("div", null, "care-actions");
