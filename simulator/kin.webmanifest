@@ -10,6 +10,7 @@
   "theme_color": "#20352e",
   "prefer_related_applications": false,
   "icons": [
-    { "src": "/kin-icon.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/kin-icon.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any" },
+    { "src": "/kin-phone-icon.png", "sizes": "1254x1254", "type": "image/png", "purpose": "maskable" }
   ]
 }

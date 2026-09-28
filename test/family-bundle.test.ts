@@ -14,7 +14,7 @@ it("serves the packaged family workspace through the actual Lambda handler witho
   const key = Object.values(resources)[0]!.Properties.Code.S3Key as string;
   const directory = path.join(app.synth().directory, `asset.${key.replace(/\.zip$/, "")}`);
   const files = ["browser-auth.js", "care-client.js", "conversation.css", "duty-rotation.js", "home.css", "home.html", "how-kin-works.html", "invite-client.js", "invite.css", "invite.html", "invite.js", "mcp-client.js", "roster-editor.js", "styles.css", "voice-input.js", "workspace-client.js", "workspace.css", "workspace.js"];
-  files.push("install.js", "kin-icon.png", "kin-logo.png", "kin-sw.js", "kin.webmanifest", "push-controls.js", "completion-undo.js", "plan-pause.js");
+  files.push("install.js", "kin-icon.png", "kin-phone-icon.png", "kin-logo.png", "kin-sw.js", "kin.webmanifest", "push-controls.js", "completion-undo.js", "plan-pause.js");
   files.sort();
   expect((await readdir(path.join(directory, "family"))).sort()).toEqual(files);
   const compiledMcp = await build({ entryPoints: ["simulator/mcp-client.ts"], bundle: true, format: "esm", platform: "browser", target: "es2022",
