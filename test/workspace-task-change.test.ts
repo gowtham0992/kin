@@ -91,6 +91,31 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
 }
 
 describe("reviewed one-time check-in editing", () => {
+  it.each([0, 2, 8])("puts the next check-ins before creation and keeps all %s occurrences accessible", async count => {
+    const tasks = Array.from({ length: count }, (_, i) => single(`future-${i}`, {
+      title: `Upcoming ${i}`, dueAt: new Date(Date.UTC(2026, 8, 9 + i, 15)).toISOString(),
+    })).reverse();
+    const ui = await fixture(tasks);
+    const content = ui.element("workspace-content")!, upcoming = ui.element("plan-upcoming")!;
+    const form = content.children.find(child => child.tagName === "FORM")!;
+    expect(content.children.indexOf(upcoming)).toBeLessThan(content.children.indexOf(form));
+    expect(ui.element("plan-add-shortcut")?.textContent).toBe("Add a check-in");
+    const more = ui.element("plan-upcoming-more");
+    if (count > 3) {
+      expect(upcoming.children.find(el => el.tagName === "UL")?.children).toHaveLength(3);
+      expect(more?.tagName).toBe("DETAILS");
+      expect(more?.children[0]?.textContent).toBe("Show 5 more upcoming check-ins");
+      expect(more?.descendants().filter(el => el.tagName === "H3").map(el => el.textContent))
+        .toEqual(["Upcoming 3", "Upcoming 4", "Upcoming 5", "Upcoming 6", "Upcoming 7"]);
+    } else expect(more).toBeNull();
+    expect(ui.bodies()).toEqual([]);
+  });
+
+  it("does not show the add shortcut to a view-only member", async () => {
+    const ui = await fixture([single()], false);
+    expect(ui.element("plan-add-shortcut")).toBeNull();
+    expect(ui.element("plan-upcoming")?.textContent).toContain("A call together");
+  });
   it("labels both routine-review endpoints with their local time zones across a clock change", async () => {
     vi.setSystemTime(new Date("2026-10-30T12:00:00.000Z"));
     const first = single("routine-first", { routineId: "daily", dueAt: "2026-10-31T15:00:00.000Z" });

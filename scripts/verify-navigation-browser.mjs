@@ -222,7 +222,7 @@ try {
   }
   // Routine review uses the same explicit date/time-zone labels as single
   // check-ins. Inject read-only synthetic plan data; never save this routine.
-  const routineTimes = [1, 2].map(days => new Date(Date.now() + days * 86400000).toISOString());
+  const routineTimes = Array.from({ length: 8 }, (_, i) => new Date(Date.now() + (i + 1) * 86400000).toISOString());
   await page.route("**/api/plan", async route => {
     const response = await route.fetch(), plan = await response.json();
     return route.fulfill({ json: { ...plan, tasks: routineTimes.map((dueAt, index) => ({
@@ -231,15 +231,35 @@ try {
     })) } });
   });
   await page.goto(`${origin}/invite.html#plan`);
-  await page.getByText("Synthetic routine review · 2 future check-ins", { exact: true }).click();
+  await expect(page.locator('#plan-upcoming > ul > li')).toHaveCount(3);
+  const moreUpcoming = page.locator('#plan-upcoming-more');
+  await expect(moreUpcoming).not.toHaveAttribute('open', '');
+  await moreUpcoming.locator('summary').focus(); await page.keyboard.press('Enter');
+  await expect(moreUpcoming).toHaveAttribute('open', '');
+  await expect(moreUpcoming.locator('li')).toHaveCount(5);
+  await page.keyboard.press('Enter');
+  await expect(moreUpcoming).not.toHaveAttribute('open', '');
+  assert.equal(await page.locator('#plan-upcoming').evaluate(section =>
+    !!(section.compareDocumentPosition(document.querySelector('.care-plan-create')) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
+  await page.locator('#plan-add-shortcut').focus(); await page.keyboard.press('Enter');
+  await expect(page.locator('#plan-title')).toBeFocused();
+  await expect(page.locator('#plan-title')).toHaveValue('');
+  await page.getByText("Synthetic routine review · 8 future check-ins", { exact: true }).click();
   const routine = page.locator('.care-routines form');
   const expectedRange = await page.evaluate(times => times.map(value => new Intl.DateTimeFormat(undefined,
     { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })
-    .format(new Date(value))).join(' through '), routineTimes);
+    .format(new Date(value))).join(' through '), [routineTimes[0], routineTimes.at(-1)]);
   await expect(routine.locator('p').first()).toHaveText(expectedRange);
   await expect(routine.locator('input[type="checkbox"]')).not.toBeChecked();
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
+    const hierarchy = await page.locator('#plan-upcoming').evaluate(section => ({
+      upcomingBottom: section.getBoundingClientRect().bottom,
+      formTop: document.querySelector('.care-plan-create').getBoundingClientRect().top,
+      width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
+    }));
+    assert.ok(hierarchy.upcomingBottom <= hierarchy.formTop);
+    assert.equal(hierarchy.scrollWidth, hierarchy.width);
     const bounds = await routine.locator('p').first().evaluate(element => {
       const box = element.getBoundingClientRect();
       return { left: box.left, right: box.right, overflow: element.scrollWidth > element.clientWidth + 1 };

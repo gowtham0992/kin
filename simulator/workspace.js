@@ -592,7 +592,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   }
   function renderPlan(data) {
     pauseEditor?.destroy(); pauseEditor = null;
-    const heading = node("div"); heading.append(node("p", data.historyDays === 30 ? "Recent check-ins and the next 30 days" : "The next 30 days", "kicker"), node("h2", "Make space for the small things."), node("p", "Agree on an ordinary check-in, once or as a short daily routine. This is care coordination, not a medication recommendation."));
+    const heading = node("div"); heading.append(node("p", data.historyDays === 30 ? "Recent check-ins and the next 30 days" : "The next 30 days", "kicker"), node("h2", "Your family’s plan."), node("p", "Agree on an ordinary check-in, once or as a short daily routine. This is care coordination, not a medication recommendation."));
     const form = node("form", null, "invite-panel care-plan-create");
     form.setAttribute("aria-label", "Schedule a check-in");
     if (member.permissions.manageDuty) {
@@ -601,6 +601,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       const titleLabel = node("label", "What is the check-in?"); titleLabel.htmlFor = "plan-title";
       const title = node("input"); title.id = "plan-title"; title.required = true; title.maxLength = 120; title.placeholder = "A glass of water, a walk, a call…";
       title.value = draft.title;
+      const add = node("button", "Add a check-in", "secondary"); add.id = "plan-add-shortcut"; add.type = "button";
+      add.addEventListener("click", () => title.focus());
+      const actions = node("div", null, "care-plan-actions"); actions.append(add); heading.append(actions);
       const dueLabel = node("label", `When? (${Intl.DateTimeFormat().resolvedOptions().timeZone})`); dueLabel.htmlFor = "plan-due";
       const due = node("input"); due.id = "plan-due"; due.type = "datetime-local"; due.required = true;
       due.value = draft.due;
@@ -679,9 +682,17 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const upcoming = node("section", null, "care-plan-group"); upcoming.id = "plan-upcoming";
     upcoming.setAttribute("aria-label", "Coming up");
     upcoming.append(node("h3", `Coming up · ${upcomingTasks.length}`, "care-plan-group-title"));
-    if (upcomingTasks.length) upcoming.append(planRows(upcomingTasks));
+    if (upcomingTasks.length) {
+      upcoming.append(planRows(upcomingTasks.slice(0, 3)));
+      if (upcomingTasks.length > 3) {
+        const more = node("details", null, "care-plan-more"); more.id = "plan-upcoming-more";
+        const remaining = upcomingTasks.length - 3;
+        more.append(node("summary", `Show ${remaining} more upcoming check-in${remaining === 1 ? "" : "s"}`), planRows(upcomingTasks.slice(3)));
+        upcoming.append(more);
+      }
+    }
     else upcoming.append(node("p", member.permissions.manageDuty
-      ? data.tasks.length ? "No upcoming check-ins. Add one above when your family is ready." : "Your plan is empty. Start with one small, agreed-upon check-in."
+      ? data.tasks.length ? "No upcoming check-ins. Add one below when your family is ready." : "Your plan is empty. Start with one small, agreed-upon check-in."
       : "No upcoming check-ins. A caregiver can schedule an agreed-upon check-in.", "care-note"));
     const earlier = node("section", null, "care-plan-group"); earlier.id = "plan-earlier";
     earlier.setAttribute("aria-label", "Earlier, still open");
@@ -734,7 +745,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         onError: failure, onSave: proposal => mutate(() => client.pausePlan(proposal), pauseSavedMessage, () => {}, "pause") });
     }
     const activePause = data.planPause?.pause && new Date(data.planPause.pause.endsAt) > new Date();
-    content.replaceChildren(heading, ...(pauseEditor && activePause ? [pauseEditor.element] : []), form, routines, upcoming,
+    content.replaceChildren(heading, ...(pauseEditor && activePause ? [pauseEditor.element] : []), upcoming, form, routines,
       ...(earlierTasks.length ? [earlier] : []), ...(recordedTasks.length ? [recorded] : []),
       ...(pauseEditor && !activePause ? [pauseEditor.element] : []));
   }

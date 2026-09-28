@@ -208,7 +208,8 @@
   .care-brief-sections { display: block; }
   .care-brief-section { break-inside: avoid; padding: 16px 0; }
 }
-.care-plan-create { margin-top: 24px; }
+.care-plan-actions { margin-top: 24px; }
+.care-plan-create { margin-top: 40px; }
 .care-plan-create > h3 { font: 400 28px/1.25 Georgia, serif; letter-spacing: -.02em; margin: 0 0 24px; }
 .care-plan-create .care-plan-time-note { margin: 8px 0 0; }
 .care-plan-create .care-plan-preview { margin: 24px 0 16px; padding: 12px 16px; border-left: 2px solid var(--sage); background: var(--paper-deep); color: var(--ink); }

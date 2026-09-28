@@ -27,7 +27,7 @@ try {
   page.on("pageerror", error => errors.push(error.message));
   page.on("request", request => { if (request.method() === "POST" && /\/api\/tasks\/[^/]+\/change$/.test(request.url())) writes.push(request.postDataJSON()); });
   await page.goto(`${origin}/invite.html#plan`);
-  await expect(page.getByRole("heading", { name: "Make space for the small things." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your family’s plan." })).toBeVisible();
   const due = await page.evaluate(() => {
     const day = new Date(); day.setDate(day.getDate() + 1); day.setHours(9, 0, 0, 0);
     return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}T09:00`;
@@ -122,6 +122,7 @@ try {
   assert.equal(cancels.length, 2); assert.deepEqual(cancels[0], cancels[1]); assert.equal("title" in cancels[0], false);
   assert.equal((await readTask()).state, "cancelled");
   await expect(page.locator(`#task-title-${taskId}`)).toHaveCount(0);
+  await page.locator('#plan-history > summary').click();
   await expect(page.getByRole("heading", { name: "Theo has updated this plan", exact: true })).toBeVisible();
   await page.screenshot({ path: path.join(output, "plan-cancelled-1280.png"), fullPage: true });
   assert.deepEqual(errors, []);
