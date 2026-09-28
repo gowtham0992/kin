@@ -24,7 +24,7 @@ import { completionUndoBody, completionUndoLifetime, CompletionUndoConflict } fr
 import { FamilyAccessDeniedError, mcpCarePermission, requireMembership, type FamilyAccess, type Membership } from "./membership.js";
 import { authorizeCareWrite, type CareWriteAuthorization } from "./care-write-authorization.js";
 import { InvitationIssueError, issueInvitationBody, type InvitationIssuer } from "./invitation-issuer.js";
-import type { BrowserAuthConfig } from "./browser-auth-config.js";
+import { browserAuthConfig, type BrowserAuthConfig } from "./browser-auth-config.js";
 import { installBrowserSessions, type BrowserSessionStore } from "./browser-session.js";
 import { familyAssets } from "./family-assets.js";
 import type { PushSubscriptions } from "./push-subscriptions.js";
@@ -74,6 +74,8 @@ export interface HttpAppOptions {
   familyAccess?: FamilyAccess;
   invitationIssuer?: InvitationIssuer;
   browserAuth?: BrowserAuthConfig | (() => Promise<BrowserAuthConfig>);
+  /** Optional public-site alias; authenticated workspace stays at its configured origin. */
+  publicSiteOrigin?: string;
   canonicalMcpUri?: string | (() => Promise<string>);
   authorizationServer?: string;
   serveSimulator?: boolean;
@@ -105,6 +107,11 @@ export function createHttpApp(
     standardMcpResource(options.authorizationServer!);
   }
   const familyEnabled = options.serveFamilyWorkspace === true;
+  const publicSite = options.publicSiteOrigin ? new URL(options.publicSiteOrigin) : undefined;
+  if (publicSite && (!familyEnabled || publicSite.protocol !== "https:" ||
+      publicSite.origin !== options.publicSiteOrigin || publicSite.username || publicSite.password)) {
+    throw new Error("Public site requires an exact HTTPS origin and the family surface");
+  }
   if (options.workspaceWeeklyBrief && (!familyEnabled || !options.accessAuthorizer || !options.familyAccess || !options.browserAuth)) {
     throw new Error("Workspace weekly brief requires the authenticated family workspace");
   }
@@ -216,6 +223,19 @@ export function createHttpApp(
     app.get("/kin-icon.svg", (_request, response) => {
       response.set(headers).redirect(302, "/kin-icon.png");
     });
+    if (publicSite) {
+      app.get("/invite.html", async (request, response, next) => {
+        if (request.get("host") !== publicSite.host) { next(); return; }
+        try {
+          const config = typeof options.browserAuth === "function" ? await options.browserAuth() : options.browserAuth!;
+          // Fixed, validated deployment destination, never a return URL or forwarded Host.
+          // Do not forward query values (including authorization codes) between origins.
+          const destination = browserAuthConfig(config).redirectUri;
+          if (new URL(destination).origin === publicSite.origin) { next(); return; }
+          response.set(headers).redirect(302, destination);
+        } catch (error) { next(error); }
+      });
+    }
     for (const asset of familyAssets) {
       app.get(`/${asset}`, (_request, response) => {
         const root = options.familyAssetDirectory ?? (asset === "mcp-client.js" ? path.resolve(moduleDirectory, "../dist/simulator") : simulatorDirectory);

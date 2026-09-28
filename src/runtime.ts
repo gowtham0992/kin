@@ -161,6 +161,7 @@ export function createConfiguredApp(
             return browserAuth;
           } : browserAuth,
           serveFamilyWorkspace: familyEnabled,
+          publicSiteOrigin: environment.KIN_PUBLIC_SITE_ORIGIN || undefined,
           workspaceWeeklyBrief,
           familyAssetDirectory: options.familyAssetDirectory,
           accessManagement: familyEnabled ? createDynamoAccessManagement({ tableName: tableName!, familyAccess: familyAccess!, region: environment.AWS_REGION }) : undefined,

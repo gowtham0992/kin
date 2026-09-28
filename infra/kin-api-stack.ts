@@ -55,6 +55,10 @@ export type KinApiStackProps = StackProps;
 export class KinApiStack extends Stack {
   constructor(scope: Construct, id: string, props: KinApiStackProps) {
     super(scope, id, props);
+    const publicSiteOrigin = new CfnParameter(this, "PublicSiteOrigin", {
+      type: "String", default: "", allowedPattern: "^$|^https://[a-z0-9.-]+$",
+      description: "Optional public-site alias only; workspace, OAuth issuer, Echo and push origins stay unchanged.",
+    });
     const webPushEnabled = new CfnParameter(this, "WebPushEnabled", {
       type: "String", default: "false", allowedValues: ["true", "false"],
       description: "Expose opt-in caregiver push only after the worker and application key are configured.",
@@ -475,6 +479,7 @@ export class KinApiStack extends Stack {
     apiFunction.addEnvironment("KIN_OAUTH_JWKS_URI", `${httpApi.apiEndpoint}/jwks`);
     apiFunction.addEnvironment("KIN_OAUTH_AUTHORIZATION_SERVER", httpApi.apiEndpoint);
     apiFunction.addEnvironment("KIN_BROWSER_REDIRECT_URI", `${httpApi.apiEndpoint}/invite.html`);
+    apiFunction.addEnvironment("KIN_PUBLIC_SITE_ORIGIN", publicSiteOrigin.valueAsString);
     const canonicalResourceParameter = new StringParameter(
       this,
       "CanonicalResourceParameter",

@@ -20,6 +20,28 @@ function setup() {
 }
 
 describe("separate family workspace", () => {
+  it("keeps a public alias separate from the existing authenticated workspace", async () => {
+    const f = setup();
+    f.options.publicSiteOrigin = "https://public.kin.example";
+    const app = f.app();
+    await request(app).get("/").set("host", "public.kin.example").expect(200);
+    const entry = await request(app).get("/invite.html?code=do-not-forward&next=https://evil.example")
+      .set("host", "public.kin.example").expect(302);
+    expect(entry.headers.location).toBe(config.redirectUri);
+    expect(entry.headers["cache-control"]).toBe("no-store");
+    expect(entry.headers["referrer-policy"]).toBe("no-referrer");
+    await request(app).get("/invite.html").set("host", "kin.example").expect(200);
+    await request(app).get("/invite.html").set("host", "kin.example")
+      .set("x-forwarded-host", "public.kin.example").expect(200);
+    await request(app).get("/api/today").set("host", "public.kin.example").expect(401);
+  });
+
+  it.each(["http://public.kin.example", "https://public.kin.example/path", "https://user@public.kin.example", "https://public.kin.example?x=1"])(
+    "rejects invalid public site origin %s", origin => {
+      const f = setup(); f.options.publicSiteOrigin = origin;
+      expect(() => f.app()).toThrow(/Public site/);
+    });
+
   it("explains invitation acceptance through Kin sign-in without requiring Alexa", async () => {
     const page = await request(setup().app()).get("/invite.html").expect(200);
     expect(page.text).toContain("sign in to Kin, choose Review invitation, and review their permissions before accepting");
