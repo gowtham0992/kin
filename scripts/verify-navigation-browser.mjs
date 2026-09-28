@@ -220,6 +220,34 @@ try {
     else await expect(page.locator("#care-request")).toBeVisible();
     await page.unroute("**/api/session");
   }
+  // Routine review uses the same explicit date/time-zone labels as single
+  // check-ins. Inject read-only synthetic plan data; never save this routine.
+  const routineTimes = [1, 2].map(days => new Date(Date.now() + days * 86400000).toISOString());
+  await page.route("**/api/plan", async route => {
+    const response = await route.fetch(), plan = await response.json();
+    return route.fulfill({ json: { ...plan, tasks: routineTimes.map((dueAt, index) => ({
+      id: `routine-zone-${index}`, routineId: "routine-zone", title: "Synthetic routine review",
+      dueAt, state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null,
+    })) } });
+  });
+  await page.goto(`${origin}/invite.html#plan`);
+  await page.getByText("Synthetic routine review · 2 future check-ins", { exact: true }).click();
+  const routine = page.locator('.care-routines form');
+  const expectedRange = await page.evaluate(times => times.map(value => new Intl.DateTimeFormat(undefined,
+    { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })
+    .format(new Date(value))).join(' through '), routineTimes);
+  await expect(routine.locator('p').first()).toHaveText(expectedRange);
+  await expect(routine.locator('input[type="checkbox"]')).not.toBeChecked();
+  for (const width of [375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const bounds = await routine.locator('p').first().evaluate(element => {
+      const box = element.getBoundingClientRect();
+      return { left: box.left, right: box.right, overflow: element.scrollWidth > element.clientWidth + 1 };
+    });
+    assert.ok(bounds.left >= 0 && bounds.right <= width && !bounds.overflow);
+    await page.screenshot({ path: path.join(output, `routine-review-${width}.png`), fullPage: true });
+  }
+  await page.unroute("**/api/plan");
   // Fresh access loss clears both navigation levels and private content.
   await page.goto(`${origin}/invite.html#today`);
   await expect(primary).toBeVisible();

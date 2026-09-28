@@ -91,6 +91,17 @@ async function fixture(tasks = [single()], manageDuty = true, reschedule = false
 }
 
 describe("reviewed one-time check-in editing", () => {
+  it("labels both routine-review endpoints with their local time zones across a clock change", async () => {
+    vi.setSystemTime(new Date("2026-10-30T12:00:00.000Z"));
+    const first = single("routine-first", { routineId: "daily", dueAt: "2026-10-31T15:00:00.000Z" });
+    const last = single("routine-last", { routineId: "daily", dueAt: "2026-11-02T16:00:00.000Z" });
+    const ui = await fixture([first, last]);
+    const format = (value: string) => new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(value));
+    const editor = ui.routineEdit();
+    expect(editor.form.textContent).toContain(`${format(first.dueAt)} through ${format(last.dueAt)}`);
+    expect(editor.consent.checked).toBe(false);
+    expect(ui.bodies()).toEqual([]);
+  });
   it("puts today's reply actions before secondary closure without changing consent", async () => {
     const overdue = single("today-overdue", { dueAt: "2026-09-08T14:00:00.000Z" });
     const ui = await fixture([overdue], true, false, true);

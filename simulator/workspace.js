@@ -719,7 +719,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         title.addEventListener("change", () => { consent.checked = false; });
         confirmation.append(consent, node("span", `I reviewed this change to ${tasks.length} future check-ins. Cancellation keeps a record; it cannot be undone here.`));
         const save = node("button", "Apply reviewed change", "secondary"); save.type = "submit";
-        edit.append(node("p", `${new Date(tasks[0].dueAt).toLocaleString()} through ${new Date(tasks.at(-1).dueAt).toLocaleString()}`, "care-note"), label, title, actionLabel, action, confirmation, save);
+        edit.append(node("p", `${timestamp(tasks[0].dueAt)} through ${timestamp(tasks.at(-1).dueAt)}`, "care-note"), label, title, actionLabel, action, confirmation, save);
         edit.addEventListener("submit", event => { event.preventDefault(); if (busy || client.pending || !consent.checked || !edit.reportValidity()) return;
           consent.checked = false;
           void mutate(() => client.changeRoutine({ routineId, action: action.value, ...(action.value === "rename" ? { title: title.value.trim() } : {}),
