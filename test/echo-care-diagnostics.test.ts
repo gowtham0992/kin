@@ -38,6 +38,25 @@ function safeEvent(event: EchoCareDiagnostic) {
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("privacy-safe Echo care diagnostics", () => {
+  it.each([true, false])("finishes reminder-ticket validation exactly once without logging the ticket (valid: %s)", async valid => {
+    const f = fixture(), original = f.fetch.getMockImplementation()!;
+    const ticket = "PRIVATE_TICKET_".padEnd(43, "x");
+    const result = { ticket, expiresAt: 1_789_142_490_000 };
+    f.fetch.mockImplementation(async (url, init) => {
+      const frame = JSON.parse(String(init?.body));
+      if (frame.method !== "tools/call") return original(url, init);
+      return Response.json({ jsonrpc: "2.0", id: frame.id, result: { content: [],
+        structuredContent: valid ? result : { ...result, expiresAt: "PRIVATE INVALID EXPIRY" } } });
+    });
+    const pending = f.client.prepareReminder!(secret, { taskId: task.id, expected: input.expected, consent: "kin-reminder-sync-v1" });
+    if (valid) await expect(pending).resolves.toEqual(result);
+    else await expect(pending).rejects.toMatchObject({ code: "unavailable" });
+    expect(f.events).toHaveLength(1);
+    expect(f.events[0]).toMatchObject({ operation: "confirm", phase: "validation",
+      outcome: valid ? "success" : "failure", reason: valid ? "none" : "result_validation" });
+    expect(f.events[0]!.phases).toHaveProperty("validation");
+    safeEvent(f.events[0]!);
+  });
   it("emits one allowlisted success only after snapshot validation, without recording optional GET", async () => {
     const f = fixture(); await expect(f.client.today(secret)).resolves.toEqual(snapshot);
     expect(Object.isFrozen(f.events[0]!.phases)).toBe(true);

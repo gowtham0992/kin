@@ -339,8 +339,9 @@ export function createEchoCareClient(endpoint: string | URL, options: EchoCareCl
     async prepareReminder(accessToken, input) {
       const diagnostic = careDiagnostic("confirm", options.onDiagnostic);
       const content = await call(accessToken, "prepare_plan_reminder", input, diagnostic);
+      diagnostic.phase("validation");
       const result = z.object({ ticket: z.string().regex(/^[A-Za-z0-9_-]{43}$/), expiresAt: z.number().int().positive() }).strict().safeParse(content);
-      if (!result.success) throw new EchoCareError("unavailable");
+      if (!result.success) { diagnostic.finish("result_validation"); throw new EchoCareError("unavailable"); }
       diagnostic.finish("none"); return result.data;
     },
     async confirm(accessToken, input) {
