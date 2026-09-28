@@ -212,6 +212,10 @@ export function createHttpApp(
         dotfiles: "deny", headers, lastModified: false, etag: false });
     });
     // Never derive a filesystem path from the request or expose the demo directory.
+    // Existing installations may retain the previous icon URL until their manifest refreshes.
+    app.get("/kin-icon.svg", (_request, response) => {
+      response.set(headers).redirect(302, "/kin-icon.png");
+    });
     for (const asset of familyAssets) {
       app.get(`/${asset}`, (_request, response) => {
         const root = options.familyAssetDirectory ?? (asset === "mcp-client.js" ? path.resolve(moduleDirectory, "../dist/simulator") : simulatorDirectory);

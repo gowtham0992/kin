@@ -14,7 +14,7 @@ it("serves the packaged family workspace through the actual Lambda handler witho
   const key = Object.values(resources)[0]!.Properties.Code.S3Key as string;
   const directory = path.join(app.synth().directory, `asset.${key.replace(/\.zip$/, "")}`);
   const files = ["browser-auth.js", "care-client.js", "conversation.css", "duty-rotation.js", "home.css", "home.html", "how-kin-works.html", "invite-client.js", "invite.css", "invite.html", "invite.js", "mcp-client.js", "roster-editor.js", "styles.css", "voice-input.js", "workspace-client.js", "workspace.css", "workspace.js"];
-  files.push("install.js", "kin-icon.svg", "kin-sw.js", "kin.webmanifest", "push-controls.js", "completion-undo.js", "plan-pause.js");
+  files.push("install.js", "kin-icon.png", "kin-logo.png", "kin-sw.js", "kin.webmanifest", "push-controls.js", "completion-undo.js", "plan-pause.js");
   files.sort();
   expect((await readdir(path.join(directory, "family"))).sort()).toEqual(files);
   const compiledMcp = await build({ entryPoints: ["simulator/mcp-client.ts"], bundle: true, format: "esm", platform: "browser", target: "es2022",
@@ -42,9 +42,13 @@ it("serves the packaged family workspace through the actual Lambda handler witho
       const response = await handler(event(`/${file}`), {}, () => {});
       expect(response.statusCode).toBe(200);
       expect(new Headers(response.headers).get("cache-control")).toBe("no-store");
-      const body = response.isBase64Encoded ? Buffer.from(response.body, "base64").toString("utf8") : response.body;
-      expect(body).toBe(await readFile(path.join(directory, "family", file), "utf8"));
-      expect(body).toBe(file === "mcp-client.js" ? compiledMcp.outputFiles[0]!.text : await readFile(new URL(`../simulator/${file}`, import.meta.url), "utf8"));
+      const body = Buffer.from(response.body, response.isBase64Encoded ? "base64" : "utf8");
+      expect(body).toEqual(await readFile(path.join(directory, "family", file)));
+      expect(body).toEqual(file === "mcp-client.js" ? Buffer.from(compiledMcp.outputFiles[0]!.text) : await readFile(new URL(`../simulator/${file}`, import.meta.url)));
+      if (file.endsWith(".png")) {
+        expect(new Headers(response.headers).get("content-type")).toContain("image/png");
+        expect(response.isBase64Encoded).toBe(true);
+      }
     }
     for (const route of ["/index.html", "/app.js", "/story.html", "/story.js", "/mcp-client.ts", "/%2e%2e%2findex.mjs"]) {
       expect((await handler(event(route), {}, () => {})).statusCode).toBe(404);

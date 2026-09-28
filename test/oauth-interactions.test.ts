@@ -12,6 +12,15 @@ const uid = "interaction-123";
 const resourceUri = "https://example.execute-api.us-east-1.amazonaws.com/mcp";
 const csrfSecret = "a-secure-interaction-secret-that-is-long-enough";
 
+it("uses Kin's configured brand origin without trusting the request host", async () => {
+  const { app } = fixture();
+  const page = await request(app).get(`/interaction/${uid}`).set("Host", "untrusted.example").expect(200);
+  expect(page.text).toContain('src="https://example.execute-api.us-east-1.amazonaws.com/kin-logo.png" alt="Kin"');
+  expect(page.headers["content-security-policy"]).toContain("img-src https://example.execute-api.us-east-1.amazonaws.com;");
+  expect(page.headers["content-security-policy"]).not.toContain("untrusted.example");
+  expect(page.headers["referrer-policy"]).toBe("no-referrer");
+});
+
 function fixture(prompt: "login" | "consent" = "login", enrollment?: FamilyEnrollment, browser: boolean | "desktop" = false) {
   const details = {
     uid,

@@ -42,7 +42,8 @@ describe("caregiver app installation", () => {
     expect(manifest.headers["content-type"]).toContain("application/manifest+json");
     expect(manifest.headers["cache-control"]).toBe("no-store");
     expect(JSON.parse(manifest.text)).toMatchObject({ id: "/invite.html", start_url: "/invite.html", display: "standalone", scope: "/" });
-    for (const name of ["kin-sw.js", "install.js", "kin-icon.svg"]) await request(app).get(`/${name}`).expect(200);
+    for (const name of ["kin-sw.js", "install.js", "kin-icon.png", "kin-logo.png"]) await request(app).get(`/${name}`).expect(200);
+    await request(app).get("/kin-icon.svg").expect(302).expect("Location", "/kin-icon.png");
     const page = await request(app).get("/invite.html").expect(200);
     expect(page.text).toContain('rel="manifest"');
     expect(page.text).toContain("Installation does not turn on notifications");

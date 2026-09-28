@@ -10,6 +10,6 @@
   "theme_color": "#20352e",
   "prefer_related_applications": false,
   "icons": [
-    { "src": "/kin-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/kin-icon.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any maskable" }
   ]
 }

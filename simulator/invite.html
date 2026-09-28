@@ -8,17 +8,19 @@
     <title>Your family workspace — Kin</title>
     <meta name="theme-color" content="#20352e" />
     <link rel="manifest" href="/kin.webmanifest" />
-    <link rel="icon" href="/kin-icon.svg" type="image/svg+xml" />
+
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/invite.css" />
     <link rel="stylesheet" href="/workspace.css" />
     <link rel="stylesheet" href="/conversation.css" />
     <script type="module" src="/invite.js"></script>
     <script type="module" src="/install.js"></script>
+    <link rel="icon" href="/kin-icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/kin-icon.png" />
   </head>
   <body class="workspace-page">
     <a id="workspace-skip" class="workspace-skip" href="#workspace-main">Skip to content</a>
-    <header class="site-header"><a class="brand" href="/" aria-label="Kin home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>kin</span></a><a class="back-link" href="/">Switch experience <span aria-hidden="true">↗</span></a></header>
+    <header class="site-header"><a class="brand" href="/" aria-label="Kin home"><img class="brand-logo" src="/kin-logo.png" alt="Kin" width="150" height="75" /></a><a class="back-link" href="/">Switch experience <span aria-hidden="true">↗</span></a></header>
     <main id="workspace-main" class="invite-page" tabindex="-1">
       <section class="invite-intro"><p class="kicker">Your family circle</p><h1>A familiar place. <br /><em>Your people, here.</em></h1><p>Sign in to check in, share the day, or catch up on your family’s plan.</p><p class="workspace-simulation-note">The browser conversation is a simulated Alexa+ experience backed by real MCP. A separate classic Alexa development skill connects linked test Echo devices.</p></section>
       <div class="workspace-session"><p id="workspace-identity"></p><button id="browser-signin" class="primary" type="button" hidden>Sign in to Kin</button><details class="workspace-account"><summary>Account &amp; sign out</summary><button id="browser-disconnect" class="secondary" type="button" hidden>Sign out of this workspace</button><p>Your family membership stays the same. This does not sign you out of the account provider.</p></details></div>

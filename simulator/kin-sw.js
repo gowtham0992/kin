@@ -23,7 +23,7 @@ self.addEventListener("push", event => {
   const test = message.kind === "connection_test";
   event.waitUntil(self.registration.showNotification(test ? "Kin · Test notification" : "Kin · You're on today", {
     body: test ? "Your Kin phone connection test. No care action is needed." : "A check-in needs a follow-up. Open Kin to review it.",
-    tag: `kin-${message.tag}`, icon: "/kin-icon.svg",
+    tag: `kin-${message.tag}`, icon: "/kin-icon.png",
     // No care data or server-supplied destination stored in the notification.
     data: { path: "/invite.html#today" },
   }));
