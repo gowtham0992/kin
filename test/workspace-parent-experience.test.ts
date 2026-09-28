@@ -3,7 +3,7 @@ const { createWorkspace } = await import(new URL("../simulator/workspace.js", im
 
 // Only DOM and HTTP are boundaries; the actual workspace and request client run.
 class Element {
-  tagName: string; id = ""; className = ""; value = ""; type = ""; hidden = false; disabled = false; checked = false; open = false;
+  tagName: string; id = ""; className = ""; value = ""; type = ""; href = ""; hidden = false; disabled = false; checked = false; open = false;
   dataset: Record<string, string> = {}; attributes: Record<string, string> = {};
   parent: Element | null = null; children: Element[] = []; private ownText = "";
   classList = { add() {}, remove() {} };
@@ -32,7 +32,7 @@ let close: (() => void) | undefined;
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { close?.(); close = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-async function fixture(tasks: Array<typeof water & { lastResponse?: string | null; confirmedBy?: string | null; confirmedAt?: string | null }> = [water], mcpConversation = false, naturalLanguage = false, initialHash = "#ask", loadMcpClient?: () => Promise<unknown>) {
+async function fixture(tasks: Array<typeof water & { lastResponse?: string | null; confirmedBy?: string | null; confirmedAt?: string | null }> = [water], mcpConversation = false, naturalLanguage = false, initialHash = "#ask", loadMcpClient?: () => Promise<unknown>, todayExtra: Record<string, unknown> = {}) {
   const elements = new Map<string, Element>();
   const get = (id: string) => {
     const nested = elements.get("workspace-content")?.descendants().find(child => child.id === id);
@@ -70,7 +70,7 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
     return url === "/api/conversation" ? heldConversation ?? conversationResult : ({ ok: true, json: async () => url === "/api/session"
       ? { name: "Evelyn", role: "care_recipient", mcpConversation, permissions: { confirm: true, manageDuty: false, invite: false },
         ...(naturalLanguage ? { conversation: { naturalLanguage: true, consentVersion: "bedrock-task-titles-v1" } } : {}) }
-      : { tasks, summary: { total: tasks.length, completed: tasks.filter(task => task.state === "done").length }, escalations: [], date: "2026-09-08" } });
+      : { tasks, summary: { total: tasks.length, completed: tasks.filter(task => task.state === "done").length }, escalations: [], date: "2026-09-08", ...todayExtra } });
   });
   const onAccessLost = vi.fn();
   const workspace = createWorkspace({ request, onAccessLost, onInvite() {}, onLeaveInvite() {}, ...(loadMcpClient ? { loadMcpClient } : {}) }); close = workspace.reset;
@@ -92,6 +92,41 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
 }
 
 describe("parent-first conversation", () => {
+  it("brings unacknowledged follow-ups ahead of the plan without equating them with missing replies", async () => {
+    const ui = await fixture([{ ...water, state: "done" }], false, false, "#today", undefined, {
+      escalations: [{ id: "follow-up", taskId: water.id, dueAt: water.dueAt, status: "sent", recipientMemberName: "Theo" }],
+    });
+    const elements = ui.descendants();
+    expect(ui.get("workspace-content").textContent).toContain("1 follow-up needs acknowledgment");
+    expect(elements.findIndex(e => e.id === "today-follow-ups")).toBeLessThan(elements.findIndex(e => e.className === "care-plan"));
+    const followUp = elements.find(e => e.className === "care-follow-up")!;
+    expect(followUp.textContent).toContain("Reply recorded: done");
+    expect(followUp.textContent).toContain("Routed to Theo");
+    expect(followUp.textContent).toContain("Phone receipt is not verified");
+    expect(ui.request.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+  });
+
+  it("keeps acknowledgment separate from an unanswered check-in and current duty", async () => {
+    const ui = await fixture([water], false, false, "#today", undefined, {
+      onDuty: { memberName: "Maya", endsAt: "2026-09-09T00:00:00.000Z" },
+      escalations: [{ id: "follow-up", taskId: water.id, dueAt: water.dueAt, status: "sent", recipientMemberName: "Theo", acknowledgedBy: "Theo", acknowledgedAt: "2026-09-08T16:00:00.000Z" }],
+    });
+    const followUp = ui.descendants().find(e => e.className === "care-follow-up")!;
+    expect(followUp.textContent).toContain("Seen by Theo");
+    expect(followUp.textContent).toContain("No reply recorded");
+    expect(followUp.textContent).not.toContain("Routed to Maya");
+    expect(ui.get("workspace-content").textContent).not.toContain("1 follow-up needs acknowledgment");
+    expect(ui.button("Acknowledge follow-up")).toBeUndefined();
+  });
+
+  it("gives an empty circle a role-appropriate start without pretending setup is complete", async () => {
+    const ui = await fixture([], false, false, "#today");
+    expect(ui.descendants().find(e => e.className === "care-start-guide")?.textContent).toContain("Agree on one small check-in");
+    expect(ui.descendants().find(e => e.className === "care-start-guide")?.textContent).toContain("A turn does not switch on phone alerts");
+    expect(ui.descendants().find(e => e.tagName === "A" && e.textContent === "How to get started")?.href).toBe("/how-kin-works.html");
+    expect(ui.descendants().find(e => e.tagName === "A" && e.textContent === "Schedule a check-in")).toBeUndefined();
+  });
+
   it("reads account attribution before check-in actions and coverage after them", async () => {
     const ui = await fixture([water], false, false, "#today");
     const elements = ui.descendants();

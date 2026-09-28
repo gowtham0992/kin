@@ -40,3 +40,4 @@ jobs:
           npm run test:dynamo -- "$kin_dynamo_dir"
       - run: npx --no-install playwright install --with-deps chromium
       - run: npm run test:browser
+      - run: npm run test:browser:today

@@ -399,10 +399,13 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     if (mcpTracePanel) { content.append(mcpTracePanel); renderMcpTrace(); }
   }
   function renderToday(data) {
+    const awaitingAcknowledgment = data.escalations.filter(alert => !alert.acknowledgedBy).length;
     const header = node("div", null, "care-summary");
     const introduction = node("div", null, "care-summary-intro");
-    introduction.append(node("p", `Family plan · ${date(data.date)}`, "kicker"), node("h2", "A little care, shared."),
-      node("p", data.summary.total ? `${data.summary.completed} of ${data.summary.total} check-ins completed` : "Room for one small check-in.", "care-count"));
+    introduction.append(node("p", `Family plan · ${date(data.date)}`, "kicker"), node("h2", awaitingAcknowledgment
+      ? awaitingAcknowledgment === 1 ? "A follow-up to review." : "Follow-ups to review." : "A little care, shared."));
+    if (awaitingAcknowledgment) introduction.append(node("p", `${awaitingAcknowledgment} ${awaitingAcknowledgment === 1 ? "follow-up needs" : "follow-ups need"} acknowledgment`, "care-attention"));
+    introduction.append(node("p", data.summary.total ? `${data.summary.completed} of ${data.summary.total} check-ins completed` : "Room for one small check-in.", "care-count"));
     const duty = node("section", null, "care-duty-card");
     duty.setAttribute("aria-label", "Today’s coverage");
     duty.append(node("p", "Today’s coverage", "kicker"),
@@ -417,6 +420,11 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       copy.append(node("p", `${timestamp(task.dueAt)} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state === "scheduled" ? task.lastResponse === "not_yet" ? "Not yet" : "Awaiting check-in" : task.state}`, "kicker"), node("h3", task.title));
       if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
       if (task.confirmedBy) copy.append(node("p", `Via ${task.confirmedBy}’s Kin account · ${timestamp(task.confirmedAt)}`, "care-note"));
+      const followUp = data.escalations.find(alert => alert.taskId === task.id && !alert.acknowledgedBy)
+        ?? data.escalations.find(alert => alert.taskId === task.id);
+      if (followUp) copy.append(node("p", followUp.acknowledgedBy
+        ? `Follow-up seen by ${followUp.acknowledgedBy}. This does not complete the check-in.`
+        : "Family follow-up is waiting for acknowledgment.", "care-note"));
       item.append(copy);
       if (member.permissions.confirm && task.state === "scheduled") {
         const actions = node("div", null, "care-actions");
@@ -439,20 +447,56 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       link.href = "#plan";
       empty.append(copy, link); list.append(empty);
     }
-    const alerts = node("section", null, "care-alerts"); alerts.append(node("h3", "Family follow-up"));
+    const alerts = node("section", null, "care-alerts"); alerts.id = "today-follow-ups";
+    alerts.append(node("h3", "Family follow-up"));
     if (!data.escalations.length) alerts.append(node("p", "No follow-ups listed for today or yesterday. This is not a safety check."));
-    for (const alert of data.escalations) {
+    // Keep the stored recipient separate from today's duty: a handoff does not
+    // reroute an existing follow-up. Acknowledgment is not task completion.
+    for (const alert of [...data.escalations].sort((a, b) => Number(!!a.acknowledgedBy) - Number(!!b.acknowledgedBy))) {
+      const task = data.tasks.find(task => task.id === alert.taskId);
+      const item = node("article", null, "care-follow-up");
+      item.append(node("p", alert.acknowledgedBy ? `Seen by ${alert.acknowledgedBy}` : "Waiting for acknowledgment", "kicker"),
+        node("h4", task?.title ?? "Check-in"), node("p", `Due ${timestamp(alert.dueAt)}`, "care-note"));
+      const reply = !task ? "Open the plan to review this check-in’s current reply."
+        : task.state === "scheduled" ? task.lastResponse === "not_yet" ? "Reply recorded: not yet. The check-in remains open." : "No reply recorded."
+        : task.state === "done" || task.state === "skipped" ? `Reply recorded: ${task.state}.`
+        : task.state === "closed_unanswered" ? "Closed without a reply." : "This check-in was canceled.";
+      item.append(node("p", reply));
+      if (!task) {
+        const plan = node("a", "Review family plan", "care-duty-link"); plan.href = "#plan";
+        item.append(plan);
+      }
+      if (alert.recipientMemberName) item.append(node("p", `Routed to ${alert.recipientMemberName}.`, "care-note"));
+      if (alert.acknowledgedBy) item.append(node("p", `${alert.acknowledgedBy} acknowledged the follow-up at ${timestamp(alert.acknowledgedAt)}. The check-in itself is unchanged.`, "care-note"));
+      else if (member.permissions.manageDuty) item.append(button("Acknowledge follow-up", () => void mutate(() => client.acknowledge(alert.id), "Follow-up acknowledged. The check-in itself is unchanged.")));
+      else item.append(node("p", "A caregiver can acknowledge this follow-up.", "care-note"));
+      const delivery = node("details", null, "care-delivery-details");
+      delivery.append(node("summary", "Notification details"));
       const notification = alert.status === "receipt_pending" ? "Provider accepted; receipt needs review"
         : alert.status === "sent" ? "Notification accepted by the messaging service" : "Notification not confirmed";
-      alerts.append(node("p", `${data.tasks.find(task => task.id === alert.taskId)?.title ?? "Check-in"} · Due ${timestamp(alert.dueAt)}. ${notification}${alert.recipientMemberName ? ` for ${alert.recipientMemberName}` : ""}.${alert.acknowledgedBy ? "" : " No caregiver acknowledgment recorded."}`));
-      if (alert.status === "receipt_pending") alerts.append(node("p", "The operator needs to reconcile the receipt. This does not prove phone delivery, and Kin will not automatically resend it.", "care-note"));
-      if (alert.acknowledgedBy) alerts.append(node("p", `${alert.acknowledgedBy} acknowledged the follow-up at ${timestamp(alert.acknowledgedAt)}. The check-in itself is unchanged.`));
-      else if (member.permissions.manageDuty) alerts.append(button("Acknowledge follow-up", () => void mutate(() => client.acknowledge(alert.id), "Follow-up acknowledged.")));
+      delivery.append(node("p", `${notification}. Phone receipt is not verified by this status.`, "care-note"));
+      if (alert.status === "receipt_pending") delivery.append(node("p", "The operator needs to reconcile the receipt. This does not prove phone delivery, and Kin will not automatically resend it.", "care-note"));
+      item.append(delivery); alerts.append(item);
     }
     if (data.escalations.length) alerts.append(node("p", "Acknowledgment records that a caregiver has seen the follow-up. It does not confirm the task is done or cancel queued messages.", "care-note"));
     const undoOffer = completionUndoOffer(data);
     const today = node("div", null, "care-today");
-    today.append(header, ...(undoOffer ? [undoOffer] : []), list, duty, alerts);
+    today.append(header, ...(undoOffer ? [undoOffer] : []), ...(awaitingAcknowledgment ? [alerts] : []), list, duty, ...(!awaitingAcknowledgment ? [alerts] : []));
+    if (!data.tasks.length) {
+      const start = node("section", null, "care-start-guide");
+      start.append(node("h3", "A simple way to start."));
+      const steps = node("ol");
+      for (const [title, text] of [
+        ["Agree on one small check-in", "Choose something together. A caregiver adds its time in Plan."],
+        ["Choose who follows up", "Assign a caregiver in Turns. A turn does not switch on phone alerts."],
+        ["Reply, then catch up", "Use Ask Kin or a linked Echo. Your circle sees the reply here; acknowledging a follow-up does not mark a check-in done."],
+      ]) {
+        const step = node("li"); step.append(node("strong", title), node("p", text, "care-note")); steps.append(step);
+      }
+      const guide = node("a", "How to get started", "care-duty-link"); guide.href = "/how-kin-works.html";
+      guide.setAttribute("aria-label", "How to get started");
+      start.append(steps, guide); today.append(start);
+    }
     content.replaceChildren(today);
   }
   function renderCircle(data) {

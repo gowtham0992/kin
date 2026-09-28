@@ -52,9 +52,9 @@
   .home-mode { margin: 0; font-size: 11px; order: 0; }
   .home-introduction h1 { font-size: clamp(48px, 12vw, 68px); margin: 0; order: 1; }
   .home-lead { font-size: 18px; margin: 0; order: 2; }
-  .home-boundary { margin: 0; order: 3; }
+  .home-boundary { margin: 0; order: 5; }
   .home-entries { order: 4; }
-  .home-description { margin: 0; order: 5; }
+  .home-description { margin: 0; order: 3; }
   .home-parent { min-height: 0; }
   .home-parent h2 { margin-top: 24px; font-size: 36px; }
   .home-parent h2 br, .home-parent p br { display: none; }

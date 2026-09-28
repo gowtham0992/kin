@@ -87,7 +87,9 @@ describe("family follow-up UI", () => {
   it("keeps a parent's Not yet separate from an absent caregiver acknowledgment", async () => {
     const content = await workspace(snapshot());
     expect(content.textContent).toContain("Not yet");
-    expect(content.textContent).toContain("No caregiver acknowledgment recorded.");
+    const followUp = content.descendants().find(element => element.className === "care-follow-up")!;
+    expect(followUp.textContent).toContain("Waiting for acknowledgment");
+    expect(followUp.textContent).toContain("Reply recorded: not yet. The check-in remains open.");
     expect(content.textContent).not.toContain("someone has responded");
     expect(content.textContent.toLowerCase()).not.toContain("missed");
   });
@@ -95,7 +97,11 @@ describe("family follow-up UI", () => {
   it("shows a prior-day unresolved alert's due date and time without inventing a task response", async () => {
     const data = snapshot(); data.escalations[0]!.taskId = "older-task"; data.escalations[0]!.dueAt = "2026-09-07T23:30:00.000Z";
     const content = await workspace(data);
-    expect(content.textContent).toContain(`Check-in · Due ${timestamp(data.escalations[0]!.dueAt)}`);
+    const followUp = content.descendants().find(element => element.className === "care-follow-up")!;
+    expect(followUp.children.find(element => element.tagName === "H4")?.textContent).toBe("Check-in");
+    expect(followUp.textContent).toContain(`Due ${timestamp(data.escalations[0]!.dueAt)}`);
+    expect(followUp.textContent).toContain("Open the plan to review this check-in’s current reply.");
+    expect(followUp.textContent).not.toContain("No reply recorded.");
     expect(content.textContent).toContain("Acknowledge follow-up");
     expect(content.textContent).not.toContain("Missed check-in");
   });
