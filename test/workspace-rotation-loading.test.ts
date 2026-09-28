@@ -83,6 +83,20 @@ async function loadingFixture() {
 }
 
 describe("workspace view loading", () => {
+  it("shows seven readable duty summaries with assignment forms closed until requested", async () => {
+    const ui = await loadingFixture(); await ui.page.open();
+    const days = ui.get("workspace-content").descendants().filter(item => item.className === "care-duty-day");
+    expect(days).toHaveLength(7);
+    for (const day of days) {
+      expect(day.tagName).toBe("DETAILS");
+      expect(day.attributes.has("open")).toBe(false);
+      expect(day.children[0]!.tagName).toBe("SUMMARY");
+      expect(day.children[0]!.textContent).toMatch(/Sep/);
+      expect(day.children[0]!.textContent).toMatch(/Maya|Theo|Uncovered/);
+      expect(day.children[1]!.tagName).toBe("FORM");
+    }
+    expect(ui.request.mock.calls.every(([url]) => url === "/api/session" || url === "/api/circle")).toBe(true);
+  });
   it("shows a noninteractive placeholder until the initial view is available", async () => {
     const ui = await loadingFixture(); ui.hold(); const opening = ui.page.open();
     await vi.waitFor(() => expect(ui.request).toHaveBeenCalledWith("/api/circle", expect.anything()));

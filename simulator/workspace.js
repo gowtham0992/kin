@@ -501,7 +501,15 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
           actions.append(confirm, button("Keep unchanged", () => { review.hidden = true; select.value = day.assignment?.memberId ?? ""; select.focus(); })); review.append(actions); review.hidden = false; confirm.focus();
         });
       }
-      roster.append(row);
+      if (member.permissions.manageDuty && (caregivers.length || day.assignment)) {
+        const dayPanel = node("details", null, "care-duty-day");
+        const summary = node("summary", null, "care-duty-summary");
+        const copy = node("span", null, "care-duty-summary-copy");
+        copy.append(node("strong", date(day.date)), node("span", day.assignment ? assignedName : "Uncovered", "care-note"));
+        summary.append(copy, node("span", day.assignment ? "Change" : "Assign", "care-duty-edit-label"));
+        dayPanel.append(summary, row);
+        roster.append(dayPanel);
+      } else roster.append(row);
     }
     if (!caregivers.length) roster.append(node("p", "No roster member is eligible for duty. The organizer needs to configure the caregiver roster before these days can be assigned."));
     content.replaceChildren(heading, coverage, balance, roster, node("p", "Handoffs apply to new follow-ups; alerts already queued keep their original recipient.", "care-note"));

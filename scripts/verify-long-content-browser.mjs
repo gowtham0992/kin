@@ -34,11 +34,11 @@ try {
       await page.setViewportSize({ width, height: 1000 });
       // Body overflow can be hidden by CSS. Also inspect individual text and
       // control bounds so clipping does not masquerade as a responsive pass.
-      const clipped = await page.locator('#workspace-content h2, #workspace-content h3, #workspace-content p, #workspace-content button, #workspace-content select').evaluateAll(elements => elements.flatMap(element => {
+      const clipped = await page.locator('#workspace-content h2, #workspace-content h3, #workspace-content p, #workspace-content button, #workspace-content select, .care-duty-summary-copy > *').evaluateAll(elements => elements.flatMap(element => {
         const rect = element.getBoundingClientRect();
         if (!rect.width || !rect.height || getComputedStyle(element).visibility === 'hidden') return [];
         const outside = rect.left < -1 || rect.right > innerWidth + 1;
-        const textOverflow = ['H2', 'H3', 'P'].includes(element.tagName) && element.scrollWidth > element.clientWidth + 1;
+        const textOverflow = (['H2', 'H3', 'P'].includes(element.tagName) || element.parentElement.classList.contains('care-duty-summary-copy')) && element.scrollWidth > element.clientWidth + 1;
         return outside || textOverflow ? [{ tag: element.tagName, text: element.textContent.slice(0, 100), outside, textOverflow }] : [];
       }));
       assert.deepEqual(clipped, [], `${view}: clipped content at ${width}px`);

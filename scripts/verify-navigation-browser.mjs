@@ -96,6 +96,34 @@ try {
   await primary.getByRole("link", { name: "Turns", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Who’s taking the next turn?" })).toBeVisible();
   await expect(page).toHaveURL(`${origin}/invite.html#turns`);
+  const dutyDays = page.locator('.care-duty-day');
+  await expect(dutyDays).toHaveCount(7);
+  await expect(dutyDays.locator('select').first()).not.toBeVisible();
+  const firstDay = dutyDays.first(), firstSummary = firstDay.locator('summary');
+  await firstSummary.focus(); await page.keyboard.press('Enter');
+  await expect(firstDay.locator('select')).toBeVisible();
+  assert.equal(await firstSummary.evaluate(el => getComputedStyle(el).outlineStyle !== 'none'), true);
+  const originalDuty = await firstDay.locator('select').inputValue();
+  await firstDay.locator('select').selectOption('__clear__');
+  await firstDay.getByRole('button', {name:'Review handoff',exact:true}).click();
+  await expect(firstDay.getByRole('heading',{name:'Clear this assignment?',exact:true})).toBeVisible();
+  await expect(firstDay.getByRole('button',{name:'Confirm clear assignment',exact:true})).toBeFocused();
+  await firstDay.getByRole('button',{name:'Keep unchanged',exact:true}).click();
+  await expect(firstDay.locator('select')).toHaveValue(originalDuty);
+  await expect(firstDay.locator('select')).toBeFocused();
+  await firstSummary.focus();
+  await page.keyboard.press('Enter');
+  await expect(firstDay.locator('select')).not.toBeVisible();
+  for (const width of [375, 768, 1440]) {
+    await page.setViewportSize({width, height:900});
+    const bounds = await dutyDays.locator('summary').evaluateAll(items => items.map(el => { const r=el.getBoundingClientRect(); return {height:r.height,left:r.left,right:r.right}; }));
+    assert.ok(bounds.every(r=>r.height>=44 && r.left>=0 && r.right<=width));
+    const overviewHeight = await page.locator('.care-duty-week').evaluate(el=>el.getBoundingClientRect().height);
+    assert.ok(overviewHeight < 650, 'The ordinary seven-day overview stays compact without disclosure margins');
+    await page.screenshot({path:path.join(output, `turns-overview-${width}.png`),fullPage:true});
+  }
+  // Exercise expanded layouts too; hiding controls must not hide layout defects.
+  for (const summary of await dutyDays.locator('summary').all()) await summary.click();
   for (const width of [320, 375, 620, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     const rows = await page.locator('.care-duty-week .care-roster-row').evaluateAll(rows => rows.map(row => {
