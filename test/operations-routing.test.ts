@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 import { KinApiStack } from "../infra/kin-api-stack.js";
 import { KinReminderSyncStack } from "../infra/kin-reminder-sync-stack.js";
 
-it.each(["api", "reminder"])("allows optional operator routing for %s without creating subscriptions", kind => {
+it.each(["api", "reminder"])("keeps %s alarms removed without changing subscriptions", kind => {
   const app = new App();
   const env = { account: "123456789012", region: "us-east-1" };
   const stack = kind === "api" ? new KinApiStack(app, "ApiOperations", { env })
@@ -17,17 +17,7 @@ it.each(["api", "reminder"])("allows optional operator routing for %s without cr
   for (const rejected of ["https://example.com", "*", "arn:aws:sns:us-east-1:123456789012:kin-care-alerts", "arn:aws:sns:us-east-1:123456789012:kin-operations\n"]) expect(valid.test(rejected)).toBe(false);
   template.resourceCountIs("AWS::SNS::Subscription", 0);
   template.resourceCountIs("AWS::SNS::Topic", 0);
-  const alarms = Object.values(template.findResources("AWS::CloudWatch::Alarm"));
-  expect(alarms).toHaveLength(kind === "api" ? 2 : 1);
-  for (const alarm of alarms) {
-    if (alarm.Properties.AlarmName === "kin-mcp-api-p95-latency") {
-      // Aggregate latency includes deliberately slower model-backed Week reads.
-      expect(alarm.Properties.AlarmActions).toBeUndefined();
-      expect(alarm.Properties.Threshold).toBe(450);
-    } else {
-      expect(alarm.Properties.AlarmActions).toEqual({ "Fn::If": ["OperationsAlarmDestinationConfigured", [{ Ref: "OperationsAlarmTopicArn" }], { Ref: "AWS::NoValue" }] });
-    }
-    expect(alarm.Properties.AlarmDescription).toContain("docs/delivery-operations.md");
-  }
-  template.hasOutput("OperationsAlarmRouting", { Value: { "Fn::If": ["OperationsAlarmDestinationConfigured", { Ref: "OperationsAlarmTopicArn" }, "NOT_CONFIGURED"] } });
+  template.resourceCountIs("AWS::CloudWatch::Alarm", 0);
+  template.resourceCountIs("AWS::CloudWatch::CompositeAlarm", 0);
+  template.hasOutput("OperationsAlarmRouting", { Value: "ALARMS_REMOVED_BY_OWNER" });
 }, 30_000);

@@ -20,11 +20,6 @@ import {
 } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import {
-  Alarm,
-  ComparisonOperator,
-  TreatMissingData,
-} from "aws-cdk-lib/aws-cloudwatch";
-import {
   AccountRecovery,
   Mfa,
   UserPool,
@@ -495,31 +490,7 @@ export class KinApiStack extends Stack {
       resources: [canonicalResourceParameter.parameterArn],
     }));
 
-    const serverErrors = new Alarm(this, "ApiServerErrors", {
-      alarmName: "kin-mcp-api-server-errors",
-      alarmDescription: "Kin's public MCP endpoint is returning server errors. Operator runbook: docs/delivery-operations.md#api-and-reminder-sync-recovery",
-      metric: stage.metricServerError({ period: Duration.minutes(5) }),
-      threshold: 1,
-      evaluationPeriods: 1,
-      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: TreatMissingData.NOT_BREACHING,
-    });
-    new Alarm(this, "ApiP95Latency", {
-      alarmName: "kin-mcp-api-p95-latency",
-      alarmDescription: "Kin's p95 API latency exceeds its 450 ms service target. Operator runbook: docs/delivery-operations.md#api-and-reminder-sync-recovery",
-      metric: stage.metricLatency({
-        period: Duration.minutes(5),
-        statistic: "p95",
-      }),
-      threshold: 450,
-      evaluationPeriods: 1,
-      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
-      treatMissingData: TreatMissingData.NOT_BREACHING,
-    });
-
-    // Week includes a bounded model call, so aggregate latency is diagnostic,
-    // not an operator page. Route only actionable server failures.
-    configureOperationsRouting(this, [serverErrors]);
+    configureOperationsRouting(this);
 
     new CfnOutput(this, "CanonicalMcpUri", { value: canonicalMcpUri });
     new CfnOutput(this, "OAuthIssuer", { value: httpApi.apiEndpoint });

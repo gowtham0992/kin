@@ -8,7 +8,6 @@ import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { CfnRule as EventRule, Rule, Schedule } from "aws-cdk-lib/aws-events";
 import { LambdaFunction } from "aws-cdk-lib/aws-events-targets";
-import { TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import type { Construct } from "constructs";
 import { configureOperationsRouting } from "./operations-routing.js";
 
@@ -58,12 +57,7 @@ export class KinReminderSyncStack extends Stack {
         KIN_SKILL_MESSAGING_SECRET_ID: "kin/alexa-skill-messaging" }, bundling: { bundleAwsSDK: true, minify: true, target: "node22" } });
     const schedule = new Rule(this, "Schedule", { ruleName: "kin-reminder-sync-sweep", schedule: Schedule.rate(Duration.minutes(1)), enabled: false, targets: [new LambdaFunction(worker, { retryAttempts: 0 })] });
     (schedule.node.defaultChild as EventRule).state = Fn.conditionIf(scheduleActive.logicalId, "ENABLED", "DISABLED").toString();
-    const errors = worker.metricErrors({ period: Duration.minutes(5) }).createAlarm(this, "WorkerErrors", {
-      alarmName: "kin-reminder-sync-worker-errors",
-      alarmDescription: "A reminder cancellation sweep failed; stale reminders may remain. Operator runbook: docs/delivery-operations.md#api-and-reminder-sync-recovery",
-      threshold: 1, evaluationPeriods: 1, treatMissingData: TreatMissingData.NOT_BREACHING,
-    });
-    configureOperationsRouting(this, [errors]);
+    configureOperationsRouting(this);
     new CfnOutput(this, "QueueTable", { value: queue.tableName });
     new CfnOutput(this, "WorkerFunctionName", { value: worker.functionName });
     new CfnOutput(this, "ScheduleName", { value: schedule.ruleName });

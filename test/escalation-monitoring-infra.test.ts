@@ -1,6 +1,6 @@
 import { App } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, it } from "vitest";
 import { KinDataStack } from "../infra/kin-data-stack.js";
 
 describe("delivery symptom monitoring", () => {
@@ -10,33 +10,21 @@ describe("delivery symptom monitoring", () => {
   beforeAll(() => {
     template = Template.fromStack(new KinDataStack(new App(), "DeliveryMonitoringTest"));
   }, 30_000);
-  it("alarms on failed, blocked, uncertain and stuck deliveries even when Lambda succeeds", () => {
+  it("preserves delivery metrics for manual inspection without alarms", () => {
     for (const [field, name] of [["failed", "Failed"], ["blocked", "Blocked"], ["receiptPending", "ReceiptPending"], ["stuck", "Stuck"]]) {
       template.hasResourceProperties("AWS::Logs::MetricFilter", {
         FilterPattern: '{ $.message.event = "kin.escalation_delivery.health" }',
         MetricTransformations: [{ MetricNamespace: "Kin/Delivery", MetricName: name,
           MetricValue: `$.message.${field}`, DefaultValue: 0, Unit: "Count" }],
       });
-      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-        Namespace: "Kin/Delivery", MetricName: name, Statistic: "Maximum", Period: 300,
-        Threshold: 1, EvaluationPeriods: 1, TreatMissingData: "notBreaching",
-        AlarmDescription: Match.stringLikeRegexp("docs/delivery-operations.md"),
-      });
     }
   });
 
-  it("routes every worker alarm only to an explicitly supplied operator topic", () => {
+  it("does not recreate owner-removed alarms and preserves runtime permissions", () => {
     template.hasParameter("OperationsAlarmTopicArn", { Type: "String", Default: "" });
-    template.hasCondition("OperationsAlarmDestinationConfigured", {
-      "Fn::Not": [{ "Fn::Equals": [{ Ref: "OperationsAlarmTopicArn" }, ""] }],
-    });
-    const alarms = Object.values(template.findResources("AWS::CloudWatch::Alarm"));
-    expect(alarms).toHaveLength(6);
-    for (const alarm of alarms) {
-      expect(alarm.Properties.AlarmActions).toEqual({ "Fn::If": ["OperationsAlarmDestinationConfigured",
-        [{ Ref: "OperationsAlarmTopicArn" }], { Ref: "AWS::NoValue" }] });
-      expect(JSON.stringify(alarm.Properties.AlarmActions)).not.toContain("CareAlerts");
-    }
+    template.resourceCountIs("AWS::CloudWatch::Alarm", 0);
+    template.resourceCountIs("AWS::CloudWatch::CompositeAlarm", 0);
+    template.hasOutput("OperationsAlarmRouting", { Value: "ALARMS_REMOVED_BY_OWNER" });
     template.hasResourceProperties("AWS::IAM::Policy", { PolicyDocument: { Statement: Match.arrayWith([
       Match.objectLike({ Action: "dynamodb:ConditionCheckItem", Effect: "Allow",
         Condition: { "ForAnyValue:StringEquals": { "dynamodb:EnclosingOperation": ["TransactWriteItems"] } } }),

@@ -8,16 +8,9 @@ import {
   Fn,
   RemovalPolicy,
   Stack,
-  Token,
   type StackProps,
 } from "aws-cdk-lib";
-import {
-  Alarm,
-  CfnAlarm,
-  ComparisonOperator,
-  TreatMissingData,
-  Unit,
-} from "aws-cdk-lib/aws-cloudwatch";
+import { Unit } from "aws-cdk-lib/aws-cloudwatch";
 import {
   AttributeType,
   BillingMode,
@@ -88,13 +81,10 @@ export class KinDataStack extends Stack {
         Fn.conditionEquals(scheduleEnabled.valueAsString, "true"),
       ),
     });
-    const operationsTopic = new CfnParameter(this, "OperationsAlarmTopicArn", {
+    new CfnParameter(this, "OperationsAlarmTopicArn", {
       type: "String", default: "",
       allowedPattern: "^$|^arn:[a-z0-9-]+:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]+$",
-      description: "Existing operator-owned SNS topic with a verified notification destination. Empty means alarms have no actions. Never use the family care-alert topic. Verify before enabling the worker.",
-    });
-    const operationsConfigured = new CfnCondition(this, "OperationsAlarmDestinationConfigured", {
-      expression: Fn.conditionNot(Fn.conditionEquals(operationsTopic.valueAsString, "")),
+      description: "Legacy operator destination retained for deployment compatibility. Inactive: CloudWatch alarms removed by owner request.",
     });
 
     this.table = new Table(this, "CareState", {
@@ -208,58 +198,22 @@ export class KinDataStack extends Stack {
     const scheduleResource = escalationSchedule.node.defaultChild as CfnSchedule;
     scheduleResource.state = Fn.conditionIf(schedulingEnabled.logicalId, "ENABLED", "DISABLED").toString();
 
-    const alarms: Alarm[] = [];
-    alarms.push(new Alarm(this, "EscalationWorkerErrors", {
-      alarmName: "kin-escalation-worker-errors",
-      alarmDescription: "Kin's scheduled escalation worker returned an error. Runbook: docs/delivery-operations.md#worker-error-or-dead-letter",
-      metric: worker.metricErrors({ period: Duration.minutes(5) }),
-      threshold: 1,
-      evaluationPeriods: 1,
-      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: TreatMissingData.NOT_BREACHING,
-    }));
-    alarms.push(new Alarm(this, "EscalationWorkerDeadLettersVisible", {
-      alarmName: "kin-escalation-worker-dead-letters",
-      alarmDescription: "Kin has an escalation worker invocation requiring investigation. Runbook: docs/delivery-operations.md#worker-error-or-dead-letter",
-      metric: workerDeadLetterQueue.metricApproximateNumberOfMessagesVisible({
-        period: Duration.minutes(5),
-      }),
-      threshold: 1,
-      evaluationPeriods: 1,
-      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: TreatMissingData.NOT_BREACHING,
-    }));
-
-    for (const [field, name, symptom] of [
-      ["failed", "Failed", "A follow-up publication failed"],
-      ["blocked", "Blocked", "A follow-up has no routed caregiver"],
-      ["receiptPending", "ReceiptPending", "Provider accepted a follow-up but its receipt needs reconciliation"],
-      ["stuck", "Stuck", "A queued or sending follow-up has not progressed for 15 minutes"],
+    for (const [field, name] of [
+      ["failed", "Failed"],
+      ["blocked", "Blocked"],
+      ["receiptPending", "ReceiptPending"],
+      ["stuck", "Stuck"],
     ]) {
-      const metric = new MetricFilter(this, `Delivery${name}Metric`, {
+      new MetricFilter(this, `Delivery${name}Metric`, {
         logGroup: workerLogGroup,
         filterPattern: FilterPattern.stringValue("$.message.event", "=", "kin.escalation_delivery.health"),
         metricNamespace: "Kin/Delivery", metricName: name!, metricValue: `$.message.${field}`,
         defaultValue: 0, unit: Unit.COUNT,
       });
-      alarms.push(new Alarm(this, `Delivery${name}Alarm`, {
-        alarmName: `kin-delivery-${field}`,
-        alarmDescription: `${symptom}. Runbook: docs/delivery-operations.md#delivery-symptoms`,
-        metric: metric.metric({ statistic: "Maximum", period: Duration.minutes(5) }),
-        threshold: 1, evaluationPeriods: 1,
-        comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: TreatMissingData.NOT_BREACHING,
-      }));
-    }
-    for (const alarm of alarms) {
-      const resource = alarm.node.defaultChild as CfnAlarm;
-      // Do not create subscriptions or send operational events to family phones.
-      resource.alarmActions = Token.asList(Fn.conditionIf(operationsConfigured.logicalId,
-        [operationsTopic.valueAsString], { Ref: "AWS::NoValue" }));
     }
     new CfnOutput(this, "OperationsAlarmRouting", {
-      value: Fn.conditionIf(operationsConfigured.logicalId, operationsTopic.valueAsString, "NOT_CONFIGURED").toString(),
-      description: "Verify subscription receipt before worker enablement; a configured ARN alone is not delivery proof.",
+      value: "ALARMS_REMOVED_BY_OWNER",
+      description: "No CloudWatch alarms. Inspect service logs and delivery state manually.",
     });
 
     new CfnOutput(this, "CareStateTableName", {
