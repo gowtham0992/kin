@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const origin = 'http://127.0.0.1:3073';
 const output = '/tmp/kin-today-journey';
 await mkdir(output, { recursive: true });
-for (const mode of ['alerts', 'today-empty']) {
+for (const mode of ['alerts', 'today-empty', 'today-history']) {
   const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/preview-invitations.ts', mode, '3073'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   let browser;
   try {
@@ -43,10 +43,20 @@ for (const mode of ['alerts', 'today-empty']) {
       await disclosure.focus(); await page.keyboard.press('Enter');
       await expect(page.getByText('Notification not confirmed. Phone receipt is not verified by this status.', { exact: true })).toBeVisible();
       await page.keyboard.press('Enter');
-    } else {
+    } else if (mode === 'today-empty') {
       await expect(page.locator('.care-start-guide')).toContainText('A turn does not switch on phone alerts');
       await expect(page.getByRole('link', { name: 'Schedule a check-in', exact: true })).toHaveAttribute('href', '#plan');
       await expect(page.getByRole('link', { name: 'How to get started', exact: true })).toHaveAttribute('href', '/how-kin-works.html');
+    } else {
+      await expect(page.locator('.care-today > .care-plan > li')).toHaveCount(2);
+      await expect(page.locator('.care-today > .care-plan > li').first()).toContainText('Water — synthetic');
+      await expect(page.getByRole('heading', { name: 'Morning call — synthetic', exact: true })).not.toBeVisible();
+      const summary = page.getByText('Today’s history · 1', { exact: true });
+      await summary.focus(); await page.keyboard.press('Enter');
+      await expect(page.getByRole('heading', { name: 'Morning call — synthetic', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+      await expect(page.locator('#today-history')).toHaveAttribute('open', '');
+      await expect(page.locator('#today-history')).toContainText('Via Maya');
     }
     for (const width of [375, 768, 1440]) {
       await page.setViewportSize({ width, height: 1000 });

@@ -243,6 +243,12 @@
 .care-attention { color: var(--coral); font-weight: 700; margin: 16px 0 0; }
 .care-summary .care-attention + .care-count { margin-top: 8px; }
 .care-today > #today-follow-ups { margin-top: 24px; }
+.care-today > .care-today-history { grid-column: 1 / -1; }
+#workspace-content .care-today-history { margin-top: 0; padding: 16px 0 24px; }
+.care-today-history > summary { color: var(--sage); min-height: 48px; display: list-item; padding: 12px 0; box-sizing: border-box; overflow-wrap: anywhere; }
+.care-today-history > summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
+.care-today-history .care-plan { margin: 16px 0 0; }
+.workspace-page .care-today-history .care-plan li { background: var(--card); padding: 24px; border: 1px solid var(--line); border-radius: 16px; margin-bottom: 16px; }
 .care-follow-up { padding: 24px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .care-follow-up:last-of-type { padding-bottom: 8px; }
 .care-follow-up h4 { font: 400 26px/1.25 Georgia, serif; margin: 8px 0; }

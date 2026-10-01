@@ -45,6 +45,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   let rotationEditor = null;
   let pauseEditor = null;
   let conversationDraft = "";
+  let todayHistoryOpen = false;
   let conversationSelection = null;
   let voice = null;
   let briefEvidence = null, printedEvidence = null, briefCitationGroups = [];
@@ -72,6 +73,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     $("plan-due")?.dispatchEvent(new Event("change"));
   }
   function reset() {
+    todayHistoryOpen = false;
     pauseEditor?.destroy(); pauseEditor = null;
     clearTimeout(undoReviewTimer);
     pushControls.reset();
@@ -415,7 +417,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     duty.append(dutyLink); header.append(introduction);
     if (member.permissions.confirm) header.append(authorNote());
     const list = node("ul", null, "care-plan");
-    for (const task of data.tasks) {
+    const historyList = node("ul", null, "care-plan");
+    for (const task of [...data.tasks].sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt))) {
       const item = node("li", null, "care-check-in"), copy = node("div");
       copy.append(node("p", `${timestamp(task.dueAt)} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state === "scheduled" ? task.lastResponse === "not_yet" ? "Not yet" : "Awaiting check-in" : task.state}`, "kicker"), node("h3", task.title));
       if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
@@ -436,7 +439,19 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
         item.append(actions);
       }
       if (canCloseUnanswered(task)) item.append(taskChangeEditor(task, false, true));
-      list.append(item);
+      (task.state === "scheduled" ? list : historyList).append(item);
+    }
+    if (data.tasks.length && !list.childElementCount) {
+      const empty = node("li", null, "care-empty");
+      empty.append(node("h3", "No check-ins waiting for a reply."),
+        node("p", "Today’s recorded replies and changes are in the history below. These records do not verify anyone’s safety.", "care-note"));
+      list.append(empty);
+    }
+    const history = historyList.childElementCount ? node("details", null, "care-today-history") : null;
+    if (history) {
+      history.id = "today-history"; history.open = todayHistoryOpen;
+      history.append(node("summary", `Today’s history · ${historyList.childElementCount}`), historyList);
+      history.addEventListener("toggle", () => { todayHistoryOpen = history.open; });
     }
     if (!data.tasks.length) {
       const empty = node("li", null, "care-empty"), copy = node("div");
@@ -481,7 +496,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     if (data.escalations.length) alerts.append(node("p", "Acknowledgment records that a caregiver has seen the follow-up. It does not confirm the task is done or cancel queued messages.", "care-note"));
     const undoOffer = completionUndoOffer(data);
     const today = node("div", null, "care-today");
-    today.append(header, ...(undoOffer ? [undoOffer] : []), ...(awaitingAcknowledgment ? [alerts] : []), list, duty, ...(!awaitingAcknowledgment ? [alerts] : []));
+    today.append(header, ...(undoOffer ? [undoOffer] : []), ...(awaitingAcknowledgment ? [alerts] : []), list, ...(history ? [history] : []), duty, ...(!awaitingAcknowledgment ? [alerts] : []));
     if (!data.tasks.length) {
       const start = node("section", null, "care-start-guide");
       start.append(node("h3", "A simple way to start."));

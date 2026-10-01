@@ -8,9 +8,10 @@ import { createFamilyConversationService, BudgetExceeded } from "../src/family-c
 import { createMemoryRosterManagement, type RosterMemberRecord } from "../src/roster-management.js";
 
 const mode = process.argv[2] ?? "success";
+const historyFixture = mode === "today-history";
 const port = Number(process.argv[3] ?? 3014);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid preview port");
-if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "today-closure", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content", "week-sources", "week-comparison"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "today-history", "today-closure", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content", "week-sources", "week-comparison"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
 // Optional bounded delay for inspecting the real workspace loading UI locally.
@@ -29,7 +30,13 @@ if (mode === "long-content") {
   rosterMembers[1]!.name = "Alexandria-Catherine Montgomery-Worthington · synthetic caregiver";
   rosterMembers[2]!.name = "LongUnbrokenSyntheticCaregiverName".repeat(2);
 }
-const store = mode === "today-closure"
+const store = historyFixture
+  ? new InMemoryCareStore([
+      { id: "history-done", title: "Morning call — synthetic", dueAt: "2026-09-08T14:00:00.000Z", state: "done", lastResponse: "done", confirmedAt: "2026-09-08T14:05:00.000Z", confirmedBy: "Maya" },
+      { id: "history-open", title: "Evening walk — synthetic", dueAt: "2026-09-08T20:00:00.000Z", state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null },
+      { id: "history-not-yet", title: "Water — synthetic", dueAt: "2026-09-08T15:00:00.000Z", state: "scheduled", lastResponse: "not_yet", confirmedAt: "2026-09-08T15:01:00.000Z", confirmedBy: "Evelyn" },
+    ], () => new Date("2026-09-08T16:00:00.000Z"), null, "America/Denver", [], rosterMembers)
+  : mode === "today-closure"
   ? new InMemoryCareStore([{ id: "close-today", title: "A call together — synthetic check-in", dueAt: "2026-09-08T14:00:00.000Z",
       state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null }], () => new Date("2026-09-08T15:00:00.000Z"), null, "America/Denver", [], rosterMembers)
   : mode === "week-comparison"

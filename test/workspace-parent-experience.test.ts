@@ -92,6 +92,36 @@ async function fixture(tasks: Array<typeof water & { lastResponse?: string | nul
 }
 
 describe("parent-first conversation", () => {
+  it("shows a factual empty state when every check-in has a recorded outcome", async () => {
+    const ui = await fixture([{ ...water, state: "done" }], false, false, "#today");
+    const list = ui.descendants().find(element => element.className === "care-plan")!;
+    expect(list.textContent).toContain("No check-ins waiting for a reply.");
+    expect(list.textContent).toContain("These records do not verify anyone’s safety.");
+    expect(ui.get("today-history").textContent).toContain(water.title);
+    expect(ui.get("today-history").open).toBe(false);
+  });
+
+  it("keeps unanswered and not-yet check-ins ahead of recorded history", async () => {
+    const ui = await fixture([
+      { ...water, id: "recorded", title: "Morning call", state: "done" },
+      { ...water, id: "later", title: "Evening walk", dueAt: "2026-09-08T20:00:00.000Z" },
+      { ...water, id: "waiting", title: "Water", lastResponse: "not_yet" },
+    ], false, false, "#today");
+    const history = ui.descendants().find(element => element.id === "today-history")!;
+    expect(history).toBeDefined();
+    expect(history.open).toBe(false);
+    expect(history.textContent).toContain("Morning call");
+    expect(history.textContent).not.toContain("Evening walk");
+    const list = ui.descendants().find(element => element.className === "care-plan")!;
+    expect(list.children.map(element => element.textContent)).toEqual([
+      expect.stringContaining("Water"), expect.stringContaining("Evening walk"),
+    ]);
+    history.open = true; await history.emit("toggle");
+    await ui.get("workspace-refresh").click();
+    expect(ui.get("today-history").open).toBe(true);
+    expect(ui.request.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+  });
+
   it("brings unacknowledged follow-ups ahead of the plan without equating them with missing replies", async () => {
     const ui = await fixture([{ ...water, state: "done" }], false, false, "#today", undefined, {
       escalations: [{ id: "follow-up", taskId: water.id, dueAt: water.dueAt, status: "sent", recipientMemberName: "Theo" }],
