@@ -85,10 +85,12 @@ try {
     await trust.setViewportSize({ width, height: 900 });
     await expect(trust).toHaveURL(`${origin}/how-kin-works.html`);
     await expect(trust.getByRole("heading", { level: 1 })).toHaveText("A little care.Clear expectations.");
-    await expect(trust.locator("main section")).toHaveCount(6);
+    await expect(trust.locator(".kin-start-steps > li")).toHaveCount(3);
+    await expect(trust.locator(".kin-guide-details > details")).toHaveCount(7);
     await expect(trust.locator("script")).toHaveCount(0);
     await expect(trust.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute("content", /script-src 'none'/);
-    await expect(trust.locator(".kin-trust-boundary")).toContainText("not emergency monitoring");
+    await expect(trust.locator(".kin-guide-limit")).toContainText("not emergency monitoring");
+    await expect(trust.locator(".kin-trust-boundary")).toContainText("does not verify anyone’s safety");
     assert.equal(await trust.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Trust page overflow at ${width}px`);
     const paragraphs = await trust.locator("main p").evaluateAll(elements => elements.map(element => {
       const style = getComputedStyle(element), box = element.getBoundingClientRect();

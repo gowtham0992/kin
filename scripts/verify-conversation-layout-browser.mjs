@@ -1,10 +1,13 @@
 // Actual rendered MCP workspace, synthetic identity/data; no voice or writes.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { chromium, expect } from 'playwright/test';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const origin = 'http://127.0.0.1:3071';
+const output = '/tmp/kin-first-use-20260930';
+await mkdir(output, { recursive: true });
 const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/preview-invitations.ts', 'mcp-family', '3071'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
 let browser;
 try {
@@ -33,12 +36,34 @@ try {
   console.log('MCP conversation boundary text is separate at five viewport widths.');
   await page.goto(origin + '/how-kin-works.html');
   await expect(page.getByRole('heading', { name: 'Start with one small check-in.' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Go to your circle', exact: true })).toHaveAttribute('href', '/invite.html');
+  await expect(page.getByRole('link', { name: 'What you need first', exact: true })).toHaveAttribute('href', '#readiness-heading');
+  await expect(page.locator('.kin-start-steps > li')).toHaveCount(3);
+  await expect(page.locator('.kin-guide-limit')).toContainText('not emergency monitoring');
+  await expect(page.locator('.kin-guide-readiness')).toContainText('Phone alerts are off unless delivery is enabled');
+  await expect(page.locator('.kin-guide-readiness')).toContainText('not native Alexa+ toolkit integration');
+  const details = page.locator('.kin-guide-details > details');
+  await expect(details).toHaveCount(7);
+  for (const detail of await details.all()) {
+    const summary = detail.locator('summary');
+    await summary.press('Enter');
+    await expect(detail).toHaveAttribute('open', '');
+    await expect(detail.locator('p').first()).toBeVisible();
+    await summary.press('Enter');
+    await expect(detail).not.toHaveAttribute('open', '');
+  }
   for (const [name, fragment] of [['Plan', 'plan'], ['Turns', 'turns'], ['Ask Kin', 'ask'], ['Today', 'today']]) {
     await expect(page.getByRole('link', { name, exact: true })).toHaveAttribute('href', '/invite.html#' + fragment);
   }
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Family guide overflow at ${width}px`);
+    const clipped = await page.locator('main h1, main h2, main p, main summary, .kin-start-steps > li').evaluateAll(elements => elements.filter(element => {
+      const box = element.getBoundingClientRect();
+      return box.width > 0 && (box.left < 0 || box.right > innerWidth);
+    }).map(element => element.textContent));
+    assert.deepEqual(clipped, [], `Family guide text clips at ${width}px`);
+    await page.screenshot({ path: `${output}/guide-${width}.png`, fullPage: true });
   }
   console.log('Family first-use guide links and responsive widths verified.');
 } finally { await browser?.close(); child.kill('SIGTERM'); }

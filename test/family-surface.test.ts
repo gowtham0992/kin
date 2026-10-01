@@ -20,6 +20,17 @@ function setup() {
 }
 
 describe("separate family workspace", () => {
+  it("puts practical first steps and setup limits before expandable coordination details", async () => {
+    const page = await request(setup().app()).get("/how-kin-works.html").expect(200);
+    expect(page.text).toContain('class="kin-start-steps"');
+    expect(page.text).toContain('class="kin-guide-details"');
+    expect(page.text).toContain("Before you start");
+    expect(page.text).toContain("Phone alerts are off unless delivery is enabled");
+    expect(page.text).toContain("not native Alexa+ toolkit integration");
+    expect(page.text).toContain("not emergency monitoring");
+    expect(page.text).toContain("script-src 'none'");
+  });
+
   it("keeps a public alias separate from the existing authenticated workspace", async () => {
     const f = setup();
     f.options.publicSiteOrigin = "https://public.kin.example";

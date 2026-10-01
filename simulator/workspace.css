@@ -74,6 +74,29 @@
 .kin-trust a, .kin-trust-link a { color: var(--sage); }
 .kin-trust a:focus-visible, .kin-trust-link a:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
 .kin-trust-page .back-link { color: var(--sage); text-underline-offset: 4px; }
+.kin-guide { max-width: 1040px; padding: 40px 48px 80px; }
+.kin-guide > h1, .kin-guide > .kin-trust-lead { max-width: 720px; }
+.kin-guide-limit { max-width: 64ch; border-left: 2px solid var(--line); padding-left: 16px; color: var(--muted); }
+.kin-guide-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; margin: 24px 0 40px; }
+.kin-guide-actions a { display: inline-flex; align-items: center; min-height: 48px; box-sizing: border-box; font-weight: 700; text-underline-offset: 4px; }
+.kin-guide .kin-guide-primary { background: var(--sage); color: var(--card); border-radius: 8px; padding: 12px 20px; text-decoration: none; }
+.kin-guide .kin-guide-primary:hover { background: var(--ink); }
+.kin-guide-readiness h2 { scroll-margin-top: 24px; }
+.kin-guide .kin-start-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; padding: 0; list-style: none; counter-reset: start; }
+.kin-start-steps > li { min-width: 0; padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); counter-increment: start; }
+.kin-start-steps > li::before { content: "0" counter(start); display: block; font-size: 12px; font-weight: 800; letter-spacing: .12em; color: var(--sage); margin-bottom: 24px; }
+.kin-start-steps strong { display: block; font: 400 28px/1.2 Georgia, serif; letter-spacing: -.02em; margin-bottom: 16px; }
+.kin-guide-readiness { border-top: 1px solid var(--line); padding-top: 32px; }
+.kin-guide-readiness p:not(.kicker) { max-width: 72ch; }
+.kin-guide-open { display: inline-flex; align-items: center; gap: 24px; min-height: 48px; font-weight: 700; text-underline-offset: 4px; }
+.kin-guide-details { max-width: 760px; }
+.kin-guide-details details { border-bottom: 1px solid var(--line); }
+.kin-guide-details summary { cursor: pointer; padding: 20px 0; min-height: 48px; box-sizing: border-box; font-weight: 700; overflow-wrap: anywhere; }
+.kin-guide-details summary:hover { color: var(--sage); }
+.kin-guide-details summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
+.kin-guide-details details p { max-width: 68ch; margin: 0 0 24px; }
+@media (max-width: 900px) { .kin-guide .kin-start-steps { grid-template-columns: minmax(0, 1fr); } .kin-start-steps > li::before { margin-bottom: 16px; } }
+@media (max-width: 620px) { .kin-guide { padding: 24px 24px 64px; } }
 .care-mcp-badge { display: inline-block; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--sage); font-size: 14px; }
 .care-mcp-trace { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
 .care-mcp-trace summary { cursor: pointer; font-weight: 700; }
