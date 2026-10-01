@@ -83,7 +83,7 @@ try {
   assert.equal(notYet.frame.params.arguments.response, "not_yet");
   assert.equal(restWrites.length, 0, "Ask Kin must save via MCP, not REST confirmation");
   await page.getByRole("link", { name: "Today", exact: true }).click();
-  await expect(page.locator(".care-plan")).toContainText("Not yet");
+  await expect(page.locator(".care-today > .care-plan")).toContainText("Not yet");
   assert.equal((await api("/api/today")).tasks.find(task => task.id === "morning-water").lastResponse, "not_yet");
   checks.push("separate-review-before-mcp-write", "independent-today-persists-result");
 

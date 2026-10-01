@@ -168,7 +168,10 @@ try {
   await page.route("**/api/session", async route => { const response = await route.fetch(), data = await response.json();
     data.role = "viewer"; data.permissions = { confirm: false, manageDuty: false, invite: false }; delete data.features;
     await route.fulfill({ response, json: data }); });
-  await page.reload(); await expect(page.locator(".care-plan")).toBeVisible(); await expect(open).toHaveCount(0);
+  await page.reload(); await expect(page.locator(".care-today > .care-plan")).toBeVisible(); await expect(open).toHaveCount(0);
+  await expect(page.locator("#today-history")).toContainText("Drink a glass of water");
+  await page.locator("#today-history > summary").press("Enter");
+  await expect(row()).toBeVisible();
   await expect(page.getByRole("button", { name: "Done", exact: true })).toHaveCount(0); await page.unroute("**/api/session");
 
   // Fake browser clock only: expiry disables the reviewed action without a write.
