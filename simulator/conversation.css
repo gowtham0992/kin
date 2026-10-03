@@ -60,3 +60,18 @@
   .care-reply-choices button { flex: 1 1 auto; }
   .care-conversation-review { padding: 24px 16px; }
 }
+
+@media screen {
+  .workspace-page .care-conversation-prompt { padding: 32px 32px 16px; border-radius: var(--radius-surface) var(--radius-surface) 0 0; }
+  .workspace-page .care-voice-panel { padding: 8px 32px 32px; border-radius: 0 0 var(--radius-surface) var(--radius-surface); }
+  .workspace-page .care-conversation-prompt h3 { font-family: var(--font-product); font-weight: 600; letter-spacing: -.04em; }
+  .workspace-page .care-reply-choices button { background: var(--card); }
+  .workspace-page .care-conversation-draft { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-surface); padding: 24px; align-self: start; }
+  .workspace-page .care-conversation-draft input { border-radius: var(--radius-control); }
+  .workspace-page .care-conversation-review .care-review-task { font-family: var(--font-product); font-weight: 600; }
+  @media (max-width: 620px) {
+    .workspace-page .care-conversation-prompt { padding: 24px 20px 16px; }
+    .workspace-page .care-voice-panel { padding: 8px 20px 24px; }
+    .workspace-page .care-conversation-draft { margin-top: 20px; padding: 24px 20px; }
+  }
+}

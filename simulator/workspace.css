@@ -402,3 +402,77 @@
   .workspace-page #workspace-content li p { margin: 8px 0; }
   .workspace-page #workspace-content details { margin-top: 20px; padding: 12px 0; }
 }
+
+/* Product surfaces: quiet neutrals, readable system type, one green accent.
+   Screen-only styling preserves the existing evidence-print layout. */
+@media screen {
+  .workspace-page .site-header { max-width: 1200px; padding: 8px 40px; border-bottom: 1px solid var(--line); }
+  .workspace-page .brand-logo, .kin-trust-page .brand-logo { width: 128px; height: 64px; }
+  .workspace-page .invite-page { max-width: 1200px; padding: 24px 40px 64px; }
+  .workspace-session { padding-bottom: 20px; gap: 16px; }
+  .workspace-session #workspace-identity { font-weight: 600; color: var(--ink); font-size: 15px; }
+  .workspace-page .workspace-account summary { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-control); padding: 10px 16px; min-height: 44px; }
+  .workspace-account[open] { max-width: 100%; }
+  .workspace-navigation { align-items: center; margin-bottom: 20px; padding: 0 0 20px; }
+  .workspace-page .workspace-nav { gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper-deep); }
+  .workspace-page .workspace-nav > a { min-height: 44px; padding: 10px 24px; border-radius: var(--radius-control); font-weight: 600; color: var(--muted); }
+  .workspace-page .workspace-nav > a[aria-current] { background: var(--card); color: var(--sage); box-shadow: 0 1px 3px rgba(29, 41, 37, .12); }
+  .workspace-page .workspace-nav > a:not([aria-current]):hover { background: var(--card); }
+  .workspace-updates { padding: 0 0 8px; }
+  .workspace-updates #workspace-status { font-size: 13px; }
+  .workspace-page #workspace-content { margin-top: 24px; }
+  .workspace-page .kicker { color: var(--sage); font-weight: 650; letter-spacing: .08em; font-size: 12px; }
+  .workspace-page .invite-intro h1,
+  .workspace-page .invite-page h2,
+  .workspace-page #workspace-content :is(h2, h3, h4),
+  .kin-trust-page .kin-trust :is(h1, h2),
+  .kin-trust-page .kin-start-steps strong {
+    font-family: var(--font-product); font-weight: 600; letter-spacing: -.035em;
+  }
+  .workspace-page .invite-intro h1 em, .kin-trust-page h1 em { font-style: normal; }
+  .workspace-page #workspace-content .care-summary h2 { font-size: clamp(36px, 4vw, 56px); line-height: 1.08; letter-spacing: -.05em; }
+  .workspace-page .care-count { font-weight: 500; }
+  .workspace-page .care-duty-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-surface); padding: 24px; }
+  .workspace-page .care-duty-card h3 { font-size: 28px; }
+  .workspace-page .care-duty-link { margin-top: 16px; }
+  .workspace-page #workspace-content > .care-plan,
+  .workspace-page .care-today > .care-plan { border-radius: var(--radius-surface); padding: 0 32px; margin: 32px 0 24px; }
+  .workspace-page #workspace-content .care-plan h3 { font-size: 24px; letter-spacing: -.03em; }
+  .workspace-page .care-today-history .care-plan li { border-radius: var(--radius-surface); }
+  .workspace-page .care-alerts { border-radius: var(--radius-surface); background: var(--sage-soft); padding: 28px 32px; }
+  .workspace-page .invite-page button { border-radius: var(--radius-control); font-weight: 600; }
+  .workspace-page .invite-page .secondary { background: var(--card); }
+  .workspace-page .invite-page button:hover { filter: none; }
+  .workspace-page .invite-page .primary:hover:not(:disabled) { background: var(--ink); border-color: var(--ink); }
+  .workspace-page .invite-page .secondary:hover:not(:disabled) { background: var(--paper-deep); border-color: var(--muted); }
+  .workspace-page .invite-page button:active:not(:disabled) { transform: translateY(1px); }
+  .workspace-page .invite-page :is(input:not([type=checkbox]), select, textarea) { border-radius: var(--radius-control); border-color: var(--line); background: var(--card); }
+  .workspace-page .invite-page :is(input, select, textarea):focus-visible { outline: 3px solid var(--sage); outline-offset: 3px; }
+  .workspace-page :is(.care-undo-review, .circle-person-form, .circle-person-review, .invite-panel, .kin-install-body, .kin-push-facts, .care-duty-week) { border-radius: var(--radius-surface); }
+  .workspace-page #workspace-content .care-plan-create { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-surface); padding: 32px; }
+  .workspace-page .care-loading-lines { border-radius: var(--radius-surface); }
+  .workspace-page .kin-trust-link { margin-top: 40px; }
+  .workspace-page .kin-trust-link > a { min-height: 44px; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+  .kin-trust-page .kin-guide h1 { font-weight: 650; }
+  .kin-trust-page .kin-start-steps > li { border-radius: var(--radius-surface); padding: 32px; }
+  .kin-trust-page .kin-guide-primary { border-radius: var(--radius-control); }
+  @media (max-width: 700px) {
+    .workspace-page .site-header { padding: 8px 20px; }
+    .workspace-page .invite-page { padding: 20px 20px 48px; }
+    .workspace-session { align-items: flex-start; padding-bottom: 16px; gap: 12px; }
+    .workspace-session #workspace-identity { font-size: 14px; }
+    .workspace-page .workspace-nav { gap: 4px; width: 100%; }
+    .workspace-page .workspace-nav > a { padding: 10px 4px; font-size: 14px; }
+    .workspace-navigation { gap: 12px; padding-bottom: 12px; }
+    .workspace-page .workspace-secondary { width: 100%; justify-content: space-between; }
+    .workspace-page .workspace-management summary { padding-right: 4px; }
+    .workspace-page #workspace-content .care-summary h2 { font-size: 36px; letter-spacing: -.04em; }
+    .workspace-page #workspace-content > .care-plan,
+    .workspace-page .care-today > .care-plan { padding: 0 20px; }
+    .workspace-page .care-alerts { padding: 24px; }
+    .workspace-page .care-duty-card { padding: 20px; }
+    .workspace-page #workspace-content .care-plan-create { padding: 24px 20px; }
+    .workspace-page .care-plan .care-actions { gap: 8px; }
+    .workspace-page .brand-logo { width: 112px; height: 56px; }
+  }
+}

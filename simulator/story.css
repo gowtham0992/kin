@@ -3,7 +3,7 @@
 .story-page .site-header { max-width: 1240px; padding-block: 24px; gap: 24px; }
 .story-page [hidden] { display: none !important; }
 .story-page button, .story-page textarea, .story-page input { font: inherit; }
-.story-page button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--ink); font-weight: 750; cursor: pointer; }
+.story-page button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--card); color: var(--ink); font-weight: 600; cursor: pointer; }
 .story-page button:hover:not(:disabled) { background: var(--sage-soft); }
 .story-page button:disabled { opacity: .5; cursor: default; }
 .story-page button.story-primary { background: var(--sage); color: var(--card); border-color: var(--sage); }
@@ -11,7 +11,7 @@
 .story-page button:focus-visible, .story-page textarea:focus-visible, .story-page input:focus-visible, .story-page summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
 .story-badge { color: var(--sage); font-size: 12px; font-weight: 750; line-height: 1.5; text-align: right; }
 .story-intro { display: flex; justify-content: space-between; gap: 32px; align-items: end; margin: 16px 0 24px; }
-.story-intro h1 { margin: 12px 0 0; font: 500 clamp(38px, 4.1vw, 52px)/1.05 Georgia, serif; letter-spacing: -.05em; }
+.story-intro h1 { margin: 12px 0 0; font: 600 clamp(38px, 4.1vw, 52px)/1.05 var(--font-product); letter-spacing: -.045em; }
 .story-lede { max-width: 370px; margin: 0 0 4px; color: var(--muted); font-size: 16px; line-height: 1.6; }
 .story-disclosure { margin: 0 0 16px; padding: 12px 0; border-block: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.6; }
 .story-disclosure strong { color: var(--ink); font-weight: 750; }
@@ -19,7 +19,7 @@
 .story-notice h2 { margin-top: 0; }
 .story-controls { display: flex; justify-content: space-between; align-items: center; gap: 32px; margin-top: 32px; padding: 24px 0; border-top: 1px solid var(--line); }
 .story-controls > div:first-child { max-width: 600px; }
-.story-clock { margin: 8px 0; font: 500 24px/1.2 Georgia, serif; letter-spacing: -.025em; }
+.story-clock { margin: 8px 0; font: 600 24px/1.2 var(--font-product); letter-spacing: -.025em; }
 .story-control-actions { max-width: 370px; }
 .story-control-actions button { width: 100%; }
 .story-note { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
@@ -31,11 +31,11 @@
 .story-scene-heading h2 { scroll-margin-top: 24px; }
 .story-scene-heading h2:focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
 .story-scenes { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: 32px; align-items: start; }
-.story-parent, .story-caregiver { min-width: 0; border-radius: 18px; padding: 32px; border: 1px solid var(--line); }
+.story-parent, .story-caregiver { min-width: 0; border-radius: var(--radius-surface); padding: 32px; border: 1px solid var(--line); }
 .story-parent { background: var(--card); }
 .story-caregiver { padding: 24px; background: transparent; }
 .story-scene-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.story-scene-heading h2, .story-week h2 { margin: 8px 0 0; font: 500 32px/1.12 Georgia, serif; letter-spacing: -.035em; }
+.story-scene-heading h2, .story-week h2 { margin: 8px 0 0; font: 600 32px/1.12 var(--font-product); letter-spacing: -.035em; }
 .story-parent .story-scene-heading h2 { font-size: 44px; }
 .story-parent-caption { margin: 12px 0 0; color: var(--muted); font-size: 16px; line-height: 1.5; }
 .story-initial { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; border-radius: 50%; background: var(--sage-soft); color: var(--sage); font-weight: 800; }
@@ -94,7 +94,7 @@
 .story-week { display: grid; grid-template-columns: .85fr 1.15fr; gap: 48px; margin: 8px 0 24px; padding: 32px 0; border-block: 1px solid var(--line); }
 .story-week-intro > p:not(.kicker) { max-width: 370px; color: var(--muted); line-height: 1.6; }
 .story-brief-result { min-width: 0; }
-.story-brief-result h3 { margin: 0 0 12px; font: 500 26px/1.2 Georgia, serif; letter-spacing: -.025em; }
+.story-brief-result h3 { margin: 0 0 12px; font: 600 26px/1.2 var(--font-product); letter-spacing: -.025em; }
 .story-brief-result p, .story-brief-result li { font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
 .story-brief-result ul { padding-left: 20px; }
 .story-brief-result details { margin-top: 18px; }

@@ -1,16 +1,19 @@
 :root {
-  --ink: #20352e;
-  --muted: #5f6f67;
-  --paper: #f2ede2;
-  --paper-deep: #e6dfd0;
-  --card: #fffdf8;
+  --ink: #1d2925;
+  --muted: #56635c;
+  --paper: #f5f5f3;
+  --paper-deep: #e9eeea;
+  --card: #ffffff;
   --sage: #315f4e;
-  --sage-soft: #dce9e2;
+  --sage-soft: #e8f0eb;
   --coral: #ad4f3b;
   --yellow: #f2cb67;
-  --line: rgba(32, 53, 46, 0.14);
+  --line: rgba(29, 41, 37, 0.13);
   --shadow: 0 28px 70px rgba(39, 53, 45, 0.13), 0 8px 24px rgba(39, 53, 45, 0.08);
-  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --font-product: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --radius-surface: 24px;
+  --radius-control: 12px;
+  font-family: var(--font-product);
   color: var(--ink);
   background: var(--paper);
   font-synthesis: none;
