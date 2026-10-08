@@ -69,7 +69,7 @@ export type EscalationSummary = Pick<
   | "updatedAt"
   | "recipientMemberName"
   | "status"
-> & FollowUpContext & { acknowledgedBy?: string; acknowledgedAt?: string; recipientMemberId?: string | null; sentAt?: string };
+> & FollowUpContext & { taskTitle?: string; acknowledgedBy?: string; acknowledgedAt?: string; recipientMemberId?: string | null; sentAt?: string };
 
 export function toEscalationSummary(record: EscalationRecord): EscalationSummary {
   return {
@@ -79,6 +79,7 @@ export function toEscalationSummary(record: EscalationRecord): EscalationSummary
     ...(record.acknowledgment ? { acknowledgedBy: record.acknowledgment.name, acknowledgedAt: record.acknowledgment.at } : {}),
     id: record.id,
     taskId: record.taskId,
+    taskTitle: record.taskTitle,
     dueAt: record.dueAt,
     updatedAt: record.updatedAt,
     recipientMemberName: record.recipientMemberName,

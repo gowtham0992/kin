@@ -143,6 +143,7 @@ describe("Kin HTTP surface", () => {
     expect(response.body.escalations[0]).toEqual({
       id: event.id,
       taskId: "morning-water",
+      taskTitle: "Drink a glass of water",
       dueAt: event.dueAt,
       updatedAt: now.toISOString(),
       recipientMemberName: "Theo",

@@ -41,6 +41,7 @@ import { LambdaInvoke } from "aws-cdk-lib/aws-scheduler-targets";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { Queue, QueueEncryption } from "aws-cdk-lib/aws-sqs";
 import type { Construct } from "constructs";
+import { StringParameter } from "aws-cdk-lib/aws-ssm";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -80,6 +81,11 @@ export class KinDataStack extends Stack {
         Fn.conditionEquals(workerEnabled.valueAsString, "true"),
         Fn.conditionEquals(scheduleEnabled.valueAsString, "true"),
       ),
+    });
+    new StringParameter(this, "FollowUpProcessingConfiguration", {
+      parameterName: "/kin/runtime/follow-up-processing",
+      description: "Deployment configuration only; not worker health or phone delivery evidence.",
+      stringValue: Fn.join("", ['{"version":1,"worker":"', workerEnabled.valueAsString, '","schedule":"', scheduleEnabled.valueAsString, '"}']),
     });
     new CfnParameter(this, "OperationsAlarmTopicArn", {
       type: "String", default: "",

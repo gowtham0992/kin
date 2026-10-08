@@ -55,7 +55,7 @@ export function createWebPushPublisher(input: {
       const tag = createHash("sha256").update(record.id).digest("base64url").slice(0, 32);
       // No names, task text, URLs, tokens, or patient information on a lock screen.
       const payload = JSON.stringify({ version: 1, tag,
-        title: "Kin · You're on today",
+        title: "Kin · Family follow-up",
         body: "A check-in needs a follow-up. Open Kin to review it." });
       try {
         const result = await send(subscription, payload, {

@@ -98,7 +98,7 @@ describe("family follow-up UI", () => {
     const data = snapshot(); data.escalations[0]!.taskId = "older-task"; data.escalations[0]!.dueAt = "2026-09-07T23:30:00.000Z";
     const content = await workspace(data);
     const followUp = content.descendants().find(element => element.className === "care-follow-up")!;
-    expect(followUp.children.find(element => element.tagName === "H4")?.textContent).toBe("Check-in");
+    expect(followUp.children.find(element => element.tagName === "H4")?.textContent).toBe("Check-in — title unavailable");
     expect(followUp.textContent).toContain(`Due ${timestamp(data.escalations[0]!.dueAt)}`);
     expect(followUp.textContent).toContain("Open the plan to review this check-in’s current reply.");
     expect(followUp.textContent).not.toContain("No reply recorded.");

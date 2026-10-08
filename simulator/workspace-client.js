@@ -48,7 +48,12 @@ export function createWorkspaceClient({ request, newRequestId, mcp, now }) {
       // Close the private workspace, but preserve its opaque save reference;
       // HTTP status alone cannot tell a denied write from a denied receipt.
       const outcomeUnknown = [401, 403].includes(response.status) && ["POST", "PUT", "DELETE", "PATCH"].includes(options.method);
+      let code;
+      if (response.status === 503 && url === "/api/today") {
+        try { if ((await response.json()).error === "follow_up_window_incomplete") code = "follow_up_window_incomplete"; } catch {}
+      }
       throw Object.assign(new Error("Request failed"), { status: response.status,
+        ...(code ? { code } : {}),
         definitiveRejection: !outcomeUnknown && ([400, 401, 403, 404, 422].includes(response.status) || (response.status === 409 && /\/confirm$/.test(url))),
         ...(outcomeUnknown ? { outcomeUnknown: true } : {}) });
     }

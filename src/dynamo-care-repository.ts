@@ -131,6 +131,10 @@ function assertCompleteWindow(result: unknown, label: string, limit = 500): void
   }
 }
 
+export class FollowUpWindowIncompleteError extends Error {
+  constructor() { super("Follow-up window is incomplete or too large to return completely"); }
+}
+
 export class DynamoCareRepository implements CareRepository {
   readonly planPauseEnabled: boolean;
   readonly completionUndoEnabled: boolean;
@@ -484,18 +488,7 @@ export class DynamoCareRepository implements CareRepository {
         ConsistentRead: true,
         Limit: 501,
       })),
-      this.#client.send(new QueryCommand({
-        TableName: this.#tableName,
-        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
-        ExpressionAttributeValues: {
-          ":pk": this.#partitionKey(),
-          ":start": `ESCALATION#${shiftCalendarDate(previousDate, -1)}`,
-          ":end": `ESCALATION#${nextDate}\uffff`,
-        },
-        ConsistentRead: true,
-        Limit: 501,
-        ScanIndexForward: false,
-      })),
+      this.#todayFollowUps(date),
     ]);
     assertCompleteWindow(taskResult, "Care-plan");
     assertCompleteWindow(dutyResult, "Duty");
@@ -514,10 +507,34 @@ export class DynamoCareRepository implements CareRepository {
       .map(stripEscalationStorage)
       .filter((record) => {
         const dueDate = calendarDate(new Date(record.dueAt), this.#timeZone);
-        return dueDate === date || (dueDate === previousDate && !record.acknowledgment);
+        return dueDate === date || !record.acknowledgment;
       })
       .map(toEscalationSummary);
     return snapshotFor(date, tasks, onDuty, escalations);
+  }
+
+  async #todayFollowUps(date: string): Promise<{ Items: StoredEscalation[] }> {
+    const { startsAt, endsAt } = calendarDayBounds(date, this.#timeZone);
+    const records: StoredEscalation[] = [];
+    let cursor: Record<string, unknown> | undefined;
+    // The filter is applied after Dynamo's evaluated-item limit. Empty filtered
+    // pages are not the end of history. Bound both work and returned records.
+    for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+      const page = await this.#client.send(new QueryCommand({
+        TableName: this.#tableName,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        FilterExpression: "attribute_not_exists(acknowledgment) OR (dueAt >= :todayStart AND dueAt < :todayEnd)",
+        ExpressionAttributeValues: { ":pk": this.#partitionKey(), ":start": "ESCALATION#", ":end": "ESCALATION#\uffff",
+          ":todayStart": startsAt, ":todayEnd": endsAt },
+        ConsistentRead: true, Limit: 501, ScanIndexForward: false,
+        ...(cursor ? { ExclusiveStartKey: cursor } : {}),
+      })) as { Items?: StoredEscalation[]; LastEvaluatedKey?: Record<string, unknown> };
+      records.push(...(page.Items ?? []));
+      if (records.length > 500) throw new FollowUpWindowIncompleteError();
+      cursor = page.LastEvaluatedKey;
+      if (!cursor || !Object.keys(cursor).length) return { Items: records };
+    }
+    throw new FollowUpWindowIncompleteError();
   }
 
   async escalationSnapshot(asOf: Date): Promise<TodaySnapshot> {
@@ -605,7 +622,10 @@ export class DynamoCareRepository implements CareRepository {
       cursor = page.LastEvaluatedKey;
       if (!cursor || Object.keys(cursor).length === 0) {
         return records.filter(record => record.status !== "sent")
-          .sort((left, right) => left.id.localeCompare(right.id)).map(toEscalationSummary);
+          .sort((left, right) => left.id.localeCompare(right.id)).map(record => {
+            const { taskTitle: _title, ...summary } = toEscalationSummary(record);
+            return summary;
+          });
       }
     }
     throw new Error("Delivery health window is incomplete after ten query pages");

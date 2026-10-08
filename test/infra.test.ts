@@ -24,6 +24,14 @@ describe("Kin AWS infrastructure", { timeout: 20_000 }, () => {
     })));
     const roleFor = (functionName: string) => Object.values(functions)
       .find(resource => resource.Properties.FunctionName === functionName)!.Properties.Role["Fn::GetAtt"][0];
+    const processingReads = statements.filter(({ statement }) =>
+      JSON.stringify(statement.Resource).includes("kin/runtime/follow-up-processing"));
+    expect(processingReads).toEqual([{ roles: [{ Ref: roleFor("kin-mcp-api") }], statement: {
+      Effect: "Allow", Action: "ssm:GetParameter", Resource: { "Fn::Join": ["", ["arn:", { Ref: "AWS::Partition" },
+        ":ssm:us-east-1:123456789012:parameter/kin/runtime/follow-up-processing"]] },
+    } }]);
+    expect(Object.values(functions).find(resource => resource.Properties.FunctionName === "kin-mcp-api")!
+      .Properties.Environment.Variables.KIN_FOLLOW_UP_PROCESSING_PARAMETER).toBe("/kin/runtime/follow-up-processing");
     const conditionChecks = statements.filter(({ statement }) => [statement.Action].flat().includes("dynamodb:ConditionCheckItem"));
     expect(conditionChecks).toEqual([
       { roles: [{ Ref: roleFor("kin-mcp-api") }], statement: {
@@ -199,6 +207,11 @@ describe("Kin AWS infrastructure", { timeout: 20_000 }, () => {
 
     // Evaluate the emitted condition, not a parallel copy of the desired flag logic.
     const emitted = template.toJSON();
+    template.hasResourceProperties("AWS::SSM::Parameter", {
+      Name: "/kin/runtime/follow-up-processing", Type: "String",
+      Value: { "Fn::Join": ["", ['{"version":1,"worker":"', { Ref: "EscalationWorkerEnabled" },
+        '","schedule":"', { Ref: "EscalationScheduleEnabled" }, '"}']] },
+    });
     const schedulingState = Object.values(template.findResources("AWS::Scheduler::Schedule"))[0]!.Properties.State;
     for (const worker of ["false", "true"]) {
       for (const schedule of ["false", "true"]) {

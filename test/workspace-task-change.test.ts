@@ -188,7 +188,7 @@ describe("reviewed one-time check-in editing", () => {
     expect(help.textContent).toContain(enabled ? "A one-time check-in can also move to a new time." : "To change a time, cancel the old check-in or routine");
     const alert = ui.element("plan-notification-note")!, draft = ui.element("plan-draft-note")!, limit = ui.element("plan-time-note")!;
     expect(form.children).toContain(alert); expect(form.children).toContain(draft); expect(form.children).toContain(limit);
-    expect(alert.textContent).toBe("Missed check-ins may notify the caregiver on duty.");
+    expect(alert.textContent).toBe("Kin could not verify whether automatic follow-ups are on. Check the family plan manually; do not rely on a phone alert.");
     expect(form.children.indexOf(alert)).toBeLessThan(form.children.indexOf(save));
     expect(limit.textContent).toBe("Keep every check-in within the next 30 days.");
     expect(draft.textContent).toContain("Reloading this page or closing the session clears it.");

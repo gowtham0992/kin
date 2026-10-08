@@ -7,10 +7,24 @@ import {
 } from "../src/escalation.js";
 
 describe("missed-task escalation planning", () => {
+  it("retains an unresolved follow-up over three local midnights including the fall clock change", async () => {
+    let now = new Date("2026-10-31T15:31:00Z");
+    const task = { id: "clock-water", title: "Synthetic clock water", dueAt: "2026-10-31T15:00:00Z", state: "scheduled" as const,
+      lastResponse: null, confirmedBy: null, confirmedAt: null };
+    const store = new InMemoryCareStore([task], () => now, null, "America/Denver");
+    const record = (await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" }))!.record;
+    for (const instant of ["2026-10-31T15:31:00Z", "2026-11-01T16:31:00Z", "2026-11-02T16:31:00Z", "2026-11-03T16:31:00Z"]) {
+      now = new Date(instant);
+      expect((await store.today()).escalations).toEqual([expect.objectContaining({ id: record.id, taskTitle: task.title })]);
+    }
+    await store.acknowledgeEscalation({ id: record.id, memberId: "maya", name: "Maya" });
+    expect((await store.today()).escalations).toEqual([]);
+    expect((await store.activityBetween({ startDate: "2026-10-31", endDate: "2026-11-03" })).tasks[0]?.state).toBe("scheduled");
+  });
   it.each([
     { timeZone: "America/Denver", now: "2026-09-03T06:00:00.000Z", previous: "2026-09-03T05:40:00.000Z", old: "2026-09-02T05:40:00.000Z", today: "2026-09-03T07:00:00.000Z" },
     { timeZone: "Pacific/Kiritimati", now: "2026-09-02T10:00:00.000Z", previous: "2026-09-01T10:30:00.000Z", old: "2026-08-31T10:30:00.000Z", today: "2026-09-02T11:00:00.000Z" },
-  ])("keeps only unresolved prior-day follow-ups alongside today's alerts in $timeZone", async fixture => {
+  ])("keeps every unresolved follow-up alongside today's acknowledged alerts in $timeZone", async fixture => {
     const now = new Date(fixture.now);
     const store = new InMemoryCareStore([
       ["previous-open", fixture.previous], ["previous-closed", fixture.previous],
@@ -23,13 +37,14 @@ describe("missed-task escalation planning", () => {
     const previous = await queue("previous-open", fixture.previous);
     const closed = await queue("previous-closed", fixture.previous);
     await store.acknowledgeEscalation({ id: closed.id, memberId: "maya", name: "Maya" });
-    await queue("older-open", fixture.old);
+    const older = await queue("older-open", fixture.old);
     const today = await queue("today-closed", fixture.today);
     await store.acknowledgeEscalation({ id: today.id, memberId: "maya", name: "Maya" });
-    expect((await store.today()).escalations.map(alert => alert.id).sort()).toEqual([previous.id, today.id].sort());
+    expect((await store.today()).escalations.map(alert => alert.id).sort()).toEqual([older.id, previous.id, today.id].sort());
+    expect((await store.today()).escalations.every(alert => alert.taskTitle === "A check-in")).toBe(true);
     expect((await store.today()).tasks.map(task => task.id)).toEqual(["today-closed"]);
     await store.acknowledgeEscalation({ id: previous.id, memberId: "maya", name: "Maya" });
-    expect((await store.today()).escalations.map(alert => alert.id)).toEqual([today.id]);
+    expect((await store.today()).escalations.map(alert => alert.id).sort()).toEqual([older.id, today.id].sort());
   });
 
   it("gives a recorded Not yet reply a fresh grace period without completing the task", async () => {

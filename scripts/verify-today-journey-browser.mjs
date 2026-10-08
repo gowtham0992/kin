@@ -8,8 +8,10 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const origin = 'http://127.0.0.1:3073';
 const output = '/tmp/kin-today-journey';
 await mkdir(output, { recursive: true });
-for (const mode of ['alerts', 'today-empty', 'today-history']) {
-  const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/preview-invitations.ts', mode, '3073'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+for (const mode of ['alerts', 'today-empty', 'today-history', 'follow-up-rollover', 'offline']) {
+  const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/preview-invitations.ts', mode, '3073'], {
+    cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, KIN_PREVIEW_FOLLOW_UP_INCOMPLETE: mode === 'offline' ? 'true' : 'false' },
+  });
   let browser;
   try {
     await new Promise((resolve, reject) => {
@@ -26,7 +28,11 @@ for (const mode of ['alerts', 'today-empty', 'today-history']) {
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     if (mode === 'alerts') {
       await page.goto(origin + '/home.html');
+      await expect(page.locator('.home-lead')).toContainText('A check-in by voice.');
+      await expect(page.locator('.home-description')).toContainText('linked Echo');
+      await expect(page.locator('.home-description')).toContainText('recorded reply');
       await expect(page.locator('.home-description')).toContainText('Keep the calls.');
+      await expect(page.locator('.home-boundary')).toContainText('not native Alexa+ toolkit integration');
       for (const width of [375, 768, 1440]) {
         await page.setViewportSize({ width, height: 1000 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -34,6 +40,17 @@ for (const mode of ['alerts', 'today-empty', 'today-history']) {
       }
     }
     await page.goto(origin + '/invite.html#today');
+    if (mode === 'offline') {
+      await expect(page.locator('#workspace-status')).toContainText('could not load the complete follow-up list');
+      await expect(page.locator('.care-follow-up')).toHaveCount(0);
+      await expect(page.locator('#workspace-content')).toContainText('temporarily unavailable');
+      await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+      await expect(page.locator('#workspace-status')).toContainText('Do not treat the visible list as complete.');
+      assert.equal(writes.length, 0);
+      assert.deepEqual(errors, []);
+      console.log('Incomplete follow-up query: explicit unavailable state and read-only retry passed.');
+      continue;
+    }
     await expect(page.locator('.care-today')).toBeVisible();
     if (mode === 'alerts') {
       await expect(page.locator('.care-attention')).toHaveText('1 follow-up needs acknowledgment');
@@ -47,6 +64,17 @@ for (const mode of ['alerts', 'today-empty', 'today-history']) {
       await expect(page.locator('.care-start-guide')).toContainText('A turn does not switch on phone alerts');
       await expect(page.getByRole('link', { name: 'Schedule a check-in', exact: true })).toHaveAttribute('href', '#plan');
       await expect(page.getByRole('link', { name: 'How to get started', exact: true })).toHaveAttribute('href', '/how-kin-works.html');
+    } else if (mode === 'follow-up-rollover') {
+      await expect(page.locator('.care-follow-up')).toHaveCount(2);
+      await expect(page.locator('.care-today')).toContainText('Automatic missed-check-in follow-ups are configured off.');
+      const water = page.locator('.care-follow-up').filter({ hasText: 'Water — synthetic rollover' });
+      await expect(water).toContainText('2026');
+      await expect(page.locator('.care-follow-up').filter({ hasText: 'A call — synthetic rollover' })).toBeVisible();
+      await water.getByRole('link', { name: 'Review this check-in in Plan', exact: true }).click();
+      await expect(page.locator('#plan-task-rollover-water')).toBeFocused();
+      await expect(page.locator('#plan-task-rollover-water')).toContainText('Water — synthetic rollover');
+      await page.getByRole('link', { name: 'Today', exact: true }).click();
+      await expect(page.locator('.care-follow-up')).toHaveCount(2);
     } else {
       await expect(page.locator('.care-today > .care-plan > li')).toHaveCount(2);
       await expect(page.locator('.care-today > .care-plan > li').first()).toContainText('Water — synthetic');
@@ -74,6 +102,20 @@ for (const mode of ['alerts', 'today-empty', 'today-history']) {
       await page.screenshot({ path: `${output}/${mode}-${width}.png`, fullPage: true });
     }
     assert.equal(writes.length, 0, 'Reading Today must not mutate care');
+    if (mode === 'follow-up-rollover') {
+      const before = await (await page.request.get(origin + '/api/plan')).json();
+      await page.locator('.care-follow-up').filter({ hasText: 'Water — synthetic rollover' })
+        .getByRole('button', { name: 'Acknowledge follow-up', exact: true }).click();
+      await expect(page.locator('.care-follow-up')).toHaveCount(1);
+      await expect(page.locator('.care-follow-up')).toContainText('A call — synthetic rollover');
+      const after = await (await page.request.get(origin + '/api/plan')).json();
+      assert.deepEqual(after.tasks, before.tasks, 'Acknowledgment must not complete the old occurrence');
+      assert.equal(writes.length, 1);
+      assert.ok(writes[0].endsWith('/acknowledge'));
+      await page.reload();
+      await expect(page.locator('.care-follow-up')).toHaveCount(1);
+      await expect(page.locator('.care-follow-up')).toContainText('A call — synthetic rollover');
+    }
     if (mode === 'alerts') {
       const before = await (await page.request.get(origin + '/api/today')).json();
       await page.getByRole('button', { name: 'Acknowledge follow-up', exact: true }).click();

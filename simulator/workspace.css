@@ -297,6 +297,7 @@
 .care-duty-card .care-note { margin: 0; max-width: 28ch; }
 .care-duty-link { color: var(--sage); display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; font-size: 14px; font-weight: 700; text-underline-offset: 5px; }
 .care-duty-link::after { content: "↗"; margin-left: 12px; }
+.care-follow-up .care-duty-link::after { content: none; }
 .care-summary > .care-author-note { grid-column: 1 / -1; max-width: 760px; margin: 0; padding-left: 16px; border-left: 2px solid var(--line); font-size: 13px; }
 .workspace-page .care-plan li { min-width: 0; padding: 28px 0; }
 .workspace-page .care-plan li > div:first-child { min-width: 0; flex: 1; }

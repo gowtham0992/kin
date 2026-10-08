@@ -319,7 +319,6 @@ export class InMemoryCareStore implements CareRepository {
   async today(): Promise<TodaySnapshot> {
     const now = this.#now();
     const date = calendarDate(now, this.#timeZone);
-    const previousDate = shiftCalendarDate(date, -1);
     const tasks = [...this.#tasks.values()]
       .filter((task) => task.state !== "cancelled" && calendarDate(new Date(task.dueAt), this.#timeZone) === date)
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
@@ -335,7 +334,7 @@ export class InMemoryCareStore implements CareRepository {
       escalations: [...this.#escalations.values()]
         .filter(record => {
           const dueDate = calendarDate(new Date(record.dueAt), this.#timeZone);
-          return dueDate === date || (dueDate === previousDate && !record.acknowledgment);
+          return dueDate === date || !record.acknowledgment;
         })
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
         .map(toEscalationSummary),
@@ -480,7 +479,10 @@ export class InMemoryCareStore implements CareRepository {
   async deliveryHealthSnapshot(): Promise<EscalationSummary[]> {
     const records = [...this.#escalations.values()].filter(record => record.status !== "sent");
     if (records.length > 500) throw new Error("Delivery health window is too large to return completely");
-    return records.sort((left, right) => left.id.localeCompare(right.id)).map(toEscalationSummary);
+    return records.sort((left, right) => left.id.localeCompare(right.id)).map(record => {
+      const { taskTitle: _title, ...summary } = toEscalationSummary(record);
+      return summary;
+    });
   }
 
   async queueEscalation(input: MissedTaskEscalation | BlockedEscalation) {

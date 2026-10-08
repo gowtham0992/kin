@@ -104,7 +104,9 @@ export function createMcpServer(
             text: `${snapshot.summary.completed} of ${snapshot.summary.total} care tasks are complete today.`,
           },
         ],
-        structuredContent: { ...snapshot },
+        // Keep the strict classic Echo reader's existing wire contract. The
+        // authenticated REST workspace gets the richer follow-up title.
+        structuredContent: { ...snapshot, escalations: snapshot.escalations.map(({ taskTitle: _title, ...alert }) => alert) },
       };
     },
   );

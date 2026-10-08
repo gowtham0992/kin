@@ -20,7 +20,7 @@ afterEach(() => vi.unstubAllGlobals());
 const descendants = (element: Element): Element[] => [element, ...element.children.flatMap(descendants)];
 const control = (container: Element, text: string) => descendants(container).find(e => e.tag === "button" && e.textContent === text)!;
 const statusOf = (container: Element) => descendants(container).find(e => e.className === "kin-push-status")!;
-function fixture(permission = "granted") {
+function fixture(permission = "granted", processing = "unknown", onDuty = false) {
   const requestPermission = vi.fn(async () => permission), unsubscribe = vi.fn(async () => true);
   const json = { endpoint: "https://fcm.googleapis.com/fcm/send/synthetic", keys: { p256dh: "synthetic-key", auth: "synthetic-auth" } };
   const subscription = { endpoint: json.endpoint, unsubscribe, toJSON: () => json };
@@ -35,7 +35,7 @@ function fixture(permission = "granted") {
   const request = vi.fn(async (_url?: string, options?: any): Promise<any> => {
     if (options?.method === "POST") enrollment = { state: "saved", id: savedId };
     if (options?.method === "DELETE") enrollment = { state: "disabled", id: null };
-    return { ok: true, json: async () => ({ enrollment, duty: { assigned: false, onDuty: false }, delivery: "unverified" }) };
+    return { ok: true, json: async () => ({ enrollment, duty: { assigned: onDuty, onDuty }, delivery: "unverified", automaticFollowUps: { state: processing } }) };
   });
   const container = new Element("section");
   const controls = createPushControls({ container, request });
@@ -46,6 +46,19 @@ function fixture(permission = "granted") {
     enable: control(container, "Enable on this phone"), disable: control(container, "Turn off on this phone"), status: statusOf(container), container };
 }
 describe("explicit phone opt-in", () => {
+  it.each(["off", "unknown", "configured"])("keeps %s processing separate from a connected on-duty phone", async state => {
+    const ui = fixture("granted", state, true); await ui.ready;
+    ui.getSubscription.mockResolvedValue(ui.subscription); ui.setEnrollment({ state: "saved", id: ui.savedId });
+    await ui.controls.open(ui.config);
+    const text = statusOf(ui.container).textContent;
+    expect(text).toContain("This phone is connected to this account.");
+    expect(text).toContain("You are on duty right now.");
+    expect(text).toContain("Automatic delivery has not been verified.");
+    expect(text).toContain(state === "off" ? "configured off" : state === "configured" ? "configured on" : "could not verify whether");
+    expect(ui.request.mock.calls.every(([, options]) => options?.method === "GET")).toBe(true);
+    expect(ui.subscribe).not.toHaveBeenCalled();
+    expect(ui.requestPermission).not.toHaveBeenCalled();
+  });
   it("does nothing until the caregiver chooses Enable", async () => {
     const ui = fixture(); await ui.ready;
     expect(ui.requestPermission).not.toHaveBeenCalled();
@@ -107,7 +120,7 @@ describe("explicit phone opt-in", () => {
     const text = statusOf(ui.container).textContent;
     expect(text).toContain("connected to this account"); expect(text).toContain("No one is on duty");
     expect(text).toContain("Automatic delivery has not been verified");
-    expect(descendants(statusOf(ui.container)).filter(e => e.tag === "dt").map(e => e.textContent)).toEqual(["This phone", "Your turn", "Delivery"]);
+    expect(descendants(statusOf(ui.container)).filter(e => e.tag === "dt").map(e => e.textContent)).toEqual(["This phone", "Your turn", "Automatic follow-ups", "Delivery"]);
     expect(ui.container.children[0]!.children[1]!.textContent).toContain("Connecting a phone does not activate automatic follow-ups");
     expect(ui.container.children[0]!.children[1]!.textContent).toContain("Check Today directly");
   });
@@ -127,7 +140,7 @@ describe("explicit phone opt-in", () => {
 });
 
 it("renders fixed notification copy and opens only the signed-in workspace, never a payload URL", async () => {
-  const events: Record<string, (event: any) => void> = {}, showNotification = vi.fn(async () => {}), openWindow = vi.fn(async () => {});
+  const events: Record<string, (event: any) => void> = {}, showNotification = vi.fn(async (_title: string, _options: unknown) => {}), openWindow = vi.fn(async () => {});
   runInNewContext(readFileSync(new URL("../simulator/kin-sw.js", import.meta.url), "utf8"), {
     URL, self: { location: { origin: "https://kin.example" }, registration: { showNotification },
       clients: { matchAll: async () => [], openWindow }, addEventListener: (name: string, cb: (event: any) => void) => { events[name] = cb; } },
@@ -135,6 +148,7 @@ it("renders fixed notification copy and opens only the signed-in workspace, neve
   let pending!: Promise<void>;
   events.push!({ data: { json: () => ({ version: 1, tag: "a".repeat(32), title: "PRIVATE", body: "PRIVATE", url: "https://evil.example" }) }, waitUntil: (promise: Promise<void>) => { pending = promise; } });
   await pending; expect(JSON.stringify(showNotification.mock.calls)).not.toMatch(/PRIVATE|evil/);
+  expect(showNotification.mock.calls[0]![0]).toBe("Kin · Family follow-up");
   events.notificationclick!({ notification: { close() {}, data: { path: "https://evil.example" } }, waitUntil: (promise: Promise<void>) => { pending = promise; } });
   await pending; expect(openWindow).toHaveBeenCalledExactlyOnceWith("https://kin.example/invite.html#today");
 });

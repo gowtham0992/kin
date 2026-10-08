@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ArnFormat,
   CfnOutput,
   CfnParameter,
   CustomResource,
@@ -260,6 +261,7 @@ export class KinApiStack extends Stack {
         KIN_FAMILY_WORKSPACE_ENABLED: familyWorkspaceEnabled.valueAsString,
         KIN_BROWSER_SESSION_ENABLED: browserSessionEnabled.valueAsString,
         KIN_WEB_PUSH_ENABLED: webPushEnabled.valueAsString,
+        KIN_FOLLOW_UP_PROCESSING_PARAMETER: "/kin/runtime/follow-up-processing",
         KIN_WEB_PUSH_PUBLIC_KEY: webPushPublicKey.valueAsString,
         KIN_FAMILY_CONVERSATION_ENABLED: familyConversationEnabled.valueAsString,
         KIN_REMINDER_TICKETS_ENABLED: reminderTicketsEnabled.valueAsString,
@@ -493,6 +495,10 @@ export class KinApiStack extends Stack {
       effect: Effect.ALLOW,
       actions: ["ssm:GetParameter"],
       resources: [canonicalResourceParameter.parameterArn],
+    }));
+    apiFunction.addToRolePolicy(new PolicyStatement({
+      actions: ["ssm:GetParameter"],
+      resources: [this.formatArn({ service: "ssm", resource: "parameter", resourceName: "kin/runtime/follow-up-processing", arnFormat: ArnFormat.SLASH_RESOURCE_NAME })],
     }));
 
     configureOperationsRouting(this);

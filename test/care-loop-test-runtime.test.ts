@@ -40,7 +40,7 @@ it("stores a permanent single-use claim and sends the ordinary privacy-safe foll
   expect(claim.Item.expiresAt).toBeUndefined();
   expect(mocks.db.mock.invocationCallOrder[0]).toBeLessThan(mocks.secret.mock.invocationCallOrder[0]!);
   expect(mocks.push).toHaveBeenCalledOnce();
-  expect(JSON.parse(mocks.push.mock.calls[0]![1])).toMatchObject({ title: "Kin · You're on today",
+  expect(JSON.parse(mocks.push.mock.calls[0]![1])).toMatchObject({ title: "Kin · Family follow-up",
     body: "A check-in needs a follow-up. Open Kin to review it." });
   expect(mocks.push.mock.calls[0]![1]).not.toContain(careLoopTestTitle);
 });

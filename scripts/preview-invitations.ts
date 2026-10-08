@@ -6,12 +6,13 @@ import { AccessDeniedError, type AccessPrincipal } from "../src/auth.js";
 import { createDemoStore, InMemoryCareStore } from "../src/domain.js";
 import { createFamilyConversationService, BudgetExceeded } from "../src/family-conversation.js";
 import { createMemoryRosterManagement, type RosterMemberRecord } from "../src/roster-management.js";
+import { FollowUpWindowIncompleteError } from "../src/dynamo-care-repository.js";
 
 const mode = process.argv[2] ?? "success";
 const historyFixture = mode === "today-history";
 const port = Number(process.argv[3] ?? 3014);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid preview port");
-if (!["mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "today-history", "today-closure", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content", "week-sources", "week-comparison"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["follow-up-rollover", "mcp-family", "success", "denied", "empty", "roster", "roster-empty", "roster-uncertain", "roster-refresh-failure", "model", "model-limited", "model-unavailable", "coverage-empty", "duty-uncertain", "today-empty", "today-history", "today-closure", "viewer-empty", "plan-uncertain", "plan-refresh-failure", "conflict", "uncertain", "viewer", "offline", "alerts", "long-content", "week-sources", "week-comparison"].includes(mode)) throw new Error("Unknown fixture mode");
 const app = express();
 app.use((_request, response, next) => { response.set("cache-control", "no-store"); next(); });
 // Optional bounded delay for inspecting the real workspace loading UI locally.
@@ -30,7 +31,12 @@ if (mode === "long-content") {
   rosterMembers[1]!.name = "Alexandria-Catherine Montgomery-Worthington · synthetic caregiver";
   rosterMembers[2]!.name = "LongUnbrokenSyntheticCaregiverName".repeat(2);
 }
-const store = historyFixture
+const store = mode === "follow-up-rollover"
+  ? new InMemoryCareStore([
+      { id: "rollover-water", title: "Water — synthetic rollover", dueAt: "2026-10-31T15:00:00.000Z", state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null },
+      { id: "rollover-call", title: "A call — synthetic rollover", dueAt: "2026-10-31T15:00:00.000Z", state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null },
+    ], () => new Date("2026-11-03T16:00:00.000Z"), null, "America/Denver", [], rosterMembers)
+  : historyFixture
   ? new InMemoryCareStore([
       { id: "history-done", title: "Morning call — synthetic", dueAt: "2026-09-08T14:00:00.000Z", state: "done", lastResponse: "done", confirmedAt: "2026-09-08T14:05:00.000Z", confirmedBy: "Maya" },
       { id: "history-open", title: "Evening walk — synthetic", dueAt: "2026-09-08T20:00:00.000Z", state: "scheduled", lastResponse: null, confirmedAt: null, confirmedBy: null },
@@ -96,7 +102,14 @@ if (mode === "alerts") {
   const task = (await store.today()).tasks[0]!;
   await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
 }
-if (mode === "offline") store.today = async () => { throw new Error("Synthetic offline fixture"); };
+if (mode === "follow-up-rollover") {
+  for (const task of (await store.activityBetween({ startDate: "2026-10-31", endDate: "2026-11-03" })).tasks) {
+    await store.queueEscalation({ taskId: task.id, taskTitle: task.title, dueAt: task.dueAt, reason: "no_active_duty_assignment" });
+  }
+}
+if (mode === "offline") store.today = async () => {
+  throw process.env.KIN_PREVIEW_FOLLOW_UP_INCOMPLETE === "true" ? new FollowUpWindowIncompleteError() : new Error("Synthetic offline fixture");
+};
 if (mode === "empty") store.circle = async () => ({ timeZone: "UTC", startDate: "2026-09-05", endDate: "2026-09-11", members: [], assignments: [] });
 let targetStatus = "active";
 const familyAccess = { circleId: "synthetic", directory: { async find(principal?: AccessPrincipal) { return {
@@ -162,8 +175,9 @@ if (mode === "mcp-family") {
   `); });
 }
 app.use(createHttpApp(store, undefined, {
+  automaticFollowUps: mode === "follow-up-rollover" ? async () => ({ state: "off" }) : undefined,
   rescheduleEnabled: process.env.KIN_PREVIEW_RESCHEDULE === "true",
-  closeUnansweredEnabled: mode === "today-closure" || process.env.KIN_PREVIEW_CLOSE_UNANSWERED === "true",
+  closeUnansweredEnabled: ["today-closure", "follow-up-rollover"].includes(mode) || process.env.KIN_PREVIEW_CLOSE_UNANSWERED === "true",
   // No canonical HTTPS resource belongs to this loopback-only synthetic
   // account proxy. The real socket's origin guard and bearer checks apply.
   rosterManagement: mode.startsWith("roster") ? rosterManagement : undefined,

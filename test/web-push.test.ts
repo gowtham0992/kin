@@ -36,6 +36,7 @@ describe("private, on-duty Web Push", () => {
     expect(send).toHaveBeenCalledOnce();
     const args = (send.mock.calls as unknown as unknown[][])[0]!;
     expect(args[0]).toEqual(subscription); expect(String(args[1])).not.toMatch(/PRIVATE|theo|escalation-private/);
+    expect(JSON.parse(String(args[1])).title).toBe("Kin · Family follow-up");
     expect(args[2]).toMatchObject({ TTL: 300, timeout: 5000 });
     expect(result.messageId).toMatch(/^webpush:/);
   });
@@ -105,7 +106,7 @@ describe("private, on-duty Web Push", () => {
     await request(app).get("/api/push/subscription").expect(401);
     const result = await request(app).get("/api/push/subscription").set("authorization", "Bearer synthetic").expect(200);
     expect(result.headers["cache-control"]).toBe("no-store");
-    expect(result.body).toMatchObject({ enrollment: { state: "saved", id: subscriptionId(subscription) }, duty: { assigned: false, onDuty: false }, delivery: "unverified" });
+    expect(result.body).toMatchObject({ enrollment: { state: "saved", id: subscriptionId(subscription) }, duty: { assigned: false, onDuty: false }, delivery: "unverified", automaticFollowUps: { state: "unknown" } });
     expect(result.text).not.toContain(subscription.endpoint);
     expect(result.text).not.toContain(subscription.keys.auth);
     expect((status.mock.calls as unknown as [{ member: typeof member }][])[0]![0].member.memberId).toBe("theo");

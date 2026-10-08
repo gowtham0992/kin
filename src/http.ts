@@ -41,6 +41,8 @@ import { DutyConflict } from "./duty-change.js";
 import { dutyRotationBody, DutyRotationConflict } from "./duty-rotation.js";
 import { RosterConflict, rosterChangeBody, type RosterManagement } from "./roster-management.js";
 import { BudgetExceeded, ConsentRequired, ModelUnavailable, familyConversationConsentVersion, createFamilyConversationService } from "./family-conversation.js";
+import { followUpProcessing, type FollowUpProcessingProvider } from "./follow-up-processing.js";
+import { FollowUpWindowIncompleteError } from "./dynamo-care-repository.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const simulatorDirectory = path.resolve(moduleDirectory, "../simulator");
@@ -60,6 +62,7 @@ const dutyBody = z.object({
   .refine(input => input.memberId !== null || (typeof input.expectedMemberId === "string" && input.requestId !== undefined));
 
 export interface HttpAppOptions {
+  automaticFollowUps?: FollowUpProcessingProvider;
   browserSessions?: BrowserSessionStore;
   /** Separate model budget for authenticated REST Week, never for MCP calls. */
   workspaceWeeklyBrief?: WeeklyBriefService;
@@ -367,6 +370,7 @@ export function createHttpApp(
       const historyDays = options.closeUnansweredEnabled === true ? 30 : 0;
       const plan = await store.activityBetween({ startDate: shiftCalendarDate(date, -historyDays), endDate: shiftCalendarDate(date, 30) });
       response.set("cache-control", "no-store").json({ startDate: plan.startDate, endDate: plan.endDate, tasks: plan.tasks,
+        automaticFollowUps: await followUpProcessing(options.automaticFollowUps),
         ...(historyDays ? { historyDays } : {}),
         planPause: await store.planControl(),
         features: { reschedule: options.rescheduleEnabled === true, planPause: store.planPauseEnabled === true && response.locals.member?.role !== "viewer" } });
@@ -513,12 +517,12 @@ export function createHttpApp(
     const authorization = response.locals.writeAuthorization as CareWriteAuthorization | undefined;
     if (!authorization) { response.status(401).json({ error: "invalid_token" }); return; }
     try {
-      const [enrollment, snapshot] = await Promise.all([options.push.subscriptions.status(authorization), store.today()]);
+      const [enrollment, snapshot, automaticFollowUps] = await Promise.all([options.push.subscriptions.status(authorization), store.today(), followUpProcessing(options.automaticFollowUps)]);
       await authorization.assertCurrent();
       response.json({ publicKey: options.push.publicKey, consentVersion: pushConsentVersion, enrollment,
         duty: { assigned: snapshot.onDuty !== null, onDuty: snapshot.onDuty?.memberId === authorization.member.memberId },
         // Enrollment configuration does not establish worker/scheduler health.
-        delivery: "unverified" });
+        delivery: "unverified", automaticFollowUps });
     } catch (error) {
       if (error instanceof FamilyAccessDeniedError) { next(error); return; }
       response.status(503).json({ error: "push_settings_unavailable" });
@@ -565,7 +569,8 @@ export function createHttpApp(
 
   app.get("/api/today", async (_request, response, next) => {
     try {
-      response.set("cache-control", "no-store").json(await store.today());
+      const [snapshot, automaticFollowUps] = await Promise.all([store.today(), followUpProcessing(options.automaticFollowUps)]);
+      response.set("cache-control", "no-store").json({ ...snapshot, automaticFollowUps });
     } catch (error) {
       next(error);
     }
@@ -791,6 +796,9 @@ export function createHttpApp(
   });
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+    if (error instanceof FollowUpWindowIncompleteError) {
+      response.status(503).set("cache-control", "no-store").json({ error: "follow_up_window_incomplete" }); return;
+    }
     if (error instanceof PlanPauseConflict) { response.status(409).json({ error: "pause_conflict" }); return; }
     if (error instanceof FamilyAccessDeniedError) {
       response.status(403).set("cache-control", "no-store").json({ error: "family_access_denied" });

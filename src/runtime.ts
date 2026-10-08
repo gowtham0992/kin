@@ -9,6 +9,7 @@ import { createDemoStore } from "./domain.js";
 import { createDynamoCareRepository } from "./dynamo-care-repository.js";
 import { createHttpApp } from "./http.js";
 import { createStringParameterProvider } from "./parameter.js";
+import { createFollowUpProcessingProvider } from "./follow-up-processing.js";
 import { createUnavailablePublicApp } from "./public-api-gate.js";
 import { createBedrockBriefGenerator, WeeklyBriefService } from "./weekly-brief.js";
 import { createBedrockIntentGenerator } from "./demo-conversation.js";
@@ -148,6 +149,8 @@ export function createConfiguredApp(
             jwksUri: oauthJwksUri,
           }),
           familyAccess,
+          automaticFollowUps: familyEnabled && environment.KIN_FOLLOW_UP_PROCESSING_PARAMETER
+            ? createFollowUpProcessingProvider({ parameterName: environment.KIN_FOLLOW_UP_PROCESSING_PARAMETER, region: environment.AWS_REGION }) : undefined,
           browserSessions: familyEnabled && environment.KIN_BROWSER_SESSION_ENABLED === "true"
             ? createDynamoBrowserSessions({ tableName: tableName!, region: environment.AWS_REGION }) : undefined,
           rescheduleEnabled: environment.KIN_RESCHEDULE_ENABLED === "true",

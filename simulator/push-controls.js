@@ -1,3 +1,9 @@
+export function processingCopy(value) {
+  if (value?.state === "off") return "Automatic missed-check-in follow-ups are configured off. Check the family plan manually. Existing queued messages may still arrive.";
+  if (value?.state === "configured") return "Automatic follow-ups are configured on. This does not verify worker health or phone delivery. Check the family plan if a reply is missing.";
+  return "Kin could not verify whether automatic follow-ups are on. Check the family plan manually; do not rely on a phone alert.";
+}
+
 export function createPushControls({ request, container }) {
   let generation = 0;
   const reset = () => { generation++; if (container) { container.replaceChildren(); container.hidden = true; } };
@@ -67,7 +73,7 @@ export function createPushControls({ request, container }) {
       const duty = !data.duty.assigned ? "No one is on duty right now."
         : data.duty.onDuty ? "You are on duty right now." : "You are not on duty right now.";
       const facts = make("dl", ""); facts.className = "kin-push-facts";
-      for (const [label, value] of [["This phone", `${connection} ${permission}`], ["Your turn", duty], ["Delivery", "Automatic delivery has not been verified."]]) {
+      for (const [label, value] of [["This phone", `${connection} ${permission}`], ["Your turn", duty], ["Automatic follow-ups", processingCopy(data.automaticFollowUps)], ["Delivery", "Automatic delivery has not been verified."]]) {
         const row = make("div", ""); row.append(make("dt", label), make("dd", value)); facts.append(row);
       }
       status.replaceChildren();

@@ -291,7 +291,7 @@ describe("DynamoDB stable escalation acknowledgment", () => {
   it.each([
     ["America/Denver", "2026-09-03T06:01:00.000Z", "2026-09-03T05:15:00.000Z", "2026-09-03T06:15:00.000Z", "2026-09-02T05:15:00.000Z"],
     ["Asia/Tokyo", "2026-09-02T15:01:00.000Z", "2026-09-01T15:15:00.000Z", "2026-09-02T15:15:00.000Z", "2026-09-01T14:15:00.000Z"],
-  ])("keeps only unresolved previous-local-day follow-ups alongside today's alerts in %s", async (timeZone, instant, priorDueAt, todayDueAt, olderDueAt) => {
+  ])("keeps older unresolved follow-ups alongside today's alerts in %s", async (timeZone, instant, priorDueAt, todayDueAt, olderDueAt) => {
     const prior = alertRow(priorDueAt);
     const priorAcknowledged = { ...prior, id: `${prior.id}-acknowledged`, acknowledgment: { memberId: "maya", name: "Maya", at: instant } };
     const today = { ...alertRow(todayDueAt), acknowledgment: { memberId: "theo", name: "Theo", at: instant } };
@@ -307,14 +307,14 @@ describe("DynamoDB stable escalation acknowledgment", () => {
     const snapshot = await repository.today();
 
     expect(snapshot.date).toBe("2026-09-03");
-    expect(snapshot.escalations.map(record => record.id)).toEqual([today.id, prior.id]);
+    expect(snapshot.escalations.map(record => record.id)).toEqual([today.id, prior.id, older.id]);
     expect(snapshot.escalations[0]).toMatchObject({ acknowledgedBy: "Theo" });
     expect(snapshot.tasks.map(task => task.id)).toEqual([todayTask.id]);
     expect(snapshot.summary.total).toBe(1);
     expect(client.commands).toHaveLength(3);
     expect(client.commands[2]?.input).toMatchObject({
       KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end", ConsistentRead: true,
-      ExpressionAttributeValues: { ":pk": "CIRCLE#family-1", ":start": "ESCALATION#2026-09-01", ":end": "ESCALATION#2026-09-04\uffff" },
+      ExpressionAttributeValues: { ":pk": "CIRCLE#family-1", ":start": "ESCALATION#", ":end": "ESCALATION#\uffff" },
     });
   });
 
@@ -330,17 +330,37 @@ describe("DynamoDB stable escalation acknowledgment", () => {
     expect(await repository.acknowledgeEscalation({ id: original.id, memberId: "theo", name: "Theo" })).toEqual(first);
   });
 
-  it("refuses to show an incomplete follow-up window when DynamoDB returns another page", async () => {
+  it("follows an empty filtered page instead of hiding older unresolved follow-ups", async () => {
     const client = new FakeDynamoSender([
       { Items: [] }, { Items: [] },
       { Items: [], LastEvaluatedKey: { PK: "CIRCLE#family-1", SK: alertRow().SK } },
+      { Items: [alertRow("2026-08-03T05:15:00.000Z")] },
     ]);
     const repository = new DynamoCareRepository({ client, tableName: "kin-test", circleId: "family-1", timeZone: "America/Denver", now: () => new Date("2026-09-03T06:01:00.000Z") });
 
-    await expect(repository.today()).rejects.toThrow("Follow-up window is too large to return completely");
+    expect((await repository.today()).escalations[0]?.taskTitle).toBe("Water check-in");
 
-    expect(client.commands).toHaveLength(3);
+    expect(client.commands).toHaveLength(4);
+    expect(client.commands[3]?.input).toMatchObject({ ExclusiveStartKey: { PK: "CIRCLE#family-1", SK: alertRow().SK } });
     expect(client.commands.every(command => command instanceof QueryCommand)).toBe(true);
+  });
+
+  it.each([false, true])("bounds follow-up pagination and accepts only a complete final page (complete=%s)", async complete => {
+    let pages = 0;
+    const repository = new DynamoCareRepository({ tableName: "kin-test", circleId: "family-1", now: fixedNow, client: {
+      send: async command => {
+        const query = command as QueryCommand;
+        if (query.input.ExpressionAttributeValues?.[":start"] !== "ESCALATION#") return { Items: [] };
+        pages++;
+        expect(query.input).toMatchObject({ Limit: 501, ConsistentRead: true,
+          ExpressionAttributeValues: { ":pk": "CIRCLE#family-1", ":todayStart": "2026-09-02T00:00:00.000Z", ":todayEnd": "2026-09-03T00:00:00.000Z" } });
+        return pages === 10 && complete ? { Items: [alertRow("2026-08-03T05:15:00.000Z")] }
+          : { Items: [], LastEvaluatedKey: { PK: "CIRCLE#family-1", SK: `ESCALATION#cursor-${pages}` } };
+      },
+    } });
+    if (complete) expect((await repository.today()).escalations).toHaveLength(1);
+    else await expect(repository.today()).rejects.toThrow("Follow-up window is incomplete");
+    expect(pages).toBe(10);
   });
 });
 

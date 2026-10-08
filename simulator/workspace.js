@@ -2,7 +2,7 @@ import { createWorkspaceClient, createPlanDraft, dutyDays } from "./workspace-cl
 import { createVoiceInput, appendVoiceDraft } from "./voice-input.js";
 import { createRosterDraft, renderRosterEditor } from "./roster-editor.js";
 import { renderDutyRotation } from "./duty-rotation.js";
-import { createPushControls } from "./push-controls.js";
+import { createPushControls, processingCopy } from "./push-controls.js";
 import { renderPlanPause, pauseSavedMessage } from "./plan-pause.js";
 
 const $ = id => document.getElementById(id);
@@ -55,8 +55,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
   const content = $("workspace-content"), status = $("workspace-status");
   const viewLabels = { today: "Today", ask: "Ask Kin", plan: "Plan", turns: "Turns", circle: "Turns", week: "Week", invite: "Invite family", access: "Access" };
   const isTurns = view => view === "turns" || view === "circle";
+  const hashView = () => location.hash.slice(1).split("?")[0];
   const tab = () => location.hash === "#workspace-main" ? activeView ?? "today"
-    : Object.hasOwn(viewLabels, location.hash.slice(1)) ? location.hash.slice(1) : "today";
+    : Object.hasOwn(viewLabels, hashView()) ? hashView() : "today";
   function syncNavigation() {
     $("workspace-ask-link").hidden = !member.permissions.confirm;
     $("workspace-management").hidden = !member.permissions.invite;
@@ -100,7 +101,9 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       if (uncertain) onAccessLost(error.status, uncertain); else onAccessLost(error.status);
       return;
     }
-    status.textContent = "Could not refresh. Any visible information is the last known update. Check your connection and try again.";
+    const incomplete = error.code === "follow_up_window_incomplete";
+    status.textContent = incomplete ? "Kin could not load the complete follow-up list. Do not treat the visible list as complete. Ask the organizer to review it; use Refresh to try again."
+      : "Could not refresh. Any visible information is the last known update. Check your connection and try again.";
     if (!content.childElementCount || loadingPanel) content.replaceChildren(node("h2", `${viewLabels[tab()]} is temporarily unavailable.`),
       node("p", "Use Refresh to try again. Your unsaved draft stays in this session.", "care-note"));
   }
@@ -416,6 +419,10 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const dutyLink = node("a", "See family turns", "care-duty-link"); dutyLink.href = "#turns";
     duty.append(dutyLink); header.append(introduction);
     if (member.permissions.confirm) header.append(authorNote());
+    const processing = node("section", null, "care-alerts care-processing-status");
+    processing.setAttribute("aria-label", "Automatic follow-up status");
+    processing.append(node("h3", "Automatic follow-ups"), node("p", processingCopy(data.automaticFollowUps)),
+      node("p", "This is deployment configuration, not a delivery guarantee. Kin is not emergency monitoring.", "care-note"));
     const list = node("ul", null, "care-plan");
     const historyList = node("ul", null, "care-plan");
     for (const task of [...data.tasks].sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt))) {
@@ -464,21 +471,21 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     }
     const alerts = node("section", null, "care-alerts"); alerts.id = "today-follow-ups";
     alerts.append(node("h3", "Family follow-up"));
-    if (!data.escalations.length) alerts.append(node("p", "No follow-ups listed for today or yesterday. This is not a safety check."));
+    if (!data.escalations.length) alerts.append(node("p", "No unresolved follow-ups or acknowledged follow-ups due today are listed. This is not a safety check."));
     // Keep the stored recipient separate from today's duty: a handoff does not
     // reroute an existing follow-up. Acknowledgment is not task completion.
     for (const alert of [...data.escalations].sort((a, b) => Number(!!a.acknowledgedBy) - Number(!!b.acknowledgedBy))) {
       const task = data.tasks.find(task => task.id === alert.taskId);
       const item = node("article", null, "care-follow-up");
       item.append(node("p", alert.acknowledgedBy ? `Seen by ${alert.acknowledgedBy}` : "Waiting for acknowledgment", "kicker"),
-        node("h4", task?.title ?? "Check-in"), node("p", `Due ${timestamp(alert.dueAt)}`, "care-note"));
+        node("h4", task?.title ?? alert.taskTitle ?? "Check-in — title unavailable"), node("p", `Due ${timestamp(alert.dueAt)}`, "care-note"));
       const reply = !task ? "Open the plan to review this check-in’s current reply."
         : task.state === "scheduled" ? task.lastResponse === "not_yet" ? "Reply recorded: not yet. The check-in remains open." : "No reply recorded."
         : task.state === "done" || task.state === "skipped" ? `Reply recorded: ${task.state}.`
         : task.state === "closed_unanswered" ? "Closed without a reply." : "This check-in was canceled.";
       item.append(node("p", reply));
       if (!task) {
-        const plan = node("a", "Review family plan", "care-duty-link"); plan.href = "#plan";
+        const plan = node("a", "Review this check-in in Plan", "care-duty-link"); plan.href = `#plan?task=${encodeURIComponent(alert.taskId)}`;
         item.append(plan);
       }
       if (alert.recipientMemberName) item.append(node("p", `Routed to ${alert.recipientMemberName}.`, "care-note"));
@@ -496,7 +503,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     if (data.escalations.length) alerts.append(node("p", "Acknowledgment records that a caregiver has seen the follow-up. It does not confirm the task is done or cancel queued messages.", "care-note"));
     const undoOffer = completionUndoOffer(data);
     const today = node("div", null, "care-today");
-    today.append(header, ...(undoOffer ? [undoOffer] : []), ...(awaitingAcknowledgment ? [alerts] : []), list, ...(history ? [history] : []), duty, ...(!awaitingAcknowledgment ? [alerts] : []));
+    today.append(header, processing, ...(undoOffer ? [undoOffer] : []), ...(awaitingAcknowledgment ? [alerts] : []), list, ...(history ? [history] : []), duty, ...(!awaitingAcknowledgment ? [alerts] : []));
     if (!data.tasks.length) {
       const start = node("section", null, "care-start-guide");
       start.append(node("h3", "A simple way to start."));
@@ -693,7 +700,7 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
       const submit = node("button", "Save care plan", "primary"); submit.type = "submit";
       const timeNote = node("p", "Keep every check-in within the next 30 days.", "care-note care-plan-time-note");
       timeNote.id = "plan-time-note"; due.setAttribute("aria-describedby", timeNote.id);
-      const alertNote = node("p", "Missed check-ins may notify the caregiver on duty.", "care-note care-plan-notification-note");
+      const alertNote = node("p", processingCopy(data.automaticFollowUps), "care-note care-plan-notification-note");
       alertNote.id = "plan-notification-note";
       const draftNote = node("p", "Your draft stays while switching Kin tabs. Reloading this page or closing the session clears it.", "care-note care-plan-draft-note");
       draftNote.id = "plan-draft-note";
@@ -723,7 +730,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     function planRows(tasks) {
       const list = node("ul", null, "care-plan");
       for (const task of tasks) {
-        const row = node("li"), copy = node("div"); copy.append(node("h3", task.title), node("p", `${timestamp(task.dueAt)} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state}`, "care-note"));
+        const row = node("li"), copy = node("div"); row.id = `plan-task-${task.id}`; row.tabIndex = -1;
+        copy.append(node("h3", task.title), node("p", `${timestamp(task.dueAt)} · ${task.state === "closed_unanswered" ? "Closed without a reply" : task.state}`, "care-note"));
         if (canCloseUnanswered(task)) copy.append(taskChangeEditor(task, false, true));
         if (task.state === "closed_unanswered") copy.append(node("p", `Closed by ${task.changedBy ?? "a caregiver"}${task.changedAt ? ` at ${timestamp(task.changedAt)}` : ""}. No reply was recorded.`, "care-note"));
         if (member.permissions.manageDuty && !task.routineId && task.state === "scheduled" && task.lastResponse === null &&
@@ -807,6 +815,18 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     content.replaceChildren(heading, ...(pauseEditor && activePause ? [pauseEditor.element] : []), upcoming, form, routines,
       ...(earlierTasks.length ? [earlier] : []), ...(recordedTasks.length ? [recorded] : []),
       ...(pauseEditor && !activePause ? [pauseEditor.element] : []));
+    const selected = new URLSearchParams(location.hash.split("?")[1] ?? "").get("task");
+    if (selected && /^[A-Za-z0-9_-]{1,100}$/.test(selected)) {
+      const occurrence = document.getElementById(`plan-task-${selected}`);
+      if (occurrence) {
+        for (let parent = occurrence.parentElement; parent && parent !== content; parent = parent.parentElement) {
+          if (parent.tagName === "DETAILS") parent.open = true;
+        }
+        occurrence.focus(); occurrence.scrollIntoView({ block: "center" });
+      } else {
+        heading.append(node("p", "This follow-up’s occurrence is outside the loaded plan window or unavailable. Its follow-up record remains in Today until acknowledged; no reply or completion can be inferred.", "care-note"));
+      }
+    }
   }
   function renderBrief(data) {
     restorePrintedEvidence(); briefCitationGroups = [];
@@ -964,7 +984,12 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     if (view === "invite") { await onInvite(); return; }
     const current = revision;
     await refresh();
-    if (focus && member && current === revision && view === tab()) content.focus();
+    if (focus && member && current === revision && view === tab()) {
+      const selected = new URLSearchParams(location.hash.split("?")[1] ?? "").get("task");
+      const occurrence = view === "plan" && selected && /^[A-Za-z0-9_-]{1,100}$/.test(selected)
+        ? document.getElementById(`plan-task-${selected}`) : null;
+      (occurrence ?? content).focus();
+    }
   }
   async function poll(generation) {
     if (!member || generation !== sessionGeneration) return;
