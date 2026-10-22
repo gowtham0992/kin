@@ -1,9 +1,9 @@
 # Test Kin without a live family account
 
-Start with the public [Judges: start here guide](https://kin.gowthamsarveswaran.com/how-kin-works.html#judges).
-The guide explains the two review routes; it does not grant family access or
-publish a password. Use the local story below for a complete, credential-free
-interactive test.
+Use the local story below for a complete, credential-free interactive test.
+The public [How Kin works guide](https://kin.gowthamsarveswaran.com/how-kin-works.html)
+also explains the product; neither route grants access to a live family or
+publishes an account password.
 
 The isolated local story demonstrates Kin's complete check-in loop using real
 Streamable HTTP MCP calls and shared application state. It requires repository
@@ -48,8 +48,8 @@ route. Restart the story process to reset its synthetic data; refreshing the
 page does not reset server state. Never run cloud seeding or a live missed-task
 sweep to reset the story.
 
-See the [reviewer guide](reviewer-guide.md) for an unaided task checklist and
-the [README](../README.md) for architecture and additional verification.
+See the [README](../README.md) for product navigation and the
+[developer guide](development.md) for architecture and additional verification.
 
 ## If the story does not open
 
@@ -72,21 +72,17 @@ requires an explicitly authorized account and family membership. A roster name
 alone does not grant access. A new caregiver account is not automatically an
 isolated test family: the current deployment serves one configured circle.
 
-Dedicated live reviewer access has not been provisioned by these instructions.
-Do not use the owner's credentials or assume permission to view the existing
-family's history. If separately arranged, live reviewer credentials belong only
-in the private testing instructions supplied to judges, never in source,
-screenshots, video, public project text or this file. Verify the visibility of
-the submission field before placing any credentials there.
+These instructions do not provision an account or membership. Use only an
+explicitly authorized account and agreed test data; never borrow someone else's
+credentials or assume permission to inspect their family's history. Do not
+publish credentials in source, screenshots or shared material.
 
-At the last verified deployment, general automatic missed-check-in processing
-was off and reminder reconciliation was on. The owner has physically used a
-linked Echo Pop through the **classic Alexa development skill**, invoked with
-“Alexa, open kin family.” That device evidence is separate from the local
-Alexa+-style simulation and is not a public Skills Store or native Alexa+ claim.
-The September 23 bounded scheduled-worker test has its own
-[dated acceptance record](recurring-acceptance-20260923.md); it is not a current
-always-on delivery promise.
+Automatic missed-check-in processing and reminder reconciliation are separately
+configured. A successful local test does not establish that either live worker
+is enabled or that a phone notification was delivered. The Echo connection is
+a **classic Alexa development skill**, invoked with “Alexa, open kin family,”
+through a linked account. It is not a public Skills Store listing or proof of
+native Alexa+ Toolkit access.
 
 Kin coordinates everyday care. It does not establish whether somebody is safe,
 identify who is speaking, recommend treatment or provide emergency monitoring.

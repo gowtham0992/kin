@@ -1,96 +1,113 @@
-# Kin architecture decision
+# Kin architecture
 
-Kin will ship as one deployable TypeScript service with a DynamoDB care-state store. This keeps the Alexa+/MCP interaction fast and understandable while giving task confirmations the durability and idempotency a real family coordination product requires.
+Kin connects a parent's recorded reply to a shared family plan. Its MCP tools
+and family HTTP API use the same care repository; background workers operate
+on the same persisted care state rather than separate copies of the plan.
 
-The AWS deployment region is `us-east-1`. Deployment must use a named, non-root IAM or IAM Identity Center principal; Kin will not be provisioned from the AWS account root identity.
+## Connected surfaces share one care model
 
-The first data-only deployment used CDK's bootstrapless synthesizer. The scheduled escalation worker is now a bundled Lambda asset, so subsequent deployments use the standard CDK asset contract. Bootstrap and execution permissions remain separate from application permissions; `kin-dev` cannot deploy infrastructure and the Lambda role can access only the named table, topic, dead-letter queue, logs, and X-Ray APIs it needs.
+| Surface | Application boundary |
+| --- | --- |
+| Family web workspace | Authenticated HTTP reads and reviewed care operations. |
+| Web conversation | Interpretation proposes a draft; explicit confirmation calls MCP. |
+| Classic Alexa development skill | The linked account authorizes the Echo backend's MCP calls. |
+| Standard MCP client | Resource-bound OAuth scopes and active family membership authorize tools and widget resources. |
+| Local care story | Real loopback MCP and HTTP with one isolated in-memory repository and synthetic activity. |
 
-## The system must preserve trust before adding breadth
+The web conversation is Kin's own interface, not Amazon's Alexa+ interface.
+The classic Echo connection is distinct from native Alexa+ Toolkit access.
+Linked-account attribution identifies an authorized account, not the person
+physically speaking near a shared device.
 
-The core invariant is simple: one spoken confirmation produces one durable state transition, even when Alexa, the network, or a client retries. A confirmation and its idempotency record therefore commit in the same DynamoDB transaction. Reads are strongly consistent so an Echo Show and a caregiver phone do not contradict each other immediately after a confirmation.
+[`CareRepository`](../src/domain.ts) defines the care-state boundary. The
+in-memory implementation supports local development and the isolated story;
+[`DynamoCareRepository`](../src/dynamo-care-repository.ts) persists the same
+domain operations in AWS. A runtime is configured for one family circle;
+creating another account does not create an isolated family.
 
-Kin is ordinary family-care coordination, not emergency monitoring or a medical device. The product must never diagnose, recommend medication, imply that someone is safe because a task was completed, or silently discard a missed-task escalation.
+## Review and retry are part of a care write
 
-Daily and weekly windows are evaluated in the care circle's configured IANA timezone rather than the server's UTC date. Because existing sort keys contain UTC timestamps, DynamoDB reads use a bounded one-day buffer on each side and filter results against the IANA timezone in the repository. This keeps the deployed data compatible while preventing a late-evening task from silently moving to tomorrow's plan. If a circle grows beyond hundreds of tasks per week, add an explicit local-care-date access pattern rather than widening these reads.
+A confirmation carries the selected check-in, requested response, request ID
+and exact task snapshot that was reviewed. The server checks current access
+and rejects a stale review instead of overwriting a newer task state.
 
-## One aggregate fits the access pattern
+In DynamoDB, the task change and idempotency receipt commit atomically. Retry
+an uncertain result with the identical request ID and payload; the original
+receipt resolves a successful retry without recording the reply twice.
+Authenticated request IDs are namespaced by member, and attribution comes
+from server-owned membership rather than a submitted display name.
 
-All data for a family care circle shares `PK = CIRCLE#<circleId>`. Sort keys make the common operations direct:
+Feature-gated operations such as completion undo, rescheduling and future-plan
+cancellation have separate review and conflict contracts. They are not generic
+rollback commands. A caregiver's follow-up acknowledgment is also a separate
+record: it means seen, not contacted, completed or safe.
 
-- `TASK#<ISO due time>#<taskId>` stores a scheduled care task.
-- `CONFIRMATION#<requestId>` stores the immutable idempotency record.
-- Later slices add duty assignments and escalation outbox events under the same aggregate.
+## Authentication and membership are separate gates
 
-DynamoDB wins here because Kin's important operations are key-based, the aggregate is small, and an on-demand serverless table matches a bursty demo workload. We will reverse this choice if the product requires cross-circle reporting, flexible ad-hoc querying, or multi-aggregate transactions; those needs would favor a relational store.
+API Gateway fronts separate application and OAuth Lambda functions. The OAuth
+provider handles authorization-code grants, PKCE, consent and token issuance;
+Kin validates signatures, issuer, audience/resource, expiration and recognized
+scopes before serving protected operations.
 
-## Boundaries keep the demo honest
+Family credentials belong to Cognito. OAuth artifacts live in a separate
+DynamoDB table; private signing material, cookie keys and client secrets stay
+in Secrets Manager rather than source, browser assets or care records. Browser sessions
+use a separate authenticated workspace flow. The deployment configuration
+keeps public-site aliases distinct from canonical workspace and OAuth URLs.
 
-`CareRepository` is the application boundary. The in-memory implementation powers a zero-credential local demo, while `DynamoCareRepository` uses the same contract in AWS. HTTP, the Alexa+-style simulator, and MCP tools all call that boundary; none has a private mock state path.
+Active membership is checked against the configured circle and requested
+permission. The directory uses the verified issuer and subject, not an email
+or caller-supplied role. Roster entries do not grant access. Revocation blocks
+subsequent requests but cannot retract an operation already in flight.
 
-The current AWS transaction writes the updated task and `CONFIRMATION#<requestId>` together. Its condition expression prevents a retry from producing a second effect. A retry reads and returns the original confirmation.
+See [MCP interoperability](mcp-interoperability.md) for discovery profiles,
+scope boundaries and client registration requirements.
 
-## Delivery grows in verifiable slices
+## Persistent state follows the family's calendar
 
-1. Shared care plan and idempotent voice confirmation — complete and contract-tested.
-2. DynamoDB repository and protected table definition — complete and verified in `us-east-1`.
-3. Seven-day sibling rotation roster and durable missed-task outbox — complete, including an editable Circle view, DynamoDB-persisted handoffs, DST-safe local-day boundaries, and conditional delivery leases.
-4. SNS delivery with retry evidence and a simulator-visible escalation timeline — complete; filtered SMS subscriptions await caregiver consent and a destination number.
-5. Bedrock-assisted weekly family brief grounded only in recorded events — complete, with bounded DynamoDB reads, constrained event selection, schema and applicability validation, token metadata, and deterministic fallback.
-6. Five-minute scheduled escalation worker — deployed and live, including strict scheduler input, immutable outbox recipient routing, local-midnight coverage, least-privilege IAM, retry destinations, DLQ, alarms, structured logs, and X-Ray.
-7. Consent-based filtered SMS subscriptions and authenticated roster administration.
-8. OAuth 2.1/PKCE implementation — complete in code, including Cognito login,
-   explicit consent, AWS-only secret generation, durable grants, revocation, and
-   a real authorization-code/refresh integration test. Scoped-policy expansion,
-   public deployment, live telemetry, and the recorded Alexa+ demo remain.
+Care records share a circle partition, with distinct sort keys for tasks,
+confirmation receipts, duty assignments, membership and follow-up state.
+Strongly consistent reads support immediate readback after a confirmed write.
+Daily and weekly windows use the circle's configured IANA time zone, including
+daylight-saving transitions, rather than the server's UTC calendar date.
 
-OAuth authorization state is isolated from family care records in the
-`kin-oauth-state` table. The authorization server uses the maintained
-`oidc-provider` protocol implementation rather than custom token or PKCE logic.
-Its DynamoDB adapter atomically stores authorization artifacts with TTL, treats
-expired records as absent before asynchronous TTL cleanup, records one-time code
-consumption, and maintains grant, session-UID, and user-code indexes needed for
-revocation and replay resistance. The table is encrypted, deletion-protected,
-retained, and configured for seven-day point-in-time recovery. Signing keys,
-cookie keys, CSRF key, and client secrets remain outside the table and deployment
-artifact in a retained Secrets Manager secret. An idempotent deployment function
-generates the private RSA key and random credentials inside AWS, preserves valid
-existing material during updates, returns no secret values to CloudFormation,
-and performs no deletion when the retained stack resource is removed.
+Reads are bounded. The workspace distinguishes an incomplete or failed history
+read from a genuinely empty plan. Larger histories need an indexed or paginated
+access pattern rather than an ever-wider unbounded query.
 
-Family passwords belong to a separate, retained Cognito user pool, not Kin's
-tables. Public self-registration is disabled for the hackathon deployment;
-accounts are deliberately invited by the owner. The pool requires 12-character
-mixed passwords, suppresses user-existence errors, verifies email, and exposes a
-secretless internal app client only for the server-side password flow. The Kin
-authenticator bounds credential sizes, converts expected account failures to one
-generic result, reads Cognito's stable `sub` after authentication, and refuses
-unimplemented challenge flows. MFA remains off until the interaction UI supports
-the full challenge ceremony; enabling it earlier would strand account linking
-mid-flow rather than improve it.
+## Follow-ups and reminders have independent delivery lifecycles
 
-The account-linking interaction is rendered server-side without JavaScript or
-third-party assets. A short-lived provider interaction cookie and an HMAC bound
-to the interaction identifier protect form submissions; the page is non-cacheable
-and carries a restrictive Content Security Policy. Consent code accepts only
-Kin's exact MCP resource URI and the two user-level Alexa scopes. Any foreign
-resource, elevated scope, stale step, mismatched interaction, or forged form
-token fails closed before a grant is written.
+When explicitly enabled, the scheduled escalation worker evaluates eligible
+unanswered check-ins after the normal grace period and writes a durable outbox
+record. That record retains its intended caregiver even if duty changes later.
+Conditional leases limit competing senders; they do not guarantee exactly-once
+delivery. Ambiguous provider outcomes require reconciliation, not blind retries.
 
-OAuth runs in a separate Lambda from MCP requests. API Gateway sends only the
-well-known metadata, authorization, token, JWKS, revocation, and interaction
-paths to it; the default integration stays with the MCP runtime. Both share the
-same generated `execute-api` origin, so issuer, JWKS, protected-resource metadata,
-and token audience are derived from one AWS-owned URL rather than manually
-coordinated configuration. Reverse-proxy URL generation is enabled explicitly
-and covered with forwarded-host/protocol tests.
+Phone enrollment, active membership, duty coverage and worker/scheduler
+configuration are separate prerequisites. Configuration state is not proof
+of worker health or handset receipt. A push notification contains discreet
+follow-up wording rather than care details, and delivery is best-effort.
 
-Each slice must keep `npm run check` green and expose one end-to-end behavior a judge can see. AWS deployment, phone-number messaging, and public repository publication require explicit owner approval because they change external state or can incur cost.
+Echo reminders require their own consent and Alexa permission. Reminder
+creation, a recorded check-in reply and caregiver acknowledgment are different
+operations. A separately gated reconciliation worker requests cancellation
+of Kin-created reminders that no longer apply; cancellation may be delayed or
+fail. Users can manage reminders in the Alexa app.
 
-SNS standard topics provide at-least-once delivery. The outbox prevents concurrent workers and successful replays from publishing twice, but a network failure after SNS accepts a message and before Kin receives the message identifier remains an ambiguity window. Kin stores only a provider error code, never raw provider text, and uses privacy-minimized alert copy so a rare duplicate is understandable rather than alarming.
+The deployment definitions in [`infra/`](../infra/) keep application code,
+permissions, schedules and worker enablement explicit. Enabling a schedule or
+running a manual cloud sweep can affect real recipients; neither is a UI-test
+or local-story reset procedure.
 
-The outbox record freezes the recipient at the moment the escalation is created. A failed delivery retry publishes from that record, never from the current roster, so a duty handoff cannot silently redirect an old alert while its audit trail still names the original caregiver.
+## Weekly notes stay tied to recorded facts
 
-The public Today snapshot is an explicit projection, not a serialized database record. It exposes the task, status, recipient display name, and event time required by the family UI; it excludes provider message identifiers, attempt identifiers, delivery leases, attempt counts, and internal failure codes.
+The weekly brief consumes a bounded activity projection. When configured,
+Amazon Bedrock selects allowed evidence IDs and observation categories; Kin
+validates the selection and renders text from the corresponding stored facts.
+Invalid, missing or unavailable model output uses an evidence-linked
+deterministic fallback. A model suggestion cannot silently save a care reply.
 
-The weekly brief follows the same trust boundary. Bedrock receives a bounded seven-day projection containing task status and privacy-minimized escalation facts, not raw database records or caregiver confirmation identities. The model cannot author prose: it ranks supplied evidence IDs and chooses from two follow-up categories. Kin renders the headline, overview, observations, and follow-ups directly from stored facts. Output that is incomplete, malformed, outside the schema, references unknown evidence, or applies a follow-up to the wrong event type is discarded; Kin returns a deterministic brief from the same source facts instead. The brief is coordination context only and always carries a non-medical safety notice.
+Kin coordinates ordinary family care. It does not diagnose, recommend
+treatment, detect emergencies or establish that somebody is safe. See the
+[privacy and safety guide](../docs-site/content/privacy-and-safety.md) and
+[developer guide](development.md) for configuration and verification.

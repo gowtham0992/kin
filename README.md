@@ -14,8 +14,8 @@
 <p align="center">
   <a href="https://kin.gowthamsarveswaran.com/">Meet Kin</a> ·
   <a href="#try-one-complete-family-care-story">Try the story</a> ·
-  <a href="https://gowtham0992.github.io/kin/">Documentation</a> ·
-  <a href="docs/testing-instructions.md">Review Kin</a>
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="docs/testing-instructions.md">Try Kin</a>
 </p>
 
 Kin helps families keep track of everyday care without making the parent
@@ -106,9 +106,9 @@ cancellation and reminder preparation.
 | **Kin web conversation** | Kin's own interface calls the MCP server; it is not Amazon's Alexa+ interface. |
 | **Standard MCP clients** | OAuth sign-in, resource-bound permissions and current family membership protect access. See the [interoperability guide](docs/mcp-interoperability.md). |
 
-Kin is built for the Amazon Developer Hackathon's **Alexa+ self-hosted MCP
-route**. The working classic Echo skill is a separate device integration, not
-native Alexa+ Toolkit access or a published Skills Store listing.
+The working Echo connection is a classic Alexa development skill. It is
+separate from native Alexa+ Toolkit access and is not a published Skills Store
+listing.
 
 ## Built around consent and clear boundaries
 
@@ -133,14 +133,13 @@ medication adviser, fall detector, emergency monitor or replacement for a call.
 workspace, Echo connection and privacy boundaries. Hosted docs are currently
 offline while the repository is private; read the
 [curated guides in this repository](docs-site/content/intro.mdx) meanwhile.
-The [repository documentation hub](docs/README.md) also includes implementation
-and dated operational records:
+The [repository documentation hub](docs/README.md) brings the product and
+developer guides together:
 
-- [Try and review Kin](docs/testing-instructions.md) without family credentials.
+- [Try Kin](docs/testing-instructions.md) without family credentials.
 - [Run and configure Kin](docs/development.md) for local development.
 - [Understand the architecture](docs/architecture.md) and its design decisions.
 - [Connect a standard MCP client](docs/mcp-interoperability.md).
-- [Inspect current readiness](STATUS.md), dated acceptance and release boundaries.
 
 For developers, `npm run check` runs the build and test suite. Browser journeys
 have their own [verification instructions](docs/development.md#verify-changes).
@@ -155,15 +154,14 @@ MIT licensed; source access follows the repository's visibility. The local
 story is the credential-free review route from a checkout; source access does
 not grant live family membership.
 
-General recurring missed-check-in processing is currently **off**. A dated
-[bounded scheduled-worker test](docs/recurring-acceptance-20260923.md) demonstrated
-web-push receipt and acknowledgment without completion; it is not an always-on
-delivery promise or evidence of SMS delivery. Reminder reconciliation is on at
-the last verified deployment. See [current status](STATUS.md) and the
-[release record](docs/security-docs-release-20261021.md) for code, configuration
-and verification status. The documentation site uses GitHub Pages and is
-currently offline while the repository is private. It can be republished from
-the retained static branch when the repository becomes public.
+General recurring missed-check-in processing is currently **off**. Reminder
+reconciliation is on; cancellation can still be delayed or fail. Phone alerts
+require explicit setup, consent and active routing. They are best-effort, not an
+always-on delivery promise, and Kin does not claim verified SMS delivery.
+
+The documentation site uses GitHub Pages and is currently offline while the
+repository is private. The product and developer guides remain available in
+this repository.
 
 ## License
 

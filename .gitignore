@@ -6,3 +6,25 @@ cdk.out/
 .alexa-ai/
 coverage/
 *.log
+
+# Publish product documentation by explicit allowlist, not internal work notes.
+/docs/*
+!/docs/README.md
+!/docs/development.md
+!/docs/architecture.md
+!/docs/mcp-interoperability.md
+!/docs/story-demo.md
+!/docs/testing-instructions.md
+!/docs/assets/
+/docs/assets/*
+!/docs/assets/kin-home.png
+
+# Local coordination, account-specific administration and generation prompts.
+/STATUS.md
+/ops/
+/filming/
+/submission/
+/private-notes/
+/scripts/apply-release-prefix-grants.mjs
+/scripts/capture-release-baseline.mjs
+/design/brand/kin-care-logo-concept-v1.md

@@ -63,13 +63,10 @@ retry behavior. They do not establish physical-device acceptance, real account
 onboarding or notification receipt. The GitHub verification workflow runs
 locked installation, build, two shuffled suites, real DynamoDB Local transaction
 checks and Chromium journeys; it does not deploy or use AWS credentials.
-Consult [current status](../STATUS.md) for the latest observed results and any
-hosted-CI limitation, rather than interpreting a workflow file as a passing run.
-
-The [DynamoDB Local guide](plan-dynamo-local-20260926.md) covers the independent
-database-expression gate. Fresh candidate and live-baseline requirements are
-recorded in the [current readiness record](filming-readiness-20261021.md), not
-in historical release candidates.
+Check the verification run for the exact commit rather than interpreting a
+workflow file as a passing result. `npm run test:dynamo -- /path/to/dynamodb-local`
+runs the independent database-expression gate against an installed DynamoDB
+Local distribution; the CI workflow downloads and checksum-verifies it.
 
 ## Configure an authenticated MCP deployment
 
@@ -117,7 +114,7 @@ intended family and time zone explicitly for an authorized cloud deployment.
 The current deployment serves one configured circle. Creating another account
 does not create an isolated family. Cognito owns account credentials; active
 circle membership and role authorize care operations. A roster name alone is
-not access. See [family access](family-access.md) and [invitations](invitations.md).
+not access. See the [family workspace guide](../docs-site/content/family-workspace.md).
 
 ### Preserve review and retry semantics
 
@@ -133,7 +130,8 @@ days using recently assigned responsibility, not a measurement of actual
 caregiving effort. Individual duty handoffs change the selected day's coverage;
 queued alerts keep their original recipient. Local-day boundaries account for
 daylight-saving changes. The architecture and enforcement choices are in
-[architecture](architecture.md) and [roster management](roster-management.md).
+[architecture](architecture.md) and the
+[family workspace guide](../docs-site/content/family-workspace.md).
 
 ## Cloud commands are not local diagnostics
 
@@ -168,8 +166,8 @@ npm run sweep:aws
 publish real messages.** Do not use it for a bounded one-message acceptance test
 or before recipient consent and routing are verified. The existence of this SNS
 implementation does not prove SMS delivery; observed handset acceptance used
-web push. Follow [delivery operations](delivery-operations.md) instead of
-guessing whether an uncertain send should be retried.
+web push. An uncertain send must be reconciled against its durable delivery
+record and provider result before any retry; do not infer permission to resend.
 
 Automatic processing uses a separate worker and scheduler with independent
 pause controls. Durable outbox records freeze the intended caregiver; a later
@@ -209,7 +207,7 @@ REST Week has its separate 5,000 ms budget
 still uses MCP's budget. These limit model waiting, not authentication or
 database time. Model calls make one SDK attempt and abort at the deadline.
 The offline `brief:aws` command accepts `KIN_BEDROCK_TIMEOUT_MS` from 50–10000 ms,
-default 300. See [weekly contract evidence](weekly-contract-20260918.md).
+default 300. These are waiting budgets, not a guarantee about total response time.
 
 ## Prepare infrastructure without deploying it
 
@@ -220,25 +218,21 @@ npm run infra:synth
 This bundles Lambda assets and emits a CloudFormation template; it is not a
 deployment. The data stack uses on-demand billing, AWS-managed encryption,
 seven-day point-in-time recovery, deletion protection and retain-on-delete.
-Deployments need the existing scoped bootstrap, fresh live baselines, reviewed
-code/configuration differences and recoverable previous artifacts. See
-[AWS deployment](aws-deployment.md) and [release controls](release-controls.md).
+Deployments require an explicitly chosen non-root principal, fresh live
+configuration baselines, reviewed code/configuration differences and recoverable
+previous artifacts. Review the four stack definitions under `infra/` before
+using CDK to deploy to an authorized account. Synthesis itself does not create
+AWS resources or establish that a future deployment is free of charges.
 
-The October 21 security update's actual rollout and rollback state is recorded
-in [current status](../STATUS.md) and the
-[release record](security-docs-release-20261021.md); the earlier
-[preparation record](filming-readiness-20261021.md) is not a current deployment
-target. General
-recurring follow-up processing was last verified off and reminder reconciliation
-on; the owner removed Kin's CloudWatch alarms. Historical runbooks do not
-authorize restoring alarms, enabling sends, adding IAM grants or deploying an
-old candidate.
+The escalation worker and scheduler have separate CloudFormation controls;
+both must be enabled for new scheduled processing. A pause is not proof that
+in-flight delivery has stopped or queues have drained. Reminder reconciliation
+has its own controls. Treat activation, IAM changes, alarms and delivery tests
+as separate operational decisions, not automatic steps of a code update.
 
 The separate classic Alexa development skill connects the linked Echo account
 to Kin; it is not native Alexa+ Toolkit access or Skills Store publication.
 The [importable interaction model](../alexa/interaction-model-en-US.json) is
-the current model source. [Echo setup](echo-pop-setup.md) and
-[linked care](echo-linked-care.md) preserve historical integration work; their
-old activation claims, deadlines and dialogue are not today's acceptance
-status or a current voice script. Kin coordinates care; it does not verify
+the model source; the [Echo and MCP guide](../docs-site/content/echo-and-mcp.md)
+explains the account-linking and device boundary. Kin coordinates care; it does not verify
 safety, identify the physical speaker or provide medical or emergency services.
