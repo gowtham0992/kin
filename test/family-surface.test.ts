@@ -20,6 +20,15 @@ function setup() {
 }
 
 describe("separate family workspace", () => {
+  it("links the separate public documentation without changing private workspace access", async () => {
+    const app = setup().app();
+    const page = await request(app).get("/").expect(200);
+    expect(page.text).toContain('<nav class="home-links" aria-label="Learn about Kin">');
+    expect(page.text).toMatch(/href="https:\/\/gowtham0992\.github\.io\/kin\/"[^>]*>Docs(?:\s*<span[^>]*>[^<]*<\/span>)?\s*<\/a>/);
+    await request(app).get("/api/today").expect(401);
+    await request(app).get("/story.html").expect(404);
+  });
+
   it("lets signed-out judges find credential-free instructions without granting family access", async () => {
     const app = setup().app();
     for (const path of ["/", "/invite.html"]) {

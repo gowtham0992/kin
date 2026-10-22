@@ -110,4 +110,24 @@ describe("Kin MCP contract", () => {
     });
     expect(result.isError).toBe(true);
   });
+
+  it.each([
+    ["wide object", Object.fromEntries(Array.from({ length: 257 }, (_, i) => [`field${i}`, null]))],
+    ["nested object", { padding: Object.fromEntries(Array.from({ length: 256 }, (_, i) => [`field${i}`, null])) }],
+    ["nested array", { padding: Array.from({ length: 256 }, () => null) }],
+  ])("rejects a bounded oversized %s before invoking a tool", async (_shape, args) => {
+    const today = vi.spyOn(store, "today");
+    const result = await client.callTool({ name: "show_today", arguments: args });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("maximum of 256 elements");
+    expect(today).not.toHaveBeenCalled();
+  });
+
+  it("accepts arguments at the element ceiling without changing the normal tool result", async () => {
+    const result = await client.callTool({ name: "show_today", arguments:
+      Object.fromEntries(Array.from({ length: 256 }, (_, i) => [`field${i}`, null])),
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({ summary: { total: 2, completed: 0 } });
+  });
 });

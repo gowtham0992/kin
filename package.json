@@ -43,7 +43,7 @@
     "@aws-sdk/lib-dynamodb": "^3.1124.0",
     "@codegenie/serverless-express": "^4.17.1",
     "@modelcontextprotocol/ext-apps": "1.7.5",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "ask-sdk-core": "2.14.0",
     "ask-sdk-model": "1.86.0",
     "express": "5.2.1",
@@ -63,7 +63,7 @@
     "constructs": "^10.8.1",
     "esbuild": "^0.28.2",
     "playwright": "1.63.0",
-    "supertest": "7.2.2",
+    "supertest": "7.3.1",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
     "vitest": "4.1.11"

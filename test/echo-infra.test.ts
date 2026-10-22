@@ -167,7 +167,10 @@ describe("isolated Echo development infrastructure", () => {
     template.hasOutput("EchoSkillIdOutput", { Value: { Ref: "EchoSkillId" } });
   });
 
-  it("runs the actual CommonJS deployment handler with greeting, deny, and pause behavior intact", () => {
+  // Each cold start has its own existing five-second budget. Combining three
+  // child processes under one five-second test made valid startups fail in
+  // aggregate when the machine was busy.
+  it.each(["greeting", "wrong skill", "paused"] as const)("runs the actual CommonJS deployment handler: %s", scenario => {
     const skillId = "amzn1.ask.skill.00000000-0000-0000-0000-000000000001";
     const launch = {
       version: "1.0",
@@ -183,16 +186,19 @@ describe("isolated Echo development infrastructure", () => {
       KIN_ECHO_CARE_ENABLED: "false", KIN_ECHO_MCP_ENDPOINT: "",
     }, encoding: "utf8", timeout: 5_000 }));
 
-    const enabled = invoke("true", launch);
-    expect(enabled.response.response.outputSpeech.ssml).toContain("Your family account is not connected yet");
-    expect(enabled.response.response.shouldEndSession).toBe(false);
-    const wrongSkill = { ...launch, context: { System: { application: {
+    const event = scenario === "wrong skill" ? { ...launch, context: { System: { application: {
       applicationId: "amzn1.ask.skill.00000000-0000-0000-0000-000000000002",
-    } } } };
-    expect(invoke("true", wrongSkill)).toEqual({ error: "Invalid Kin Echo request." });
-    const paused = invoke("false", launch);
-    expect(paused.response.response.outputSpeech.ssml).toContain("voice testing is paused");
-    expect(paused.response.response.shouldEndSession).toBe(true);
+    } } } } : launch;
+    const result = invoke(scenario === "paused" ? "false" : "true", event);
+    if (scenario === "wrong skill") {
+      expect(result).toEqual({ error: "Invalid Kin Echo request." });
+    } else if (scenario === "paused") {
+      expect(result.response.response.outputSpeech.ssml).toContain("voice testing is paused");
+      expect(result.response.response.shouldEndSession).toBe(true);
+    } else {
+      expect(result.response.response.outputSpeech.ssml).toContain("Your family account is not connected yet");
+      expect(result.response.response.shouldEndSession).toBe(false);
+    }
   });
 
   it.each([true, false])("runs the bundled MCP care path without real networking, linked account=%s", linked => {

@@ -43,6 +43,14 @@ try {
     for (const width of [320, 375, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${name}: overflow at ${width}`);
+      if (name === 'home') {
+        const docs = page.getByRole('navigation', { name: 'Learn about Kin' }).getByRole('link', { name: 'Docs', exact: true });
+        await expect(docs).toHaveAttribute('href', 'https://gowtham0992.github.io/kin/');
+        const box = await docs.boundingBox();
+        assert.ok(box && box.x >= 0 && box.x + box.width <= width && box.height >= 44, `Docs navigation clipped at ${width}`);
+        await docs.focus();
+        assert.notEqual(await docs.evaluate(element => getComputedStyle(element).outlineStyle), 'none');
+      }
       const headings = await page.locator('main h1, main h2, main h3').evaluateAll(elements => elements.filter(element => element.getBoundingClientRect().width).map(element => getComputedStyle(element).fontFamily));
       assert.ok(headings.every(font => !font.includes('Georgia')), `${name}: old display typography remains`);
       const clipped = await page.locator('main h1, main h2, main h3, main button, main input, main select').evaluateAll(elements => elements.filter(element => {

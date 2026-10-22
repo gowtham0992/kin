@@ -1,0 +1,22 @@
+{
+  "name": "kin-documentation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The public product documentation for Kin.",
+  "license": "MIT",
+  "engines": { "node": ">=22.23.2 <23" },
+  "scripts": {
+    "start": "docusaurus start --host 127.0.0.1",
+    "build": "docusaurus build",
+    "serve": "docusaurus serve --host 127.0.0.1 --port 3044",
+    "test:browser": "node scripts/verify-docs.mjs"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/preset-classic": "3.10.2",
+    "@mdx-js/react": "3.1.1",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": { "playwright": "1.63.0" }
+}

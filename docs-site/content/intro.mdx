@@ -1,0 +1,73 @@
+---
+id: intro
+slug: /
+title: A little care, shared.
+sidebar_label: Meet Kin
+description: A parent's voice check-in, a shared family plan and a clearer next turn.
+---
+
+import Link from '@docusaurus/Link';
+
+<p className="kin-lead">A parent's voice check-in. A shared family plan. A clearer next turn.</p>
+
+Kin helps a family keep track of everyday care across households. A parent can
+reply on a linked Echo; the family sees the recorded reply and whose turn it is
+to follow up in a shared web workspace.
+
+Keep the calls. Kin keeps the shared plan together.
+
+<div className="kin-paths">
+  <Link className="kin-path" to="/quickstart/">
+    <strong>Try one care story</strong>
+    <span>Follow a reply, a family follow-up and a weekly note. No family account or AWS credentials needed.</span>
+    <em>Start the local story →</em>
+  </Link>
+  <Link className="kin-path" to="/family-workspace/">
+    <strong>Find your way around</strong>
+    <span>Understand Today, Plan, Turns and Week—and what a caregiver acknowledgment actually means.</span>
+    <em>Explore the family workspace →</em>
+  </Link>
+</div>
+
+## One reply, understood by the family
+
+Someone can say that their check-in is done, not done yet, or intentionally
+skipped. Kin records the reported reply; it does not infer how the person is
+feeling or decide whether they are safe.
+
+The family can see the plan and agree who is on duty. When automatic follow-up
+processing is enabled and routing is ready, an overdue check-in can prompt a
+discreet notification to the assigned caregiver. Acknowledging that follow-up
+records **seen**, not contacted, completed or safe.
+
+Weekly notes bring recorded activity together, with source facts you can
+inspect instead of an unexplained score.
+
+## Choose how to use Kin
+
+- **For the person checking in:** use a linked Echo, or speak, type or choose a
+  reply in Kin's web conversation. Review the proposed change before saving.
+- **For caregivers:** open the shared family workspace on a phone or computer.
+  It can be added to a phone's home screen; there is no separate app-store download.
+- **For builders and reviewers:** run the isolated local story, then explore
+  the [MCP integration](./echo-and-mcp.md) and [developer overview](./for-developers.md).
+
+The hosted family workspace requires authorized sign-in and accepted circle
+membership. A roster name is not an account, and this documentation does not
+grant access.
+
+## Know the boundaries
+
+The working Echo connection is a **classic Alexa development skill**. Kin's
+browser conversation uses real MCP calls, but it is not Amazon's Alexa+
+interface or proof of native Alexa+ Toolkit access. The local story uses
+synthetic people, time and notifications.
+
+General recurring missed-check-in processing is currently off in the hosted
+deployment. A notification demonstration or successful test is not a promise
+that automatic delivery is always running.
+
+Kin coordinates ordinary family care. It is not a medical device, medication
+adviser, fall detector, emergency monitor or replacement for a call.
+
+[Read the privacy and safety guide →](./privacy-and-safety.md)

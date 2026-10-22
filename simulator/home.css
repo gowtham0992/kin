@@ -1,6 +1,7 @@
 .kin-home { overflow-x: visible; }
 .kin-home::before { display: none; }
-.home-header { max-width: 1256px; padding: 16px 48px; }
+.home-header { max-width: 1256px; padding: 16px 48px; gap: 16px; flex-wrap: wrap; }
+.home-links { display: flex; align-items: center; gap: 24px; margin-left: auto; }
 .home-about { color: var(--sage); text-underline-offset: 5px; min-height: 44px; display: inline-flex; align-items: center; gap: 12px; font-size: 14px; }
 .skip-link { position: absolute; top: 8px; left: 16px; padding: 12px 16px; background: var(--card); color: var(--ink); z-index: 10; transform: translateY(-160%); }
 .skip-link:focus { transform: translateY(0); }
@@ -52,6 +53,9 @@
 }
 @media (max-width: 700px) {
   .home-header { padding: 20px 24px; }
+  .home-header .brand-logo { width: 112px; height: 56px; }
+  .home-links { gap: 16px; }
+  .home-links .home-about { font-size: 13px; gap: 6px; }
   .home-main { grid-template-columns: 1fr; gap: 20px; padding: 16px 24px 24px; }
   .home-introduction { display: contents; }
   .home-mode { margin: 0; font-size: 11px; order: 0; }

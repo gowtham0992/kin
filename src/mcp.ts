@@ -35,7 +35,9 @@ export function createMcpServer(
   authorization?: CareWriteAuthorization,
   reminderTickets?: ReminderTickets,
 ): McpServer {
-  const server = new McpServer({ name: "kin", version: "0.1.0" });
+  // All current tool inputs are small fixed shapes (at most 18 members,
+  // including nested reviews). Bound aggregate validation work before parsing.
+  const server = new McpServer({ name: "kin", version: "0.1.0" }, { maxToolInputElements: 256 });
   if (store.planPauseEnabled && member && authorization && member.role !== "viewer") {
     const failure = (error: unknown) => {
       if (error instanceof FamilyAccessDeniedError) return { isError: true, content: [{ type: "text" as const, text: "Family access does not allow this pause." }], structuredContent: { code: "family_access_denied" } };
