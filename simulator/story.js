@@ -120,7 +120,7 @@ export function createStoryPage({ doc = document, request = (...args) => fetch(.
     if (transcript.length > 16) transcript.splice(0, transcript.length - 16);
     $("story-transcript").replaceChildren(...transcript.map(entry => {
       const item = node("li"); item.dataset.speaker = entry.speaker;
-      item.append(node("strong", entry.speaker === "Kin" ? "Kin · simulated Alexa reply" : "Evelyn · submitted draft"), node("p", entry.text)); return item;
+      item.append(node("strong", entry.speaker === "Kin" ? "Kin · local demo reply" : "Evelyn · submitted draft"), node("p", entry.text)); return item;
     }));
     $("story-transcript").scrollTop = $("story-transcript").scrollHeight;
   }
@@ -161,9 +161,9 @@ export function createStoryPage({ doc = document, request = (...args) => fetch(.
       const notification = story.notifications.find(record => record.id === alert.id);
       item.append(node("p", `${data.tasks.find(task => task.id === alert.taskId)?.title ?? "Check-in"} · Due ${formatTimestamp(alert.dueAt)}`));
       item.append(node("p", alert.status === "receipt_pending" ? "Provider accepted; receipt needs review. Operator reconciliation is required; no automatic resend. This status does not prove phone delivery."
-        : notification ? `Simulated notification for ${notification.recipientMemberName ?? "the caregiver"}. No SMS was sent.`
+        : notification ? `Demo notification for ${notification.recipientMemberName ?? "the caregiver"}. No phone message was sent.`
         : alert.status === "blocked" ? "No caregiver was on duty when the follow-up was recorded. No SMS was sent."
-        : "No simulated notification is recorded yet. No SMS was sent."));
+        : "No demo notification is recorded yet. No phone message was sent."));
       if (alert.acknowledgedBy) item.append(node("p", `${alert.acknowledgedBy} acknowledged the follow-up at ${formatTime(alert.acknowledgedAt)}. Evelyn’s check-in is unchanged.`));
       else {
         item.append(node("p", "No caregiver acknowledgment recorded."));
@@ -302,7 +302,7 @@ export function createStoryPage({ doc = document, request = (...args) => fetch(.
       pendingRest = null;
       const refreshed = await loadViews({ parent: true });
       if (!owns(owner)) return;
-      setStatus(`${intent.kind === "advance" ? "Demo clock advanced. Any notification shown is simulated." : "Theo acknowledged the follow-up. Evelyn’s check-in was not completed by this action."}${refreshed ? "" : " The latest view could not be refreshed; use Refresh family view."}`);
+      setStatus(`${intent.kind === "advance" ? "Demo clock advanced. Notifications stay in this local demo; no phone message was sent." : "Theo acknowledged the follow-up. Evelyn’s check-in was not completed by this action."}${refreshed ? "" : " The latest view could not be refreshed; use Refresh family view."}`);
     } catch (error) {
       if (!owns(owner)) return;
       if ([400, 401, 403, 404, 409, 422].includes(error.status)) { pendingRest = null; setStatus("The local change was rejected. Refresh to check the current story before trying again."); }

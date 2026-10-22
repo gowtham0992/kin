@@ -181,7 +181,7 @@ function render(data) {
   echoActions.hidden = !next;
   echoActions.dataset.taskId = next?.id ?? "";
   document.querySelector("#voice-line").textContent = next
-    ? "Example voice request: “Alexa, tell Kin I did it.” Use the buttons in this simulation."
+    ? "Example voice request: “Alexa, tell Kin I did it.” Use the buttons in this local demo."
     : latestSent
       ? `Delivery is not confirmed. ${latestSent.acknowledgedBy ? `${latestSent.acknowledgedBy} acknowledged the follow-up.` : "No caregiver acknowledgment recorded."}`
       : data.tasks.length ? "Kin has quietly updated your family." : "There are no check-ins in today’s shared plan.";

@@ -4,10 +4,11 @@ import { describe, expect, it } from "vitest";
 const html = await readFile(new URL("../simulator/story.html", import.meta.url), "utf8");
 
 describe("local story presentation contract", () => {
-  it("identifies the simulated Alexa experience and its real MCP boundary before the interactive story", () => {
+  it("identifies the local care demo and its real MCP boundary before the interactive story", () => {
     const opening = html.slice(0, html.indexOf('id="story-app"'));
-    expect(opening).toContain("Simulated Alexa+ experience · real MCP");
+    expect(opening).toContain("Local care demo · real MCP");
     expect(opening).toContain("Synthetic people, clock and notifications. No live Alexa or SMS connection.");
+    expect(opening).not.toMatch(/\bsimulated\b/i);
     expect(opening).not.toContain("<details");
   });
 

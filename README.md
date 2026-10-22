@@ -5,8 +5,8 @@ Kin helps a family share everyday check-ins, follow-ups, and the next turn at ca
 The family workspace includes shared check-ins, care plans, duty handoffs,
 follow-up acknowledgment, invitations, access management and evidence-linked
 weekly notes. Its portable core is an MCP `2025-11-25`-compatible server using
-Streamable HTTP and an MCP Apps widget. The Alexa+ interface is a labeled
-simulation over real MCP calls. A separate classic Alexa development skill
+Streamable HTTP and an MCP Apps widget. Kin's web conversation uses real MCP
+calls; it is not Amazon's Alexa+ interface. A separate classic Alexa development skill
 connects the owner's Echo Pop to the same linked family account; it is not a
 native Alexa+ add-on.
 
@@ -30,16 +30,19 @@ automatically deployed, and an isolated test is not recurring-service acceptance
 | Family workspace and classic Echo connection | Deployed; owner has used linked plan reads on an Echo Pop and a second caregiver has joined the shared workspace. |
 | Alexa reminder creation and cancellation | Owner reported a reminder appearing and later disappearing. Automatic reconciliation is now enabled; see the [activation and recovery evidence](docs/reminder-activation-20260918.md). |
 | Missed-check-in phone notification | September 23 bounded recurring acceptance passed: two real scheduled sweeps, one delivery attempt, owner-confirmed receipt, and stored acknowledgment without completing the check-in. Worker and schedule were restored off. See [acceptance evidence](docs/recurring-acceptance-20260923.md). |
-| Operational alerts | Operator email routing has been tested; these are separate from family notifications. |
-| Alexa+ conversation | Clearly labeled simulation using real MCP calls—not native toolkit access. |
+| Operational alerts | Historical operator email routing was tested. All nine Kin CloudWatch alarms were removed September 27 at the owner's request; operations currently require manual inspection. |
+| Browser conversation | Kin's own interface uses real MCP calls—not native Alexa+ toolkit access. The isolated story uses synthetic people, time and notifications. |
 | Close without a reply | Synthetic closure, attribution and reload passed September 20; corrected weekly totals were deployed and read back by the caregiver September 22 and organizer September 23. See [current status](STATUS.md). |
-| Release candidate | A matching committed, tagged, fresh-clone release is still outstanding. Historical clone checks do not prove the current working tree reproduces production. |
+| Release candidate | The October 21 judge-entry update passed build, two complete shuffled 2,729-test runs and browser gates locally. See [current release evidence](STATUS.md). The previous commit `10ba94d` has a [completed CI run](https://github.com/gowtham0992/kin/actions/runs/37710523281); check CI on the final submitted revision separately. Source publication, final tagging and the video remain separate gates. |
 
 The repository remains private. Reviewers need separately authorized repository
 access and a dedicated Kin account/invitation; do not share owner credentials.
 The local story below needs neither AWS credentials nor a family account.
 See the [acceptance runbook](docs/final-acceptance-runbook.md) for device checks.
 Start an independent review with the [reviewer guide](docs/reviewer-guide.md).
+For the credential-free judging route, use the
+[testing instructions](docs/testing-instructions.md). Never commit live testing
+credentials to this repository, including before making it public.
 
 ## Try one complete family-care story
 
@@ -109,8 +112,8 @@ the synthetic story in Chromium. It does not deploy or use AWS credentials.
 - A small MCP Apps resource renders the Today view.
 - In-memory demo data keeps the first slice runnable without cloud credentials.
 - A DynamoDB repository uses strongly consistent reads and an atomic transaction for the task update plus idempotency record.
-- Missed-task sweeps persist a deterministic outbox record, acquire a conditional 60-second delivery lease, and record the SNS message identifier or a privacy-safe failure code.
-- When explicitly enabled, the deployable worker runs that sweep every five minutes through EventBridge Scheduler, with bounded retries, a retained encrypted dead-letter queue, alarms, structured logs, and X-Ray tracing. New worker and schedule controls default to paused; see [release controls](docs/release-controls.md) before deployment.
+- Missed-task sweeps persist a deterministic outbox record, acquire a conditional 60-second delivery lease, and record the configured transport's result or a privacy-safe failure code. The bounded handset acceptance used web push, not SMS; retained SNS code is not evidence of SMS delivery.
+- When explicitly enabled, the deployable worker runs that sweep every five minutes through EventBridge Scheduler, with bounded retries, a retained encrypted dead-letter queue, structured logs, and X-Ray tracing. Worker and schedule controls default to paused and were restored off after bounded acceptance. Kin CloudWatch alarms are not active; see [release controls](docs/release-controls.md) before deployment.
 - Retries publish to the caregiver frozen into the durable outbox record even if the duty assignment changes later.
 - The Circle view makes the seven-day Maya/Theo rotation visible and editable, persists handoffs in DynamoDB, and derives exact local-day boundaries across daylight-saving changes.
 - **Propose next week** fills uncovered days using recent assigned responsibility,
@@ -217,8 +220,10 @@ receipt-write error is held for reconciliation, not automatically resent.
 Expired sending attempts are also held because a stopped process may already
 have published. Provider timeouts remain ambiguous and can duplicate on retry.
 Messages contain no task details and ask the caregiver to check Kin.
-See [delivery operations](docs/delivery-operations.md) for the deployed hardening,
-alarm destination setup, and the live verification still required before activation.
+See [delivery operations](docs/delivery-operations.md) for delivery hardening and
+[current status](STATUS.md) for the later alarm removal, paused processing and
+live verification still required before activation. Historical alarm setup
+instructions do not describe the current deployment.
 
 A recorded `not_yet` reply keeps the task incomplete and starts the configured
 grace period from the later of its due time or latest reply time (30 minutes by
@@ -227,10 +232,12 @@ Subsequent sweeps use this timing; it does not cancel queued, in-flight or sent
 notifications. The worker evaluates tasks due today or yesterday in the circle's
 time zone; it is not an indefinite follow-up scheduler.
 
-Today includes unresolved follow-ups from the previous local day alongside
-today's alerts. Acknowledging yesterday's follow-up removes it from this view,
-without completing the task or cancelling delivery. Older alerts remain
-addressable by their stable IDs but have no historical inbox in this slice.
+Today retains unacknowledged follow-ups across calendar rollover, alongside
+today's alerts. Acknowledging an older follow-up removes it from this view
+without completing the task or cancelling delivery. Cards show the captured
+title and due date and link to the exact Plan occurrence; an occurrence outside
+the loaded window is explicitly unavailable. History reads are bounded and
+report an incomplete-list error instead of presenting a falsely empty list.
 
 Generate the grounded weekly brief with Amazon Nova through the scoped application role:
 

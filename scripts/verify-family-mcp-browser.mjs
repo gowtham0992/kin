@@ -56,7 +56,8 @@ try {
     if (frame?.method === "tools/call") rpc.push({ frame, authorization: request.headers().authorization });
   });
   await page.goto(`${origin}/invite.html#ask`);
-  await expect(page.locator(".care-mcp-badge")).toContainText("Simulated Alexa+ experience · real MCP");
+  await expect(page.locator(".care-mcp-badge")).toContainText("Kin web conversation · real MCP");
+  await expect(page.locator(".care-conversation-heading")).toContainText("This is Kin’s web conversation, not Amazon’s Alexa+ interface.");
   await expect(page.locator("#workspace-identity")).toContainText("Maya");
   const review = async message => {
     await page.locator("#care-request").fill(message);

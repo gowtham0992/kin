@@ -439,8 +439,9 @@ describe("parent-first conversation", () => {
   it.each([false, true])("labels real MCP only when the authenticated capability is %s", async supported => {
     const ui = await fixture([water], supported);
     const text = ui.get("workspace-content").textContent;
-    expect(text.includes("Simulated Alexa+ experience · real MCP")).toBe(supported);
-    expect(text.includes("Not connected to Alexa or an Echo device.")).toBe(supported);
+    expect(text.includes("Kin web conversation · real MCP")).toBe(supported);
+    expect(text.includes("This is Kin’s web conversation, not Amazon’s Alexa+ interface. It is not connected to Alexa or an Echo device.")).toBe(supported);
+    expect(text).not.toMatch(/\bsimulated\b/i);
     const help = ui.descendants().find(child => child.id === "care-command-help")!;
     expect(help.tagName).toBe("DETAILS"); expect(help.open).toBe(false);
   });

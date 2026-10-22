@@ -229,8 +229,8 @@ export function createWorkspace({ request, onAccessLost, onInvite, onLeaveInvite
     const heading = node("div", null, "care-conversation-heading");
     heading.append(node("p", "A moment with Kin", "kicker"), node("h2", "How did it go?"));
     const usesMcp = member.mcpConversation === true;
-    if (usesMcp) heading.append(node("p", "Simulated Alexa+ experience · real MCP", "care-mcp-badge"),
-      node("p", "Not connected to Alexa or an Echo device.", "care-note"));
+    if (usesMcp) heading.append(node("p", "Kin web conversation · real MCP", "care-mcp-badge"),
+      node("p", "This is Kin’s web conversation, not Amazon’s Alexa+ interface. It is not connected to Alexa or an Echo device.", "care-note"));
     if (!member.permissions.confirm) {
       content.replaceChildren(heading, node("p", "Your membership allows viewing the plan, but not recording check-ins.")); return;
     }

@@ -20,8 +20,30 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  await page.goto(origin + '/home.html');
+  await expect(page.locator('.home-mode')).toHaveText('Alexa + real MCP');
+  await page.getByRole('link', { name: 'Judges: start here', exact: true }).click();
+  await expect(page).toHaveURL(origin + '/how-kin-works.html#judges');
+  await expect(page.locator('#judges')).toBeFocused();
+  await expect(page.locator('#judges')).toContainText('No Kin sign-in');
+  await expect(page.locator('#judges')).toContainText('not a hosted online demo');
+  await page.reload();
+  await expect(page.locator('#judges')).toBeVisible();
+  for (const width of [375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Judge guide overflow at ${width}px`);
+    const clipped = await page.locator('#judges p, #judges li, #judges pre, #judges a').evaluateAll(elements => elements.filter(element => {
+      const box = element.getBoundingClientRect();
+      return box.width > 0 && (box.left < 0 || box.right > innerWidth || element.scrollWidth > element.clientWidth + 1);
+    }).map(element => element.textContent));
+    assert.deepEqual(clipped, [], `Judge guide text clips at ${width}px`);
+    await page.locator('#judges').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${output}/judges-viewport-${width}.png` });
+    await page.screenshot({ path: `${output}/judges-${width}.png`, fullPage: true });
+  }
+  console.log('Public judge entry, keyboard anchor, refresh and three-width guide passed.');
   await page.goto(origin + '/invite.html#ask');
-  await expect(page.getByText('Not connected to Alexa or an Echo device.', { exact: true })).toBeVisible();
+  await expect(page.getByText('This is Kin’s web conversation, not Amazon’s Alexa+ interface. It is not connected to Alexa or an Echo device.', { exact: true })).toBeVisible();
   await expect(page.locator('.care-conversation-heading .care-author-note')).toBeVisible();
   for (const width of [375, 768, 901, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1000 });

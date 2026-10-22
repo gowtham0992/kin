@@ -20,6 +20,30 @@ function setup() {
 }
 
 describe("separate family workspace", () => {
+  it("lets signed-out judges find credential-free instructions without granting family access", async () => {
+    const app = setup().app();
+    for (const path of ["/", "/invite.html"]) {
+      const page = await request(app).get(path).expect(200);
+      expect(page.text).toMatch(/href="\/how-kin-works\.html#judges"[^>]*>Judges: start here(?:\s*<span\b[^>]*aria-hidden="true"[^>]*>[^<]*<\/span>)?\s*<\/a>/);
+      expect(page.text).not.toMatch(/\bsimulated\b/i);
+    }
+    const guide = await request(app).get("/how-kin-works.html").expect(200);
+    expect(guide.text).toContain('id="judges"');
+    expect(guide.text).toMatch(/<section\b[^>]*id="judges"[^>]*tabindex="-1"/);
+    expect(guide.text).toContain('href="https://github.com/gowtham0992/kin"');
+    expect(guide.text).toContain("npm run demo:story");
+    expect(guide.text).toContain("http://127.0.0.1:3030/story.html");
+    expect(guide.text).toContain("synthetic");
+    expect(guide.text).not.toMatch(/\bsimulated\b/i);
+    expect(guide.text).not.toMatch(/(?:password|username)\s*[:=]\s*[^<\s]/i);
+    for (const path of ["/api/today", "/api/session", "/api/plan"]) {
+      await request(app).get(path).expect(401);
+    }
+    await request(app).post("/api/tasks/morning-water/confirm")
+      .send({ response: "done", requestId: "judge-entry-must-not-save" }).expect(401);
+    await request(app).get("/story.html").expect(404);
+  });
+
   it("puts practical first steps and setup limits before expandable coordination details", async () => {
     const page = await request(setup().app()).get("/how-kin-works.html").expect(200);
     expect(page.text).toContain('class="kin-start-steps"');
@@ -157,8 +181,9 @@ describe("separate family workspace", () => {
     const home = await request(app).get("/").expect(200);
     expect(home.text).toContain('href="/invite.html#ask"');
     expect(home.text).toContain('href="/invite.html#today"');
-    expect(home.text).toContain("Simulated Alexa+ experience");
-    expect(home.text).toContain("classic Alexa skill");
+    expect(home.text).toContain("Alexa + real MCP");
+    expect(home.text).toContain("Kin’s web conversation uses real MCP calls.");
+    expect(home.text).toContain("classic Alexa development skill");
     expect(home.text).toContain("not native Alexa+ toolkit integration");
     expect(home.text).not.toContain("not connected to Alexa or an Echo device");
     expect(home.text).not.toContain("<script");

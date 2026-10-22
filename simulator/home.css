@@ -15,6 +15,7 @@
 .home-boundary { max-width: 390px; color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0; }
 .home-entries { display: grid; gap: 16px; min-width: 0; }
 .home-entries a { text-decoration: none; }
+.home-entries .home-judge-entry { color: var(--sage); display: inline-flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 8px 4px; font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; }
 .home-parent { display: flex; flex-direction: column; align-items: flex-start; position: relative; padding: 40px; background: var(--ink); color: var(--card); border-radius: var(--radius-surface); min-height: 380px; }
 .entry-eyebrow { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; line-height: 1.6; }
 .home-parent .entry-eyebrow { color: #c8d9d1; }

@@ -95,6 +95,13 @@
 .kin-guide-details summary:hover { color: var(--sage); }
 .kin-guide-details summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
 .kin-guide-details details p { max-width: 68ch; margin: 0 0 24px; }
+.kin-judge-guide { border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--card); padding: 24px; scroll-margin-top: 24px; }
+.kin-judge-guide pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: var(--radius-control); padding: 16px; font-size: 13px; }
+.kin-judge-guide a, .kin-judge-guide code { overflow-wrap: anywhere; }
+.kin-judge-guide:focus { outline: 3px solid var(--coral); outline-offset: 4px; }
+.workspace-judge-entry { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 24px; }
+.workspace-judge-entry a { min-height: 44px; display: inline-flex; align-items: center; color: var(--sage); font-weight: 600; text-underline-offset: 4px; }
+.workspace-judge-entry span { color: var(--muted); font-size: 13px; line-height: 1.6; }
 @media (max-width: 900px) { .kin-guide .kin-start-steps { grid-template-columns: minmax(0, 1fr); } .kin-start-steps > li::before { margin-bottom: 16px; } }
 @media (max-width: 620px) { .kin-guide { padding: 24px 24px 64px; } }
 .care-mcp-badge { display: inline-block; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--sage); font-size: 14px; }

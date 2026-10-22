@@ -224,7 +224,7 @@ describe("isolated local story page", () => {
     expect(ui.get("story-alerts").textContent).toContain("Provider accepted; receipt needs review");
     expect(ui.get("story-alerts").textContent).toContain("Operator reconciliation is required; no automatic resend");
     expect(ui.get("story-alerts").textContent).toContain("does not prove phone delivery");
-    expect(ui.get("story-alerts").textContent).not.toContain("No SMS was sent");
+    expect(ui.get("story-alerts").textContent).not.toContain("No phone message was sent");
   });
 
   it("does not create an MCP client or read care data when the story endpoint is unavailable", async () => {
@@ -317,7 +317,8 @@ describe("isolated local story page", () => {
     ui.get("story-advance").click(); await ui.settled();
     const advance = ui.request.mock.calls.find(([url]) => url === "/demo/story/advance")!;
     expect(JSON.parse(advance[1]!.body!)).toEqual({ step: "after_grace", confirm: true });
-    expect(ui.get("story-alerts").textContent).toContain("Simulated notification for Theo. No SMS was sent.");
+    expect(ui.get("story-alerts").textContent).toContain("Demo notification for Theo. No phone message was sent.");
+    expect(ui.get("story-alerts").textContent).not.toMatch(/\bsimulated\b/i);
     const ack = ui.get("story-alerts").descendants().find(item => item.tagName === "BUTTON")!;
     ack.click(); await ui.settled();
     expect(ui.get("story-alerts").textContent).toContain("Theo acknowledged the follow-up");
