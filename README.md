@@ -130,9 +130,9 @@ medication adviser, fall detector, emergency monitor or replacement for a call.
 ## Explore the documentation
 
 **[Kin Docs](https://gowtham0992.github.io/kin/)** covers the product, family
-workspace, Echo connection and privacy boundaries. Hosted docs are currently
-offline while the repository is private; read the
-[curated guides in this repository](docs-site/content/intro.mdx) meanwhile.
+workspace, Echo connection and privacy boundaries. The
+[curated guide sources](docs-site/content/intro.mdx) are also available in this
+repository.
 The [repository documentation hub](docs/README.md) brings the product and
 developer guides together:
 
@@ -150,18 +150,13 @@ configured workflows—not part of the quickstart.
 
 The [public site](https://kin.gowthamsarveswaran.com/) explains Kin; the hosted
 family workspace requires authorized sign-in and membership. The repository is
-MIT licensed; source access follows the repository's visibility. The local
-story is the credential-free review route from a checkout; source access does
-not grant live family membership.
+public and MIT licensed. The local story is the credential-free review route
+from a checkout; source access does not grant live family membership.
 
 General recurring missed-check-in processing is currently **off**. Reminder
 reconciliation is on; cancellation can still be delayed or fail. Phone alerts
 require explicit setup, consent and active routing. They are best-effort, not an
 always-on delivery promise, and Kin does not claim verified SMS delivery.
-
-The documentation site uses GitHub Pages and is currently offline while the
-repository is private. The product and developer guides remain available in
-this repository.
 
 ## License
 

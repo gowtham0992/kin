@@ -21,18 +21,17 @@ the static publication artifact; hosting and publication are separate from this
 build. All source and generated build output stay inside the existing Kin
 repository; no second repository is needed.
 
-The site was published and verified at **https://gowtham0992.github.io/kin/**
-from this repository's `gh-pages` branch, with its root as the Pages source.
-It is currently offline after the owner's switch to a private repository.
-That branch
-contains only the reviewed static build, including `.nojekyll`; `main` retains
-the source and lockfile. Rebuild and verify the six routes before replacing a
-published build. Never deploy the historical `docs/` directory as the Pages
-source. GitHub Free requires the repository to remain public for Pages hosting;
-changing visibility may take this site offline without affecting Kin's app.
+GitHub Pages publishes **https://gowtham0992.github.io/kin/** from this
+repository's `gh-pages` branch, with `/` (root) as the publishing source. That
+branch contains only the reviewed static build, including `.nojekyll`; `main`
+retains the source and lockfile. Rebuild and verify the six routes before
+replacing a published build. Never deploy the historical `docs/` directory as
+the Pages source. GitHub Free requires the repository to remain public for
+Pages hosting; changing visibility may take this site offline without
+affecting Kin's app.
 
-Do not publish the source repository or historical operator notes just to host
-these pages. Only the reviewed static output belongs in the docs deployment.
+Only the reviewed static output belongs in the docs deployment. Never include
+operator notes, release controls or account credentials.
 
 ## Build boundary
 

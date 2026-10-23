@@ -5,9 +5,9 @@ or learn how Kin's connected surfaces work together.
 
 ## Use Kin
 
-These guides cover the product and its boundaries. The hosted
-[Kin Docs](https://gowtham0992.github.io/kin/) site is currently offline while
-the repository is private; the same guide sources are available here:
+These guides cover the product and its boundaries. Read them on
+[Kin Docs](https://gowtham0992.github.io/kin/) or open the corresponding sources
+below:
 
 | You want to… | Open |
 | --- | --- |
