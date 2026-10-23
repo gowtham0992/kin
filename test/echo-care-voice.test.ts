@@ -258,12 +258,11 @@ describe("linked Echo care conversation", () => {
     expect(speech(result)).toContain(code === "unauthenticated" ? "link your Kin account" : code === "forbidden" ? "doesn't currently have permission" : code === "conflict" ? "changed or is no longer available" : "couldn't verify whether");
     expect(result.sessionAttributes).toEqual({});
   });
-  it("reports empty plans without implying anyone is safe", async () => {
+  it("keeps empty-plan replies factual and brief", async () => {
     const { handle, care } = setup();
     care.today.mockResolvedValue({ ...snapshot, tasks: [], summary: { total: 0, completed: 0, remaining: 0, skipped: 0 } });
     const result = await handle(request());
-    expect(speech(result)).toContain("no check-ins");
-    expect(speech(result)).toContain("doesn't tell us whether someone is safe");
+    expect(speech(result)).toBe("<speak>There are no check-ins to read for today. Say today's plan, or stop.</speak>");
     expect(result.sessionAttributes).toEqual({});
   });
   it("disambiguates duplicate titles using explicit UTC rather than an invented family timezone", async () => {

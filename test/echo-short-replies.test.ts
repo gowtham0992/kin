@@ -48,18 +48,18 @@ describe("one check-in conversation", () => {
     f.care.today.mockResolvedValue({ date: "2026-09-14", tasks: [], onDuty: null, escalations: [],
       summary: { total: 0, completed: 0, remaining: 0, skipped: 0 } });
     const result = await f.handle(f.event(intent));
-    expect(speech(result)).toBe("<speak>There are no check-ins to read for today. This doesn't tell us whether someone is safe. Say today's plan, or stop.</speak>");
+    expect(speech(result)).toBe("<speak>There are no check-ins to read for today. Say today's plan, or stop.</speak>");
     expect(result.response.reprompt?.outputSpeech).toEqual({ type: "SSML", ssml: "<speak>Say today's plan, or stop.</speak>" });
     expect(result.response.shouldEndSession).toBe(false);
     expect(f.care.confirm).not.toHaveBeenCalled();
     expect(f.reminders.createCheckIn).not.toHaveBeenCalled();
   });
-  it("gives next steps immediately when the plan has no unanswered check-ins", async () => {
+  it.each([undefined, "TodayPlanIntent"])("gives brief next steps when the plan has no unanswered check-ins for %s", async intent => {
     const f = setup();
     f.care.today.mockResolvedValue({ date: "2026-09-14", tasks: tasks.map(task => ({ ...task, state: "done", lastResponse: "done" })),
       onDuty: null, escalations: [], summary: { total: 2, completed: 2, remaining: 0, skipped: 0 } });
-    const result = await f.handle(f.event());
-    expect(speech(result)).toBe("<speak>There are no unanswered check-ins in today's plan. This doesn't tell us whether someone is safe. Say today's plan, or stop.</speak>");
+    const result = await f.handle(f.event(intent));
+    expect(speech(result)).toBe("<speak>There are no unanswered check-ins in today's plan. Say today's plan, or stop.</speak>");
     expect(f.care.confirm).not.toHaveBeenCalled();
     expect(f.reminders.createCheckIn).not.toHaveBeenCalled();
   });

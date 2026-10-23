@@ -297,8 +297,8 @@ export function createEchoCareVoice(care: EchoCareClient, now: () => number = Da
           const hasMore = available.length > rows.length;
           if (!rows.length) return say(input, afterRow
             ? "There are no more check-ins to read right now. Say today's plan to refresh."
-            : single && snapshot.tasks.length ? `There are no unanswered check-ins in today's plan. This doesn't tell us whether someone is safe. ${prompt}`
-            : `There are no check-ins to read for today. This doesn't tell us whether someone is safe. ${prompt}`, prompt);
+            : single && snapshot.tasks.length ? `There are no unanswered check-ins in today's plan. ${prompt}`
+            : `There are no check-ins to read for today. ${prompt}`, prompt);
           setState(input, { binding, listedAt: time, rows, hasMore, ...(single ? { single: true } : {}) });
           return single ? saySingle(input, rows[0]!) : sayPage(input, rows, hasMore, `Here are ${offset ? "the next" : "today's"} check-ins.`);
         }
